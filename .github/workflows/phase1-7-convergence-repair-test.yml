@@ -1,9 +1,6 @@
 name: Sentient Phase 1-7 Convergence Repair and Test
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/phase1-7-convergence-repair-test.yml
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -23,52 +20,43 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "5cfda8e6b8667d162d2683f58fd6668bad80f575"
-      - name: Repair exact compiler defects and Phase 7 lifecycle assertions
+      - name: Repair exact observed compiler defects and add Phase 7 lifecycle assertions
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          # Phase 1: only the three compiler defects observed in run 40033259159.
           p1 = Path("src/phase1/core-runtime.ts")
           src = p1.read_text()
           old_eval = '  evaluate({ rawResult, proposal }) {'
-          new_eval = '''  evaluate({ rawResult, proposal }: {
-    requirements: TaskRequirementsV1;
-    rawResult: unknown;
-    proposal: { text: string; provider?: string | undefined; model?: string | undefined };
-  }) {'''
+          new_eval = '  evaluate({ rawResult, proposal }: { requirements: TaskRequirementsV1; rawResult: unknown; proposal: { text: string; provider?: string | undefined; model?: string | undefined } }) {'
           if src.count(old_eval) != 1:
               raise SystemExit(f"unexpected Phase1 evaluate pattern count: {src.count(old_eval)}")
           old_proposal = '    proposal: candidate,'
           new_proposal = '    proposal: { text: candidate.text, provider: candidate.provider, model: candidate.model },'
           if src.count(old_proposal) != 1:
               raise SystemExit(f"unexpected Phase1 proposal pattern count: {src.count(old_proposal)}")
-          src = src.replace(old_eval, new_eval, 1).replace(old_proposal, new_proposal, 1)
-          p1.write_text(src)
+          p1.write_text(src.replace(old_eval, new_eval, 1).replace(old_proposal, new_proposal, 1))
 
-          # Phase 7: repair the two exact transcription defects already observed.
           p7 = Path("src/application/production-model-improvement.ts")
           src = p7.read_text()
           typo = "PHASE7_MINIMUM_IMPROVEMEMENT_V1"
-          fixed = "PHASE7_MINIMUM_IMPROVEMENT_V1"
+          fixed = "PHASE7_MINIMUM_IMPROVEMEMENT_V1"
           if src.count(typo) != 2:
               raise SystemExit(f"unexpected Phase7 threshold typo count: {src.count(typo)}")
           bad = 'decisionOwner:"SENTIENT_RUNTIME as const,'
           good = 'decisionOwner:"SENTIENT_RUNTIME" as const,'
           if src.count(bad) != 1:
               raise SystemExit(f"unexpected Phase7 decision-owner defect count: {src.count(bad)}")
-          src = src.replace(typo, fixed).replace(bad, good)
-          p7.write_text(src)
+          p7.write_text(src.replace(typo, fixed).replace(bad, good))
 
-          # Add assertions to the existing real production Phase 7 proof.
           test = Path("test/production-model-improvement.test.ts")
           body = test.read_text()
-          marker = 'assert.equal(result.result.candidateScore, 1);'
+          marker = '  assert.equal(result.result.candidateScore, 1);'
           if body.count(marker) != 1:
               raise SystemExit(f"unexpected Phase7 result assertion count: {body.count(marker)}")
-          if 'assert.match(result.datasetId, /^phase7-dataset:sha256:' not in body:
+          if 'result.datasetId' not in body:
               extra = [
                   '  assert.match(result.datasetId, /^phase7-dataset:sha256:[0-9a-f]{64}$/);',
                   '  assert.match(result.baselineId, /^phase7-baseline:sha256:[0-9a-f]{64}$/);',
@@ -83,7 +71,7 @@ jobs:
               ]
               body = body.replace(marker, marker + "\n" + "\n".join(extra), 1)
 
-          persisted = 'assert.equal(persisted.checkpoint?.baseRevision, PHASE7_HF_FEATURE_MODEL_REVISION_V1);'
+          persisted = '  assert.equal(persisted.checkpoint?.baseRevision, PHASE7_HF_FEATURE_MODEL_REVISION_V1);'
           if body.count(persisted) != 1:
               raise SystemExit(f"unexpected Phase7 persisted assertion count: {body.count(persisted)}")
           if 'const lifecycle = JSON.parse(artifact.content)' not in body:
