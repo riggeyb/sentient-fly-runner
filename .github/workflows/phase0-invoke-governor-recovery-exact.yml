@@ -17,8 +17,8 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       RECOVERY_APP: sentient-governor-recovery-root
       GOVERNOR_APP: sentient-deployment-governor
-      TARGET_SHA: 5d642c9e337e99639a4af8640249cc8f27595764
-      TARGET_TREE: 5a895ad4403792dffd64f004f392dd55ce7c1b63
+      TARGET_SHA: d2ae0d7d77ebb4c2ad52d9bd4ca667f860071cb3
+      TARGET_TREE: 715b9323f7928d2fa31a43e4d4fae51b2f4b2980
       RECOVERY_POLICY_REVISION: SENTIENT_GOVERNOR_RECOVERY_V1
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
