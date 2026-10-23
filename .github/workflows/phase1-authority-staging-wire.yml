@@ -1,0 +1,183 @@
+name: Phase1 Authority Staging Wire
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Sentient staging branch
+        required: true
+        type: string
+      expected_head:
+        description: Exact expected staging HEAD
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Patch exact staging head, test, and push
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          TARGET_BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/fly/production-runtime.ts")
+          text = path.read_text()
+
+          replacements = [
+              (
+                  'import { PostgresSpawnObjectiveRepository } from "../objective-continuation/postgres-spawn-repository.js";\n',
+                  'import { PostgresSpawnObjectiveRepository } from "../objective-continuation/postgres-spawn-repository.js";\n'
+                  'import { BoundedSentientPhase1AcceptancePolicyV1 } from "../phase1/bounded-acceptance-policy.js";\n',
+              ),
+              (
+                  'export function composeFlyProductionRuntimeV1() {\n',
+                  'export const FLY_PHASE1_ACCEPTANCE_POLICY_ID =\\n'
+                  '  "sentient-fly-phase1-acceptance-policy/v1" as const;\\n'
+                  'export const FLY_PHASE1_MAX_PROPOSAL_CHARS = 12_000 as const;\\n\\n'
+                  'export function createFlyPhase1AcceptancePolicyV1(): BoundedSentientPhase1AcceptancePolicyV1 {\\n'
+                  '  return new BoundedSentientPhase1AcceptancePolicyV1({\\n'
+                  '    policyId: FLY_PHASE1_ACCEPTANCE_POLICY_ID,\\n'
+                  '    maxProposalChars: FLY_PHASE1_MAX_PROPOSAL_CHARS,\\n'
+                  '  });\\n'
+                  '}\\n\\n'
+                  'export function composeFlyProductionRuntimeV1() {\\n',
+              ),
+              (
+                  '  const cognition = new LocalHuggingFacePhase1CognitionV1(localHfRuntime);\\n'
+                  '  const phase3 = new LocalHuggingFacePhase3CognitionV1(localHfRuntime);\\n',
+                  '  const cognition = new LocalHuggingFacePhase1CognitionV1(localHfRuntime);\\n'
+                  '  const phase1AcceptancePolicy = createFlyPhase1AcceptancePolicyV1();\\n'
+                  '  const phase3 = new LocalHuggingFacePhase3CognitionV1(localHfRuntime);\\n',
+              ),
+              (
+                  '  const application = composeSentientApplication({\\n'
+                  '    state,\\n'
+                  '    cognition,\\n'
+                  '    phase3,\\n',
+                  '  const application = composeSentientApplication({\\n'
+                  '    state,\\n'
+                  '    cognition,\\n'
+                  '    phase1AcceptancePolicy,\\n'
+                  '    phase3,\\n',
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"patch anchor count {count} for {old[:80]!r}")
+              text = text.replace(old, new)
+          path.write_text(text)
+
+          test_path = Path("test/fly-phase1-acceptance-policy.test.ts")
+          test_path.write_text('''import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  executeSentientPhase1TurnV1,
+  type Phase1CognitionPort,
+  type SentientPhase1Request,
+} from "../src/phase1/core-runtime.js";
+import {
+  createFlyPhase1AcceptancePolicyV1,
+  FLY_PHASE1_ACCEPTANCE_POLICY_ID,
+  FLY_PHASE1_MAX_PROPOSAL_CHARS,
+} from "../src/fly/production-runtime.js";
+
+const request: SentientPhase1Request = {
+  requestId: "fly-phase1-policy-request",
+  sessionId: "fly-phase1-policy-session",
+  taskId: "fly-phase1-policy-task",
+  userRequest: "Return a bounded subordinate proposal.",
+};
+
+test("Fly production Phase1 policy rejects an otherwise valid oversized subordinate proposal", async () => {
+  const policy = createFlyPhase1AcceptancePolicyV1();
+  const cognition: Phase1CognitionPort = {
+    async run() {
+      return {
+        ok: true,
+        provider: "huggingface-local",
+        model: "fixture-local-model",
+        metadata: { modelRevision: "fixture-revision" },
+        text: "x".repeat(FLY_PHASE1_MAX_PROPOSAL_CHARS + 1),
+      };
+    },
+  };
+
+  const result = await executeSentientPhase1TurnV1(request, {
+    cognition,
+    acceptancePolicy: policy,
+  });
+
+  assert.equal(policy.policyId, FLY_PHASE1_ACCEPTANCE_POLICY_ID);
+  assert.equal(result.status, "SUBORDINATE_RESULT_REJECTED");
+  assert.equal(result.authoritativeContent, null);
+  assert.equal(result.state.authoritativeOwner, "SENTIENT");
+  assert.equal(result.subordinate.accepted, false);
+  assert.equal(result.subordinate.acceptancePolicyId, FLY_PHASE1_ACCEPTANCE_POLICY_ID);
+  assert.match(result.subordinate.rejectionReason ?? "", /exceeding 12000 characters/);
+});
+
+test("Fly production Phase1 policy accepts a bounded valid subordinate proposal for Sentient adoption", async () => {
+  const policy = createFlyPhase1AcceptancePolicyV1();
+  const decision = await policy.evaluate(
+    {
+      contractVersion: "sentient-phase1-runtime/v1",
+      requestId: "r",
+      sessionId: "s",
+      taskId: "t",
+      normalizedUserRequest: "bounded",
+      ordinaryResponseSufficient: true,
+      externalCapabilityRequired: false,
+      requiredCapabilities: [],
+      constraints: {},
+      expectedResultForm: "TEXT",
+    },
+    {
+      text: "bounded candidate",
+      provider: "huggingface-local",
+      model: "fixture-local-model",
+      revision: "fixture-revision",
+    },
+  );
+  assert.equal(decision.accepted, true);
+});
+''')
+          PY
+
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/fly-phase1-acceptance-policy.test.js \
+            dist/test/production-phase3-cognition.test.js
+
+          git diff --check
+          git config user.name "sentient-phase1-staging"
+          git config user.email "sentient-phase1-staging@users.noreply.github.com"
+          git add src/fly/production-runtime.ts test/fly-phase1-acceptance-policy.test.ts
+          git commit -m "phase1: bind acceptance policy in Fly runtime"
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          echo "PHASE1_FLY_POLICY_WIRING=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
