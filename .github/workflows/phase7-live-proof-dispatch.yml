@@ -10,7 +10,6 @@ name: Sentient Phase 7 Live Improvement Proof Dispatch
         description: Exact deployed Sentient tree
         required: true
         type: string
-
 permissions:
   contents: read
 
@@ -21,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Execute the existing shared Phase 7 proof body
+      - name: Execute existing Phase 7 proof with canonical learning-memory transition
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           EXPECTED_SHA: ${{ inputs.sha }}
@@ -32,48 +31,39 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          source = Path(".github/workflows/phase7-live-proof.yml").read_text()
-          marker = "        run: |\n"
+          source=Path(".github/workflows/phase7-live-proof.yml").read_text()
+          marker="        run: |\n"
           if marker not in source:
               raise SystemExit("phase7_shared_proof_body_missing")
-          body = source.split(marker, 1)[1]
-          normalized = []
+          body=source.split(marker,1)[1]
+          normalized=[]
           for line in body.splitlines():
-              if line == "NODE":
+              if line=="NODE":
                   normalized.append(line)
               elif line.startswith("          "):
                   normalized.append(line[10:])
-              elif line == "":
+              elif line=="":
                   normalized.append("")
               else:
                   raise SystemExit(f"phase7_shared_proof_unexpected_indentation:{line[:40]}")
-          script = "\n".join(normalized) + "\n"
-          needle = """            await service.promoteLessonCandidate(lesson.id,{
-              decision:"promote",
-              reasonCodes:["verified_repair_narrow_scope"],
-            });
+          script="\n".join(normalized)+"\n"
+          anchor='const heldPositive=await mkRun("succeeded",3);'
+          if script.count(anchor)!=1:
+              raise SystemExit(f"phase7_heldout_anchor_count:{script.count(anchor)}")
+          memory="""await service.createDerivedMemory(lesson.id,{
+  kind:"memory",
+  memoryType:"semantic",
+  content:"verified Phase 7 learning memory",
+  derivedFromExperienceIds:[failedExp.id,repairedExp.id],
+  provenance:{
+    actor:"system",
+    modelRunId:repaired.id,
+    sourceIds:[failedEv.id,repairedEv.id],
+  },
+});
 
-            const heldPositive=await mkRun("succeeded",3);"""
-          replacement = """            await service.promoteLessonCandidate(lesson.id,{
-              decision:"promote",
-              reasonCodes:["verified_repair_narrow_scope"],
-            });
-            await service.createDerivedMemory(lesson.id,{
-              kind:"memory",
-              memoryType:"semantic",
-              content:"verified Phase 7 learning memory",
-              derivedFromExperienceIds:[failedExp.id,repairedExp.id],
-              provenance:{
-                actor:"system",
-                modelRunId:repaired.id,
-                sourceIds:[failedEv.id,repairedEv.id],
-              },
-            });
-
-            const heldPositive=await mkRun("succeeded",3);"""
-          if needle not in script:
-              raise SystemExit("phase7_learning_memory_insertion_point_missing")
-          script = script.replace(needle, replacement, 1)
+"""
+          script=script.replace(anchor,memory+anchor,1)
           Path("/tmp/phase7-shared-proof.sh").write_text(script)
           PY
           bash /tmp/phase7-shared-proof.sh
