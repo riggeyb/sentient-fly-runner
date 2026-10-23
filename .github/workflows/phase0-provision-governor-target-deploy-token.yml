@@ -1,0 +1,59 @@
+name: Phase0 Provision Governor Target Deploy Token
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase0-provision-governor-target-deploy-token
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      GOVERNOR_APP: sentient-deployment-governor
+      TARGET_APP: sentient-validation-runner
+      EXPECTED_GOVERNOR_SHA: d2ae0d7d77ebb4c2ad52d9bd4ca667f860071cb3
+      EXPECTED_GOVERNOR_TREE: 715b9323f7928d2fa31a43e4d4fae51b2f4b2980
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Provision target-scoped deploy token into Governor
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_token="$(flyctl tokens create deploy --app "$TARGET_APP")"
+          test -n "$target_token"
+          test "$target_token" != "$FLY_API_TOKEN"
+          echo "::add-mask::$target_token"
+
+          flyctl secrets set --app "$GOVERNOR_APP"             SENTIENT_TARGET_DEPLOYMENT_FLY_TOKEN="$target_token" >/dev/null
+          unset target_token
+
+          healthy=false
+          for _ in $(seq 1 90); do
+            machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
+            gid="$(printf '%s' "$machines" | jq -r '.[0].id // empty')"
+            state="$(printf '%s' "$machines" | jq -r '.[0].state // empty')"
+            if [ -n "$gid" ] && [ "$state" = "started" ]; then
+              set +e
+              out="$(flyctl ssh console -a "$GOVERNOR_APP" -C                 "node -e 'fetch(\"http://127.0.0.1:8080/healthz\").then(async r=>{const v=await r.json(); console.log(JSON.stringify({status:v.status,governorSha:v.governorSha,governorTree:v.governorTree})); if(!r.ok||v.status!==\"ok\"||v.governorSha!==\"$EXPECTED_GOVERNOR_SHA\"||v.governorTree!==\"$EXPECTED_GOVERNOR_TREE\") process.exit(2)}).catch(()=>process.exit(3))'" 2>/dev/null)"
+              rc=$?
+              set -e
+              if [ "$rc" -eq 0 ]; then
+                printf '%s\n' "$out"
+                healthy=true
+                break
+              fi
+            fi
+            sleep 2
+          done
+          test "$healthy" = "true"
+          echo "TARGET_DEPLOYMENT_FLY_TOKEN_PROVISIONED=PASS"
+          echo "GOVERNOR_IDENTITY_PRESERVED=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
