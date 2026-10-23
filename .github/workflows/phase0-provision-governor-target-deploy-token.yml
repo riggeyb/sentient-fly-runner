@@ -1,4 +1,4 @@
-name: Phase0 Provision Governor Target Deploy Token
+name: Phase0 Provision Engineering Request Token
 on:
   workflow_dispatch:
 
@@ -6,7 +6,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: phase0-provision-governor-target-deploy-token
+  group: phase0-provision-engineering-request-token
   cancel-in-progress: false
 
 jobs:
@@ -17,51 +17,36 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       GOVERNOR_APP: sentient-deployment-governor
       TARGET_APP: sentient-validation-runner
-      EXPECTED_GOVERNOR_SHA: d2ae0d7d77ebb4c2ad52d9bd4ca667f860071cb3
-      EXPECTED_GOVERNOR_TREE: 715b9323f7928d2fa31a43e4d4fae51b2f4b2980
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Provision bounded deploy token into Governor
+      - name: Provision distinct engineering request authority
         shell: bash
         run: |
           set -euo pipefail
+          engineering_token="$(openssl rand -hex 32)"
+          test -n "$engineering_token"
+          echo "::add-mask::$engineering_token"
+          flyctl secrets set --app "$GOVERNOR_APP" SENTIENT_ENGINEERING_API_TOKEN="$engineering_token" >/dev/null
+          flyctl secrets set --app "$TARGET_APP" SENTIENT_ENGINEERING_API_TOKEN="$engineering_token" >/dev/null
+          unset engineering_token
 
-          flyctl tokens debug -t "$FLY_API_TOKEN" >/tmp/base-token.json
-          org_id="$(jq -r '.. | objects | select(.type?=="Organization") | .body.id' /tmp/base-token.json | head -n1)"
-          test "$org_id" -gt 0
-          printf '[{"type":"Organization","body":{"id":%s,"mask":"rwcC"}}]' "$org_id" >/tmp/caveats.json
-
-          raw="$(flyctl tokens attenuate -t "$FLY_API_TOKEN" -f /tmp/caveats.json)"
-          target_token="$(printf '%s\n' "$raw" | awk 'NF{v=$NF} END{print v}')"
-          unset raw
-          test -n "$target_token"
-          test "$target_token" != "$FLY_API_TOKEN"
-          echo "::add-mask::$target_token"
-
-          FLY_API_TOKEN="$target_token" flyctl status -a "$TARGET_APP" >/dev/null
-          flyctl secrets set --app "$GOVERNOR_APP"             SENTIENT_TARGET_DEPLOYMENT_FLY_TOKEN="$target_token" >/dev/null
-          unset target_token
-
-          healthy=false
-          for _ in $(seq 1 90); do
-            machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
-            gid="$(printf '%s' "$machines" | jq -r '.[0].id // empty')"
-            state="$(printf '%s' "$machines" | jq -r '.[0].state // empty')"
-            if [ -n "$gid" ] && [ "$state" = "started" ]; then
-              set +e
-              out="$(flyctl ssh console -a "$GOVERNOR_APP" -C                 "node -e 'fetch(\"http://127.0.0.1:8080/healthz\").then(async r=>{const v=await r.json(); console.log(JSON.stringify({status:v.status,governorSha:v.governorSha,governorTree:v.governorTree})); if(!r.ok||v.status!==\"ok\"||v.governorSha!==\"$EXPECTED_GOVERNOR_SHA\"||v.governorTree!==\"$EXPECTED_GOVERNOR_TREE\") process.exit(2)}).catch(()=>process.exit(3))'" 2>/dev/null)"
-              rc=$?
-              set -e
-              if [ "$rc" -eq 0 ]; then
-                printf '%s\n' "$out"
-                healthy=true
-                break
+          for app in "$GOVERNOR_APP" "$TARGET_APP"; do
+            ready=false
+            for _ in $(seq 1 90); do
+              machines="$(flyctl machines list -a "$app" --json)"
+              id="$(printf '%s' "$machines" | jq -r '.[0].id // empty')"
+              state="$(printf '%s' "$machines" | jq -r '.[0].state // empty')"
+              if [ -n "$id" ] && [ "$state" = started ]; then
+                set +e
+                flyctl ssh console -a "$app" -C "node -e 'const e=String(process.env.SENTIENT_ENGINEERING_API_TOKEN||\"\");const d=String(process.env.SENTIENT_DEPLOYMENT_API_TOKEN||\"\");if(!e||!d||e===d)process.exit(2)'" >/dev/null 2>&1
+                rc=$?
+                set -e
+                if [ "$rc" -eq 0 ]; then ready=true; break; fi
               fi
-            fi
-            sleep 2
+              sleep 2
+            done
+            test "$ready" = true
           done
-          test "$healthy" = "true"
-          echo "TARGET_DEPLOYMENT_FLY_TOKEN_PROVISIONED=PASS"
-          echo "GOVERNOR_IDENTITY_PRESERVED=PASS"
+          echo "ENGINEERING_REQUEST_AUTHORITY_PROVISIONED=PASS"
+          echo "CREDENTIAL_AUTHORITY_SEPARATION=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
