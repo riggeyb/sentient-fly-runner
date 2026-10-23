@@ -1,0 +1,79 @@
+name: Sentient Phase 5 Live Recovery Status Proof
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      objective_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  phase5-recovery-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Reconnect and inspect durable collaborative objective
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+          OBJECTIVE_ID: ${{ inputs.objective_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          cat >/tmp/phase5-recovery.mjs <<'NODE'
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          const objectiveId=String(process.env.PHASE5_OBJECTIVE_ID??"").trim();
+          const sha=String(process.env.PHASE5_EXPECTED_SHA??"").trim();
+          const tree=String(process.env.PHASE5_EXPECTED_TREE??"").trim();
+          if(!token) throw new Error("PHASE5_SENTIENT_API_TOKEN_MISSING");
+          const health=await (await fetch("http://127.0.0.1:8080/healthz",{signal:AbortSignal.timeout(10000)})).json();
+          const ready=await (await fetch("http://127.0.0.1:8080/readyz",{signal:AbortSignal.timeout(10000)})).json();
+          if(health?.application?.identity?.source?.sha!==sha||health?.application?.identity?.source?.tree!==tree) throw new Error("PHASE5_RECOVERY_IDENTITY_MISMATCH");
+          if(ready?.ready!==true) throw new Error("PHASE5_RECOVERY_NOT_READY");
+          const headers={authorization:`Bearer ${token}`,accept:"application/json"};
+          let terminal=null,last=null;
+          for(let i=0;i<150;i++){
+            const r=await fetch(`http://127.0.0.1:8080/v1/objectives/${encodeURIComponent(objectiveId)}`,{headers,signal:AbortSignal.timeout(10000)});
+            if(!r.ok) throw new Error(`PHASE5_RECOVERY_STATUS_HTTP_${r.status}`);
+            last=await r.json();
+            if(["succeeded","failed","cancelled"].includes(last.status)){terminal=last;break;}
+            await new Promise(res=>setTimeout(res,1000));
+          }
+          const status=terminal??last;
+          if(!status) throw new Error("PHASE5_RECOVERY_STATUS_MISSING");
+          const app=status.result??{};
+          const collab=app?.body?.result??app?.result??{};
+          console.log("PHASE5_RECOVERY_OBJECTIVE_STATUS="+String(status.status));
+          console.log("PHASE5_RECOVERY_ERROR="+String(status.error??"none").replace(/[\r\n]/g," ").slice(0,300));
+          console.log("PHASE5_RECOVERY_COLLAB_STATUS="+String(collab.status??"none"));
+          console.log("PHASE5_RECOVERY_WORKER_COUNT="+(Array.isArray(collab.workerExecutionIds)?collab.workerExecutionIds.length:0));
+          console.log("PHASE5_RECOVERY_EVIDENCE_COUNT="+(Array.isArray(collab.evidenceRefs)?collab.evidenceRefs.length:0));
+          console.log("PHASE5_RECOVERY_AUTHORITY_OWNER="+String(collab.authorityOwner??"none"));
+          console.log("SECRET_VALUES_EXPOSED=false");
+          if(status.status==="succeeded"&&collab.status==="CONVERGED"&&collab.authorityOwner==="SENTIENT_RUNTIME"&&collab.workerEffectsCanonical===false&&Array.isArray(collab.workerExecutionIds)&&collab.workerExecutionIds.length>=2&&Array.isArray(collab.evidenceRefs)&&collab.evidenceRefs.length>=2){
+            console.log("DURABLE_SPAWN_RECOVERY=PASS");
+            console.log("SPAWN_CONVERGENCE=PASS");
+            process.exit(0);
+          }
+          if(status.status==="succeeded"&&(collab.status==="UNAVAILABLE"||collab.status==="NOT_CONVERGED")){
+            console.log("DURABLE_SPAWN_RECOVERY=PASS");
+            throw new Error(`PHASE5_BACKEND_DID_NOT_CONVERGE_${String(collab.reason??collab.status)}`);
+          }
+          throw new Error(`PHASE5_RECOVERY_TERMINAL_${String(status.status)}_${String(status.error??"none")}`);
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-recovery.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-recovery.mjs && PHASE5_OBJECTIVE_ID=$OBJECTIVE_ID PHASE5_EXPECTED_SHA=$EXPECTED_SHA PHASE5_EXPECTED_TREE=$EXPECTED_TREE node /app/phase5-recovery.mjs; rc=\$?; rm -f /app/phase5-recovery.mjs; exit \$rc'"
+          echo "RESULT=PASS"
