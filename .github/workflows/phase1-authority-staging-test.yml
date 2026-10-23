@@ -31,6 +31,10 @@ jobs:
           echo "STAGING_TREE=$(git rev-parse HEAD^{tree})"
           npm ci --no-audit --no-fund
           npm run build
-          node --test             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/production-phase3-cognition.test.js
+          node --test \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/fly-phase1-acceptance-policy.test.js \
+            dist/test/production-phase3-cognition.test.js
           echo "PHASE1_AUTHORITY_STAGING=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
