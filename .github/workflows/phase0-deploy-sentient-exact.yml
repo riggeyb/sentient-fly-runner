@@ -11,8 +11,8 @@ jobs:
     timeout-minutes: 25
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      S: 64d46db2e6a78048a07f81d683ce08ec7d95e367
-      T: dd2261700980b3da0764dcfe7e865b6bf3174a29
+      S: b58b7e44f156ebbd62dbc302d8c62b9ddb10c381
+      T: 8a6f70aa95402e0c35f30234992727f5c083d639
       K: d85eb820f18ad6d944ab93b03150d606273891a5
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
@@ -33,9 +33,9 @@ jobs:
           const sha=process.env.S, tree=process.env.T, skillsSha=process.env.K;
           const token=String(process.env.SENTIENT_DEPLOYMENT_API_TOKEN??"").trim();
           if(!token) process.exit(20);
-          const r=await fetch("http://127.0.0.1:8080/v1/deployments/sentient",{
+          const r=await fetch("https://sentient-deployment-governor.fly.dev/v1/deployments/sentient",{
             method:"POST",
-            headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":"phase0-certification-reconciliation-64d46db2"},
+            headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":"phase0-certification-reconciliation-b58b7e44"},
             body:JSON.stringify({sha,tree,skillsSha}),
             signal:AbortSignal.timeout(1100000)
           });
