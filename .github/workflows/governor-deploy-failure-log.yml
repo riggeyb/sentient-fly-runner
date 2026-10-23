@@ -11,13 +11,70 @@ jobs:
     timeout-minutes: 5
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      SENTIENT_APP: sentient-validation-runner
       GOVERNOR_APP: sentient-deployment-governor
+      OID: phase0-live-cert-40021105488
+      ENG_OBJECTIVE: phase0-live-cert-noop-40021105488
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Prepare shared Phase0 certificate module resolution
+      - name: Capture exact objective and engineering-ledger diagnostic
         shell: bash
         run: |
           set -euo pipefail
-          flyctl ssh console -a "$GOVERNOR_APP" -C "sh -lc 'rm -f /tmp/node_modules && ln -s /app/node_modules /tmp/node_modules && cd /tmp && node --input-type=module -e \"import(\\\"pg\\\").then(()=>console.log(\\\"PG_MODULE_RESOLUTION=PASS\\\"))\"'"
-          echo "HARNESS_ENVIRONMENT_FIX=PASS"
+
+          cat >/tmp/objective.mjs <<'NODE'
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          const oid=String(process.env.OID??"").trim();
+          if(!token||!oid) process.exit(20);
+          const r=await fetch(`http://127.0.0.1:8080/v1/objectives/${encodeURIComponent(oid)}`,{
+            headers:{authorization:`Bearer ${token}`,accept:"application/json"},
+            signal:AbortSignal.timeout(20000)
+          });
+          const b=await r.json().catch(()=>({}));
+          const receipt=b.lastEngineeringReceipt??null;
+          console.log("OBJECTIVE_DIAGNOSTIC="+JSON.stringify({
+            httpStatus:r.status,
+            objectiveId:b.objectiveId??null,
+            status:b.status??null,
+            activeEngineeringJobId:b.activeEngineeringJobId??null,
+            lastEngineeringReceipt:receipt?{
+              jobId:receipt.jobId??null,
+              status:receipt.status??null,
+              errorCode:receipt.errorCode??null,
+              pushResult:receipt.pushResult??null
+            }:null,
+            error:b.error??null,
+            updatedAt:b.updatedAt??null
+          }));
+          if(!r.ok) process.exit(21);
+          NODE
+          ob64="$(base64 -w0 /tmp/objective.mjs)"
+          flyctl ssh console -a "$SENTIENT_APP" -C "sh -lc 'echo $ob64 | base64 -d >/tmp/objective.mjs && OID=$OID node /tmp/objective.mjs'"
+
+          cat >/tmp/ledger.mjs <<'NODE'
+          import pg from "pg";
+          const {Pool}=pg;
+          const cs=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
+          const objective=String(process.env.ENG_OBJECTIVE??"").trim();
+          if(!cs||!objective) process.exit(30);
+          const p=new Pool({connectionString:cs,max:1,connectionTimeoutMillis:10000});
+          try{
+            const q=await p.query(`
+              SELECT job_id,status,worker_machine_id,error_code,created_at,started_at,completed_at
+              FROM sentient_deployment_governor.engineering_jobs
+              WHERE objective=$1 ORDER BY created_at
+            `,[objective]);
+            console.log("LEDGER_DIAGNOSTIC="+JSON.stringify({
+              matching:q.rowCount,
+              jobs:q.rows.map(x=>({
+                jobId:x.job_id,status:x.status,workerMachineId:x.worker_machine_id??null,
+                errorCode:x.error_code??null,createdAt:x.created_at??null,
+                startedAt:x.started_at??null,completedAt:x.completed_at??null
+              }))
+            }));
+          } finally {await p.end()}
+          NODE
+          lb64="$(base64 -w0 /tmp/ledger.mjs)"
+          flyctl ssh console -a "$GOVERNOR_APP" -C "sh -lc 'cd /app && echo $lb64 | base64 -d >/app/phase0-objective-diag.mjs && ENG_OBJECTIVE=$ENG_OBJECTIVE node /app/phase0-objective-diag.mjs; rc=\$?; rm -f /app/phase0-objective-diag.mjs; exit \$rc'"
+
           echo "SECRET_VALUES_EXPOSED=false"
