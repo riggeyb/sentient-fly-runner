@@ -1,4 +1,4 @@
-name: Phase0 Live Certification Resume
+name: Phase0 Objective Stall Diagnostic
 on:
   workflow_dispatch:
 
@@ -6,225 +6,89 @@ permissions:
   contents: read
 
 jobs:
-  certify:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
-      SENTIENT_SHA: ce2a5cceab61f31aa490f2e3174992a714f97251
-      SENTIENT_TREE: bd84818a2610bf2d2077484589580a47aa5399e8
-      DIRECTOR_HEAD: 1740828267729f8f2ce99c4619aa8add8a331955
-      OBJECTIVE_ID: phase0-cert-ce2a5cce-live-resume-v1
+      GOV: sentient-deployment-governor
+      OBJECTIVE_ID: phase0-live-cert-40021105488
+      ENG_OBJECTIVE: phase0-live-cert-noop-40021105488
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Verify frozen live identity
+      - name: Observe persisted objective and current live logs
         shell: bash
         run: |
           set -euo pipefail
-          h="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/healthz")"
-          r="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz")"
-          grep -Fq "$SENTIENT_SHA" <<<"$h"
-          grep -Fq "$SENTIENT_TREE" <<<"$h"
-          grep -Fq "$SENTIENT_SHA" <<<"$r"
-          grep -Fq "$SENTIENT_TREE" <<<"$r"
-          grep -Fq '"ready":true' <<<"$r"
-          grep -Fq '"name":"COGNITION","availability":"AVAILABLE"' <<<"$r"
-          grep -Fq '"name":"PHASE3_HF_COGNITION","availability":"AVAILABLE"' <<<"$r"
-          echo "LIVE_HEALTHZ=PASS"
-          echo "LIVE_READYZ=PASS"
-          echo "LIVE_RUNTIME_SHA_MATCH=PASS"
-          echo "LIVE_RUNTIME_TREE_MATCH=PASS"
-          echo "LOCAL_HF_COGNITION_LIVE=PASS"
-          echo "CERTIFICATION_TARGET_FROZEN=true"
-
-      - name: Run built-in live certification endpoint
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat >/tmp/cert-endpoint.mjs <<'NODE'
-          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
-          if(!token) process.exit(40);
-          const res=await fetch("http://127.0.0.1:8080/v1/certification/tests/action-fabric-local-repository-executor",{
-            method:"POST",
-            headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},
-            body:"{}",
-            signal:AbortSignal.timeout(60000),
-          });
-          const v=await res.json();
-          const safe={
-            httpStatus:res.status,
-            contract:v.contract??null,
-            testId:v.testId??null,
-            sentientSha:v.sentientSha??null,
-            sentientTree:v.sentientTree??null,
-            flyAppName:v.flyAppName??null,
-            exitStatus:v.exitStatus??null,
-            testResult:v.testResult??null,
-          };
-          console.log("CERTIFICATION_RECEIPT="+JSON.stringify(safe));
-          if(!res.ok||v.testResult!=="PASS"||v.sentientSha!==process.env.SENTIENT_SHA||v.sentientTree!==process.env.SENTIENT_TREE) process.exit(41);
-          console.log("ENGINEERING_DURABLE_EVIDENCE=PASS");
-          console.log("SECRET_VALUES_EXPOSED=false");
-          NODE
-          b64="$(base64 -w0 /tmp/cert-endpoint.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/cert-endpoint.mjs && SENTIENT_SHA=$SENTIENT_SHA SENTIENT_TREE=$SENTIENT_TREE node /tmp/cert-endpoint.mjs'"
-
-      - name: Submit durable EngineeringJob objective and capture persisted job id
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat >/tmp/objective-create.mjs <<'NODE'
-          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
-          const oid=process.env.OBJECTIVE_ID;
-          const head=process.env.DIRECTOR_HEAD;
-          if(!token||!oid||!head) process.exit(50);
-          const headers={authorization:`Bearer ${token}`,"content-type":"application/json"};
-          const payload={
-            request:"Phase-0 live certification: execute the registered EngineeringJob step and durably continue it.",
-            objectiveId:oid,
-            sessionId:`session-${oid}`,
-            mode:"multi_step",
-            privacy:"public_fixture",
-            engineeringJob:{
-              repo:"riggeyb/director-studio-beta",
-              branch:"sentient-staging-v0",
-              expectedHead:head,
-              objective:"Create one bounded Phase-0 live continuation witness on Director staging only.",
-              commands:[{
-                name:"write-phase0-live-witness",
-                category:"edit",
-                command:"node",
-                args:["-e","setTimeout(()=>require('fs').writeFileSync('.sentient-phase0-ce2a5cce-witness','phase0-live-certification\\n'),120000)"],
-                timeoutMs:180000
-              }],
-              commitMessage:"cert: phase0 live continuation witness",
-              timeoutMs:300000
-            },
-            deployOnSuccess:false
-          };
-          const create=await fetch("http://127.0.0.1:8080/v1/objectives",{
-            method:"POST",headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(30000)
-          });
-          const first=await create.json();
-          console.log(`INGRESS_HTTP_STATUS=${create.status}`);
-          console.log(`OBJECTIVE_ID=${oid}`);
-          if(create.status!==202||first.objectiveId!==oid) process.exit(51);
-          console.log("OBJECTIVE_ASYNC_INGRESS=PASS");
-          console.log("OBJECTIVE_PERSISTENCE=PASS");
-          let current=first;
-          const deadline=Date.now()+120000;
-          while(Date.now()<deadline){
-            const g=await fetch(`http://127.0.0.1:8080/v1/objectives/${encodeURIComponent(oid)}`,{headers,signal:AbortSignal.timeout(10000)});
-            current=await g.json();
-            if(current.activeEngineeringJobId) break;
-            if(current.status==="failed") { console.log("OBJECTIVE_ERROR="+String(current.error??"unknown")); process.exit(52); }
-            await new Promise(r=>setTimeout(r,1000));
-          }
-          if(!current.activeEngineeringJobId) process.exit(53);
-          console.log(`JOB_ID=${current.activeEngineeringJobId}`);
-          console.log(`PRE_RESTART_OBJECTIVE_STATUS=${current.status}`);
-          console.log("JOB_ID_PERSISTED_BEFORE_POLL=PASS");
-          console.log("FLY_RESIDENT_RUNNER=PASS");
-          console.log("SECRET_VALUES_EXPOSED=false");
-          NODE
-          b64="$(base64 -w0 /tmp/objective-create.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/objective-create.mjs && OBJECTIVE_ID=$OBJECTIVE_ID DIRECTOR_HEAD=$DIRECTOR_HEAD node /tmp/objective-create.mjs'" | tee /tmp/objective-create.out
-          job="$(sed -n 's/^JOB_ID=//p' /tmp/objective-create.out | tail -n1)"
-          test -n "$job"
-          echo "JOB_ID=$job" >> "$GITHUB_ENV"
-
-      - name: Restart Sentient during active continuation
-        shell: bash
-        run: |
-          set -euo pipefail
-          id="$(flyctl machines list -a "$APP" --json | jq -r '.[0].id')"
-          test -n "$id"
-          flyctl machine restart "$id" -a "$APP"
-          ok=false
-          for _ in $(seq 1 120); do
-            r="$(curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" || true)"
-            if [ -n "$r" ] && grep -Fq "$SENTIENT_SHA" <<<"$r" && grep -Fq "$SENTIENT_TREE" <<<"$r" && grep -Fq '"ready":true' <<<"$r"; then
-              ok=true
-              break
-            fi
+          mid="$(flyctl machines list -a "$APP" --json | jq -r '[.[]|select(.state!="destroyed")][0].id')"
+          test -n "$mid" && test "$mid" != "null"
+          flyctl machine start "$mid" -a "$APP" >/dev/null || true
+          for _ in $(seq 1 60); do
+            state="$(flyctl machines list -a "$APP" --json | jq -r --arg id "$mid" '.[]|select(.id==$id)|.state' | head -n1)"
+            [ "$state" = "started" ] && break
             sleep 2
           done
-          test "$ok" = true
-          echo "RUNTIME_RESTART_COMPLETED=PASS"
-
-      - name: Verify resumed objective uses same EngineeringJob and completes
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat >/tmp/objective-resume.mjs <<'NODE'
+          test "$state" = "started"
+          cat >/tmp/objective-status.mjs <<'NODE'
           const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
-          const oid=process.env.OBJECTIVE_ID;
-          const expectedJob=process.env.JOB_ID;
-          if(!token||!oid||!expectedJob) process.exit(60);
-          const headers={authorization:`Bearer ${token}`,"content-type":"application/json"};
-          const getObjective=async()=>{
-            const r=await fetch(`http://127.0.0.1:8080/v1/objectives/${encodeURIComponent(oid)}`,{headers,signal:AbortSignal.timeout(10000)});
-            if(!r.ok) process.exit(61);
-            return r.json();
-          };
-          let current=await getObjective();
-          const observed=current.activeEngineeringJobId ?? current.lastEngineeringReceipt?.jobId ?? null;
-          console.log(`POST_RESTART_OBSERVED_JOB_ID=${observed??""}`);
-          if(observed!==expectedJob) process.exit(62);
-          console.log("EXISTING_JOB_RECOVERED=PASS");
-          const deadline=Date.now()+12*60*1000;
-          while(Date.now()<deadline){
-            current=await getObjective();
-            if(current.status==="succeeded"||current.status==="failed") break;
-            await new Promise(r=>setTimeout(r,1500));
-          }
-          if(current.status!=="succeeded") {
-            console.log("FINAL_OBJECTIVE_STATUS="+String(current.status));
-            console.log("OBJECTIVE_ERROR="+String(current.error??"unknown"));
-            process.exit(63);
-          }
-          const receipt=current.lastEngineeringReceipt;
-          if(!receipt||receipt.jobId!==expectedJob||receipt.status!=="SUCCEEDED"||!receipt.endSha||!receipt.endTree||receipt.pushResult!=="PASS") process.exit(64);
-          const jr=await fetch(`http://127.0.0.1:8080/v1/engineering/jobs/${encodeURIComponent(expectedJob)}`,{headers,signal:AbortSignal.timeout(10000)});
-          const job=await jr.json();
-          if(!jr.ok||job.jobId!==expectedJob||job.status!=="SUCCEEDED"||job.pushResult!=="PASS"||!job.endSha||!job.endTree) process.exit(65);
-          console.log(`ENGINEERING_END_SHA=${job.endSha}`);
-          console.log(`ENGINEERING_END_TREE=${job.endTree}`);
-          console.log("ENGINEERING_RECEIPT_VERIFIED=PASS");
-          console.log("CONTINUATION_ADVANCED=PASS");
-          console.log("DURABLE_CONTINUATION=PASS");
-          console.log("RESTART_RESUME=PASS");
-          console.log("DUPLICATE_JOB_CREATED=false");
-
-          const replay=await fetch("http://127.0.0.1:8080/v1/objectives",{
-            method:"POST",headers,body:JSON.stringify({
-              request:"Phase-0 live certification replay.",
-              objectiveId:oid,
-              sessionId:`session-${oid}`,
-              mode:"multi_step",
-              privacy:"public_fixture"
-            }),signal:AbortSignal.timeout(30000)
+          const oid=String(process.env.OBJECTIVE_ID??"");
+          if(!token||!oid) process.exit(40);
+          const r=await fetch(`http://127.0.0.1:8080/v1/objectives/${encodeURIComponent(oid)}`,{
+            headers:{authorization:`Bearer ${token}`,accept:"application/json"},
+            signal:AbortSignal.timeout(20000)
           });
-          const replayBody=await replay.json();
-          const replayJob=replayBody.activeEngineeringJobId ?? replayBody.lastEngineeringReceipt?.jobId ?? null;
-          if(replay.status!==202||replayJob!==expectedJob) process.exit(66);
-          console.log("OBJECTIVE_IDEMPOTENT_REPLAY=PASS");
-          console.log("SECRET_VALUES_EXPOSED=false");
+          const b=await r.json().catch(()=>({}));
+          console.log("OBJECTIVE_JSON="+JSON.stringify({
+            httpStatus:r.status,
+            objectiveId:b.objectiveId??null,
+            status:b.status??null,
+            activeEngineeringJobId:b.activeEngineeringJobId??null,
+            lastEngineeringReceipt:b.lastEngineeringReceipt??null,
+            updatedAt:b.updatedAt??null,
+            error:b.error??null
+          }));
+          console.log("SECRET_VALUES_EXPOSEE=false");
+          if(!r.ok) process.exit(41);
           NODE
-          b64="$(base64 -w0 /tmp/objective-resume.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/objective-resume.mjs && OBJECTIVE_ID=$OBJECTIVE_ID JOB_ID=$JOB_ID node /tmp/objective-resume.mjs'"
+          b64="$(base64 -w0 /tmp/objective-status.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/objective-status.mjs && OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/objective-status.mjs'"
+          echo "LIVE_LOG_DIAGNOSTIC_BEGIN"          flyctl logs -a "$APP" --no-tail 2>/dev/null \
+            | grep -E 'sentient_application_initialized|engineering|objective|recovery|ERROR|Error|failed|FAILED' \
+            | tail -n 250 || true
+          echo "LIVE_LOG_DIAGNOSTIC_END"
 
-      - name: Final exact live identity
+      - name: Observe EngineeringJob and recovery ledgers
         shell: bash
         run: |
           set -euo pipefail
-          h="$(curl -fsS --max-time 10 "https:///{APP}.fly.dev/healthz")"
-          r="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz")"
-          grep -Fq "$SENTIENT_SHA" <<<"$h"
-          grep -Fq "$SENTIENT_TREE" <<<"$h"
-          grep -Fq "$SENTIENT_SHA" <<<"$r"
-          grep -Fq "$SENTIENT_TREE" <<<"$r"
-          echo "FINAL_LIVE_IDENTITY=PASS"
-          echo "SECRET_VALUES_EXPOSED=false"
+          cat >/tmp/stall-ledger.mjs <<'NODE'
+          import pg from "pg";
+          const {Pool}=pg;
+          const cs=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
+          const objective=String(process.env.ENG_OBJECTIVE??"");
+          if(!cs||!objective) process.exit(50);
+          const p=new Pool({connectionString:cs,max:1,connectionTimeoutMillis:10000});
+          try{
+            const jobs=await p.query(`
+              SELECT job_id,status,error_code,created_at,completed_at
+              FROM sentient_deployment_governor.engineering_jobs
+              WHERE objective=$1
+              ORDER BY created_at
+            `,[objective]);
+            const recovery=await p.query(`
+              SELECT recovery_id,status,requested_sha,requested_tree,observed_sha,observed_tree,
+                   recovery_policy_revision,error_code,diagnostic,started_at,completed_at
+              FROM sentient_deployment_governor.governor_recovery_receipts
+              WHERE started_at > NOW() - INTERVAL '30 minutes'
+              ORDER BY started_at DESC
+              LIMIT 10
+            `);
+            console.log("ENGINEERING_LEDGER_JSON="+JSON.stringify(jobs.rows));
+            console.log("RECOVERY_LEDGER_JSON="+JSON.stringify(recovery.rows));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally { await p.end(); }
+          NODE
+          b64="$(base64 -w0 /tmp/stall-ledger.mjs)"
+          flyctl ssh console -a "$GOV" -C "sh -lc 'cd /app && echo $b64 | base64 -d > /app/.phase0-stall-ledger.mjs && ENG_OBJECTIVE=$ENG_OBJECTIVE node /app/.phase0-stall-ledger.mjs; rc=\$?; rm -f /app/.phase0-stall-ledger.mjs; exit \$rc'"
