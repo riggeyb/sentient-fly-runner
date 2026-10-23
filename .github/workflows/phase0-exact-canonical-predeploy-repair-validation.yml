@@ -26,4 +26,14 @@ jobs:
       - name: Strict build
         run: npm run build
       - name: Predeploy regressions
-        run: node --test dist/test/*.test.js
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in dist/test/*.test.js; do
+            if ! node --test "$f" >/tmp/test.out 2>&1; then
+              echo "FAILING_TEST=$f"
+              tail -n 80 /tmp/test.out
+              exit 1
+            fi
+          done
+          echo "PREDEPLOY_TESTS=PASS"
