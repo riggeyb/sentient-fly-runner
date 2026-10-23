@@ -26,7 +26,7 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
           echo "CANONICAL_FENCE=PASS"
       - name: Install
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Strict build
         run: npm run build
       - name: Run required predeploy repair and Phase0 regressions
