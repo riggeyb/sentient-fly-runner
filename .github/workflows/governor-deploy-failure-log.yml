@@ -8,19 +8,36 @@ permissions:
 jobs:
   log:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       GOVERNOR_APP: sentient-deployment-governor
+      JOB_A: 3a1ca01f-32a6-4745-a9e9-ccec3491139d
+      JOB_B: 7d6fe865-d32f-4a61-b570-485a55bce818
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Capture recent Governor failure
+      - name: Capture exact EngineeringJob restart diagnostic
         shell: bash
         run: |
           set -euo pipefail
-          echo "GOVERNOR_LOGS_BEGIN"
-          timeout 15s flyctl logs -a "$GOVERNOR_APP" --no-tail 2>&1 \
-            | tail -n 150 \
-            | sed -E 's#(postgres(ql)?://)[^ @]+@#\1***@#g' || true
-          echo "GOVERNOR_LOGS_END"
-          echo "SECRET_VALUES_EXPOSED=false"
+          cat >/tmp/jobs.mjs <<'NODE'
+          const token=String(process.env.SENTIENT_ENGINEERING_API_TOKEN??"").trim();
+          if(!token) process.exit(20);
+          for(const id of [process.env.JOB_A,process.env.JOB_B]){
+            const r=await fetch(`http://127.0.0.1:8080/v1/engineering/jobs/${id}`,{
+              headers:{authorization:`Bearer ${token}`,accept:"application/json"},
+              signal:AbortSignal.timeout(10000)
+            });
+            const v=await r.json().catch(()=>({}));
+            console.log(JSON.stringify({
+              jobId:id,httpStatus:r.status,status:v.status??null,idempotencyKey:v.idempotencyKey??null,
+              expectedHead:v.expectedHead??null,startSha:v.startSha??null,startTree:v.startTree??null,
+              workerMachineId:v.workerMachineId??null,errorCode:v.errorCode??null,
+              createdAt:v.createdAt??null,startedAt:v.startedAt??null,completedAt:v.completedAt??null,
+              pushResult:v.pushResult??null,endSha:v.endSha??null,endTree:v.endTree??null
+            }));
+          }
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          b64="$(base64 -w0 /tmp/jobs.mjs)"
+          flyctl ssh console -a "$GOVERNOR_APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/jobs.mjs && JOB_A=$JOB_A JOB_B=$JOB_B node /tmp/jobs.mjs'"
