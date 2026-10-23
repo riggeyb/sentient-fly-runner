@@ -37,6 +37,35 @@ jobs:
           test "$(git rev-parse HEAD)" = "5d642c9e337e99639a4af8640249cc8f27595764"
           test "$(git rev-parse 'HEAD^{tree}')" = "5a895ad4403792dffd64f004f392dd55ce7c1b63"
 
+
+          echo "GOVERNOR_ENGINEERING_TOKEN_REPAIR=START"
+          flyctl tokens debug -t "$FLY_API_TOKEN" > /tmp/fly-token-debug.json
+          node --input-type=module - <<'NODE'
+          import fs from "node:fs";
+          const value=JSON.parse(fs.readFileSync("/tmp/fly-token-debug.json","utf8"));
+          let id=null;
+          const visit=(v)=>{
+            if(id!==null || v===null || typeof v!=="object") return;
+            if(!Array.isArray(v) && v.type==="Organization" && v.body && (typeof v.body.id==="number" || typeof v.body.id==="string")) {
+              id=String(v.body.id);
+              return;
+            }
+            for(const x of (Array.isArray(v)?v:Object.values(v))) visit(x);
+          };
+          visit(value);
+          if(!id || !/^\d+$/.test(id)) process.exit(2);
+          fs.writeFileSync("/tmp/engineering-caveats.json",JSON.stringify([{type:"Organization",body:{id:Number(id),mask:"rwcdC"}}]));
+          NODE
+          raw_engineering_token="$(flyctl tokens attenuate -t "$FLY_API_TOKEN" -f /tmp/engineering-caveats.json)"
+          ENGINEERING_FLY_TOKEN="$(printf '%s\n' "$raw_engineering_token" | awk 'NF{v=$NF} END{print v}')"
+          test -n "$ENGINEERING_FLY_TOKEN"
+          test "$ENGINEERING_FLY_TOKEN" != "$FLY_API_TOKEN"
+          echo "::add-mask::$ENGINEERING_FLY_TOKEN"
+          FLY_API_TOKEN="$ENGINEERING_FLY_TOKEN" flyctl machines list -a "$GOVERNOR_APP" --json >/dev/null
+          flyctl secrets set -a "$GOVERNOR_APP" SENTIENT_ENGINEERING_MACHINE_FLY_TOKEN="$ENGINEERING_FLY_TOKEN" >/dev/null
+          unset raw_engineering_token ENGINEERING_FLY_TOKEN
+          echo "GOVERNOR_ENGINEERING_TOKEN_REPAIR=PASS"
+
           machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
           gid="$(printf '%s' "$machines" | jq -r '.[0].id')"
           gstate="$(printf '%s' "$machines" | jq -r '.[0].state')"
@@ -78,7 +107,7 @@ jobs:
           echo "GOVERNOR_DB_HANDOFF=PASS"
 
           echo "RECOVERY_SECRET_IMPORT=START"
-          printf 'SENTIENT_DATABASE_BOOTSTRAP_URL=%s\n  "DB" | flyctl secrets import -a "$RECOVERY_APP" --stage >/dev/null
+          printf 'SENTIENT_DATABASE_BOOTSTRAP_URL=%s\n' "$DB" | flyctl secrets import -a "$RECOVERY_APP" --stage >/dev/null
           unset DB
 
           echo "RECOVERY_SECRET_IMPORT=PASS"
