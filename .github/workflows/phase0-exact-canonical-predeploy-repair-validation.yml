@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: b58b7e44f156ebbd62dbc302d8c62b9ddb10c381
+          ref: 326fa75c84aea4cbf5077e1e8a8a68cad7975c90
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
@@ -21,8 +21,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "b58b7e44f156ebbd62dbc302d8c62b9ddb10c381"
-          test "$(git rev-parse 'HEAD^{tree}')" = "8a6f70aa95402e0c35f30234992727f5c083d639"
+          test "$(git rev-parse HEAD)" = "326fa75c84aea4cbf5077e1e8a8a68cad7975c90"
+          test "$(git rev-parse 'HEAD^{tree}')" = "dcb97d80d685467441ae894b3faac7541b218942"
       - name: Install
         run: npm ci --no-audit --no-fund
       - name: Strict build
