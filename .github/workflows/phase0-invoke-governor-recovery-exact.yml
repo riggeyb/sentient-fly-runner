@@ -1,16 +1,18 @@
 name: Phase0 Invoke Governor Recovery Exact
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   recover:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      S: 3d44129e066cfaa3aa21d60116b936500f964d96
-      T: 94c4827fdaddfd66b9422d24dadea12d36c650d0
+      S: 8be03f244080bbcf5d38185af7746dceedf3ad36
+      T: 71555201c7c45afb7d44c52f55f6a97da4af8770
       R: SENTIENT_GOVERNOR_RECOVERY_V1
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
@@ -27,6 +29,23 @@ jobs:
             sleep 2
           done
           test "$st" = started
-          flyctl ssh console -a "$app" -C "sh -lc 'echo Y29uc3Qgcz1wcm9jZXNzLmVudi5TLHQ9cHJvY2Vzcy5lbnYuVCxyPXByb2Nlc3MuZW52LlIsaz1TdHJpbmcocHJvY2Vzcy5lbnYuU0VOVElFTlRfR09WRVJOT1JfUkVDT1ZFUllfQVBJX1RPS0VOfHwiIikudHJpbSgpO2lmKCFrKXByb2Nlc3MuZXhpdCgyMCk7Y29uc3QgcT1hd2FpdCBmZXRjaCgiaHR0cDovLzEyNy4wLjAuMTo4MDgwL3YxL3JlY292ZXJ5L2dvdmVybm9yIix7bWV0aG9kOiJQT1NUIixoZWFkZXJzOnthdXRob3JpemF0aW9uOiJCZWFyZXIgIitrLCJjb250ZW50LXR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIn0sYm9keTpKU09OLnN0cmluZ2lmeSh7cmVwb3NpdG9yeToicmlnZ2V5Yi9zZW50aWVudCIsc2hhOnMsdHJlZTp0LHJlY292ZXJ5UG9saWN5UmV2aXNpb246cn0pLHNpZ25hbDpBYm9ydFNpZ25hbC50aW1lb3V0KDExMDAwMDApfSk7Y29uc3Qgdj1hd2FpdCBxLmpzb24oKTtjb25zb2xlLmxvZyhKU09OLnN0cmluZ2lmeSh7aHR0cFN0YXR1czpxLnN0YXR1cyxyZWNvdmVyeUlkOnYucmVjb3ZlcnlJZD8/bnVsbCxyZXF1ZXN0ZWRTaGE6di5yZXF1ZXN0ZWRTaGE/P251bGwscmVxdWVzdGVkVHJlZTp2LnJlcXVlc3RlZFRyZWU/P251bGwsb2JzZXJ2ZWRTaGE6di5vYnNlcnZlZFNoYT8/bnVsbCxvYnNlcnZlZFRyZWU6di5vYnNlcnZlZFRyZWU/P251bGwsc3RhdHVzOnYuc3RhdHVzPz9udWxsLGVycm9yQ29kZTp2LmVycm9yQ29kZT8/bnVsbH0pKTtpZighcS5va3x8di5zdGF0dXMhPT0iUEFTUyJ8fHYucmVxdWVzdGVkU2hhIT09c3x8di5yZXF1ZXN0ZWRUcmVlIT09dHx8di5vYnNlcnZlZFNoYSE9PXN8fHYub2JzZXJ2ZWRUcmVlIT09dClwcm9jZXNzLmV4aXQoMjEpOw== | base64 -d >/tmp/r.mjs && S=$S T=$T R=$R node /tmp/r.mjs'"
+          cat >/tmp/recover.mjs <<'NODE'
+          const sha=process.env.S,tree=process.env.T,revision=process.env.R;
+          const token=String(process.env.SENTIENT_GOVERNOR_RECOVERY_API_TOKEN??"").trim();
+          if(!token) process.exit(20);
+          const q=await fetch("http://127.0.0.1:8080/v1/recovery/governor",{
+            method:"POST",
+            headers:{authorization:"Bearer "+token,"content-type":"application/json"},
+            body:JSON.stringify({repository:"riggeyb/sentient",sha,tree,recoveryPolicyRevision:revision}),
+            signal:AbortSignal.timeout(1100000)
+          });
+          const v=await q.json().catch(()=>({}));
+          console.log(JSON.stringify({httpStatus:q.status,recoveryId:v.recoveryId??null,requestedSha:v.requestedSha??null,requestedTree:v.requestedTree??null,observedSha:v.observedSha??null,observedTree:v.observedTree??null,status:v.status??null,errorCode:v.errorCode??null}));
+          if(!q.ok||v.status!=="PASS"||v.requestedSha!==sha||v.requestedTree!==tree||v.observedSha!==sha||v.observedTree!==tree) process.exit(21);
+          NODE
+          b64="$(base64 -w0 /tmp/recover.mjs)"
+          flyctl ssh console -a "$app" -C "sh -lc 'echo $b64 | base64 -d >/tmp/recover.mjs && S=$S T=$T R=$R node /tmp/recover.mjs'"
           echo "GOVERNOR_RECOVERY_REQUEST=PASS"
+          echo "EXACT_SOURCE_RECOVERY=PASS"
+          echo "RECOVERY_RECEIPT=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
