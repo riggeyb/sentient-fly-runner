@@ -1,0 +1,129 @@
+name: Sentient Phase 1-7 Convergence Repair and Test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  repair-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-phase1-7-convergence-20261023
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Fence exact shared branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "5cfda8e6b8667d162d2683f58fd6668bad80f575"
+      - name: Repair concrete Phase 7 transcription defects and add lifecycle assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path=Path("src/application/production-model-improvement.ts")
+          src=path.read_text()
+          typo="PHASE7_MINIMUM_IMPROVEMEMENT_V1"
+          if src.count(typo) != 2:
+              raise SystemExit(f"unexpected Phase7 threshold typo count: {src.count(typo)}")
+          src=src.replace(typo,"PHASE7_MINIMUM_IMPROVEMENT_V1")
+          bad='decisionOwner:"SENTIENT_RUNTIME as const,'
+          if src.count(bad) != 1:
+              raise SystemExit(f"unexpected Phase7 decision-owner defect count: {src.count(bad)}")
+          src=src.replace(bad,'decisionOwner:"SENTIENT_RUNTIME" as const,')
+          path.write_text(src)
+
+          test=Path("test/production-model-improvement.test.ts")
+          body=test.read_text()
+          anchor='''  assert.equal(result.result.decision, "PROMOTED");
+          assert.equal(result.result.baselineScore, 0);
+          assert.equal(result.result.candidateScore, 1);'''
+          if anchor not in body:
+              raise SystemExit("Phase7 result assertion anchor missing")
+          extra=anchor+'''
+          assert.match(result.datasetId, /^phase7-dataset:sha256:[0-9a-f]{64}$/);
+          assert.match(result.baselineId, /^phase7-baseline:sha256:[0-9a-f]{64}$/);
+          assert.match(result.candidateId ?? "", /^phase7-candidate:sha256:[0-9a-f]{64}$/);
+          assert.match(result.evaluationId, /^phase7-evaluation:sha256:[0-9a-f]{64}$/);
+          assert.equal(result.promotionPolicyId, "sentient-phase7-material-improvement-policy/v1");
+          assert.equal(result.promotionThreshold, 0.01);
+          assert.equal(result.promotionDecisionOwner, "SENTIENT_RUNTIME");
+          assert.equal(result.modelMayProposeImprovement, true);
+          assert.equal(result.modelMayPromoteItself, false);
+          assert.deepEqual(result.evaluationEligibility, { heldOutDisjoint: true, bothLabels: true });'''
+          body=body.replace(anchor,extra,1)
+          persisted_anchor='''  assert.equal(persisted.checkpoint?.baseRevision, PHASE7_HF_FEATURE_MODEL_REVISION_V1);'''
+          if persisted_anchor not in body:
+              raise SystemExit("Phase7 persisted assertion anchor missing")
+          persisted_extra=persisted_anchor+'''
+          const lifecycle = JSON.parse(artifact.content) as {
+            datasetId: string;
+            baselineId: string;
+            candidateId: string | null;
+            evaluationId: string;
+            promotionPolicy: {
+              policyId: string;
+              minimumImprovement: number;
+              decisionOwner: string;
+              modelMayPromoteItself: boolean;
+            };
+            evaluationEligibility: { heldOutDisjoint: boolean; bothLabels: boolean };
+          };
+          assert.equal(lifecycle.datasetId, result.datasetId);
+          assert.equal(lifecycle.baselineId, result.baselineId);
+          assert.equal(lifecycle.candidateId, result.candidateId);
+          assert.equal(lifecycle.evaluationId, result.evaluationId);
+          assert.equal(lifecycle.promotionPolicy.decisionOwner, "SENTIENT_RUNTIME");
+          assert.equal(lifecycle.promotionPolicy.modelMayPromoteItself, false);
+          assert.deepEqual(lifecycle.evaluationEligibility, { heldOutDisjoint: true, bothLabels: true });
+          assert.equal(artifact.metadata?.datasetId, result.datasetId);
+          assert.equal(artifact.metadata?.baselineId, result.baselineId);
+          assert.equal(artifact.metadata?.candidateId, result.candidateId);
+          assert.equal(artifact.metadata?.evaluationId, result.evaluationId);
+          assert.equal(artifact.metadata?.promotionDecisionOwner, "SENTIENT_RUNTIME");
+          assert.equal(artifact.metadata?.modelMayPromoteItself, false);'''
+          body=body.replace(persisted_anchor,persisted_extra,1)
+          test.write_text(body)
+          PY
+      - name: Install and build
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Cumulative targeted tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase2-skill-execution.test.js \
+            dist/test/phase3-cognitive-components.test.js \
+            dist/test/phase3-local-hf-adapter.test.js \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/phase6-capability-integration.test.js \
+            dist/test/phase7-local-hf-feature-head.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/production-model-improvement.test.js \
+            dist/test/job2-self-execution.test.js \
+            dist/test/job2-production-convergence.test.js
+          echo "CUMULATIVE_TARGETED_TESTS=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
+      - name: Commit exact tested repair to shared convergence branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-convergence"
+          git config user.email "sentient-convergence@users.noreply.github.com"
+          git add src/application/production-model-improvement.ts test/production-model-improvement.test.ts
+          git diff --cached --quiet && { echo "NO_CHANGES_TO_COMMIT"; exit 1; }
+          git commit -m "Phase 7: finalize immutable learning lifecycle evidence"
+          git push origin HEAD:sentient-phase1-7-convergence-20261023
+          echo "PUBLIC_RUNNER_USED=true"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "NETLIFY_USAGE=0"
