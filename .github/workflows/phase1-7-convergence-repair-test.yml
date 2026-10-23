@@ -1,79 +1,65 @@
-name: Sentient Phase 1-7 Convergence Repair and Test
+name: Sentient Phase0 Critical Regression Diagnostic
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  repair-test:
+  diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: sentient-phase1-7-convergence-20261023
+          ref: a6eb540a33fcb509d7aa3e833096d5d6a88d7167
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: true
-          fetch-depth: 0
-      - name: Fence and repair exact observed defects
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Fence exact candidate
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "5cfda8e6b8667d162d2683f58fd6668bad80f575"
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("src/phase1/core-runtime.ts")
-          s = p.read_text()
-          a = '  evaluate({ rawResult, proposal }) {'
-          b = '  evaluate({ rawResult, proposal }: { requirements: TaskRequirementsV1; rawResult: unknown; proposal: { text: string; provider?: string | undefined; model?: string | undefined } }) {'
-          c = '    proposal: candidate,'
-          d = '    proposal: { text: candidate.text, provider: candidate.provider, model: candidate.model },'
-          if s.count(a) != 1 or s.count(c) != 1:
-              raise SystemExit("phase1_patch_fence_failed")
-          p.write_text(s.replace(a,b,1).replace(c,d,1))
-          p = Path("src/application/production-model-improvement.ts")
-          s = p.read_text()
-          typo = "PHASE7_MINIMUM_IMPROVEMEMENT_V1"
-          fixed = "PHASE7_MINIMUM_IMPROVEMENT_V1"
-          bad = 'decisionOwner:"SENTIENT_RUNTIME as const,'
-          good = 'decisionOwner:"SENTIENT_RUNTIME" as const,'
-          if s.count(typo) != 2 or s.count(bad) != 1:
-              raise SystemExit("phase7_patch_fence_failed")
-          p.write_text(s.replace(typo,fixed).replace(bad,good))
-          print("PATCH_VERSION=phase1-7-minimal-v3")
-          PY
-      - name: Build and cumulative targeted tests
+          test "$(git rev-parse HEAD)" = "a6eb540a33fcb509d7aa3e833096d5d6a88d7167"
+          test "$(git rev-parse HEAD^{tree})" = "07f1d6a0c7990706e06fedd9005b72d925b82d71"
+          echo "CANONICAL_SHA_MATCH=PASS"
+          echo "CANONICAL_TREE_MATCH=PASS"
+      - name: Build exact candidate
         shell: bash
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
           npm run build
-          node --test \
-            dist/test/phase1-core-runtime.test.js \
-            dist/test/phase2-skill-execution.test.js \
-            dist/test/phase3-cognitive-components.test.js \
-            dist/test/phase3-local-hf-adapter.test.js \
-            dist/test/phase4-multistep-autonomy.test.js \
-            dist/test/phase5-collaborative-convergence.test.js \
-            dist/test/phase6-capability-integration.test.js \
-            dist/test/phase7-local-hf-feature-head.test.js \
-            dist/test/phase7-model-improvement.test.js \
-            dist/test/production-model-improvement.test.js \
-            dist/test/job2-self-execution.test.js \
-            dist/test/job2-production-convergence.test.js
           echo "CUMULATIVE_BUILD=PASS"
-          echo "CUMULATIVE_TARGETED_TESTS=PASS"
-          echo "SECRET_VALUES_EXPOSED=false"
-      - name: Commit exact tested repair
+      - name: Isolate Phase0 critical regressions
         shell: bash
         run: |
-          set -euo pipefail
-          git config user.name "sentient-convergence"
-          git config user.email "sentient-convergence@users.noreply.github.com"
-          git add src/phase1/core-runtime.ts src/application/production-model-improvement.ts
-          git diff --cached --quiet && { echo "NO_CHANGES_TO_COMMIT"; exit 1; }
-          git commit -m "Converge Phase 1 authority and Phase 7 learning evidence"
-          git push origin HEAD:sentient-phase1-7-convergence-20261023
-          echo "PUBLIC_RUNNER_USED=true"
-          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
-          echo "NETLIFY_USAGE=0"
+          set -uo pipefail
+          tests=(
+            active-work-core
+            active-work-expiry-fencing
+            active-work-persistence
+            active-work-restart-edge
+            engineering-jobs
+            objective-continuation
+            objective-continuation-readiness
+            permanent-continuation-http
+            permanent-continuation-multiprocess
+            phase0-control-recovery
+            phase0-engineering-readiness
+            deployment-governor
+            deployment-governor-boundaries
+            deployment-governor-skills-fence
+          )
+          failures=0
+          for t in "${tests[@]}"; do
+            echo "=== TEST:$t ==="
+            if node --test "dist/test/$t.test.js"; then
+              echo "REGRESSION:$t=PASS"
+            else
+              echo "REGRESSION:$t=FAIL"
+              failures=$((failures+1))
+            fi
+          done
+          echo "REGRESSION_FAILURE_COUNT=$failures"
+          echo "SECRET_VALUES_EXPOSED=false"
+          test "$failures" -eq 0
