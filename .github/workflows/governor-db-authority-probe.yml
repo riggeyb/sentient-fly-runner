@@ -41,5 +41,5 @@ jobs:
           } finally { await pool.end(); }
           NODE
           b64="$(base64 -w0 /tmp/probe.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/probe.mjs && node /tmp/probe.mjs'"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $b64 | base64 -d >probe.mjs && node probe.mjs && rm -f probe.mjs'"
           echo "SECRET_VALUES_EXPOSED=false"
