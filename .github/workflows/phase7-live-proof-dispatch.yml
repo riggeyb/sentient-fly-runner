@@ -47,6 +47,33 @@ jobs:
                   normalized.append("")
               else:
                   raise SystemExit(f"phase7_shared_proof_unexpected_indentation:{line[:40]}")
-          Path("/tmp/phase7-shared-proof.sh").write_text("\n".join(normalized) + "\n")
+          script = "\n".join(normalized) + "\n"
+          needle = """            await service.promoteLessonCandidate(lesson.id,{
+              decision:"promote",
+              reasonCodes:["verified_repair_narrow_scope"],
+            });
+
+            const heldPositive=await mkRun("succeeded",3);"""
+          replacement = """            await service.promoteLessonCandidate(lesson.id,{
+              decision:"promote",
+              reasonCodes:["verified_repair_narrow_scope"],
+            });
+            await service.createDerivedMemory(lesson.id,{
+              kind:"memory",
+              memoryType:"semantic",
+              content:"verified Phase 7 learning memory",
+              derivedFromExperienceIds:[failedExp.id,repairedExp.id],
+              provenance:{
+                actor:"system",
+                modelRunId:repaired.id,
+                sourceIds:[failedEv.id,repairedEv.id],
+              },
+            });
+
+            const heldPositive=await mkRun("succeeded",3);"""
+          if needle not in script:
+              raise SystemExit("phase7_learning_memory_insertion_point_missing")
+          script = script.replace(needle, replacement, 1)
+          Path("/tmp/phase7-shared-proof.sh").write_text(script)
           PY
           bash /tmp/phase7-shared-proof.sh
