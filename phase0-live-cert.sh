@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Preserve the shared bounded certification harness exactly, applying only the
-# two concrete operator repairs observed live: ledger module resolution and
-# starting the existing frozen autostopped Fly machine before SSH certification.
+# concrete operator repairs observed live: ledger module resolution, starting
+# the existing frozen autostopped Fly machine, and waiting for exact readiness
+# before objective ingress.
 REF="23836ffcf56573a1a2f7bb146871989d1c5b977a"
 URL="https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/${REF}/phase0-live-cert.sh"
 TMP="$(mktemp)"
@@ -24,6 +25,8 @@ p.write_text(s.replace(old, new))
 PY
 
 APP="sentient-validation-runner"
+SHA="ce2a5cceab61f31aa490f2e3174992a714f97251"
+TREE="bd84818a2610bf2d2077484589580a47aa5399e8"
 MID="$(flyctl machines list -a "$APP" --json | jq -r '[.[]|select(.state!="destroyed")][0].id')"
 test -n "$MID" && test "$MID" != "null"
 flyctl machine start "$MID" -a "$APP" >/dev/null || true
@@ -35,5 +38,18 @@ for _ in $(seq 1 90); do
 done
 test "$state" = "started"
 echo "FROZEN_MACHINE_STARTED=PASS"
+
+ready=false
+for _ in $(seq 1 120); do
+  if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/phase0-frozen-ready.json 2>/dev/null; then
+    if jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and (.identity.source.sha==$s) and (.identity.source.tree==$t)' /tmp/phase0-frozen-ready.json >/dev/null; then
+      ready=true
+      break
+    fi
+  fi
+  sleep 2
+done
+test "$ready" = true
+echo "FROZEN_LIVE_READY=PASS"
 
 exec bash "$TMP"
