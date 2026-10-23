@@ -1,0 +1,33 @@
+name: Sentient Governor DB Authority Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-deployment-governor
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe Governor DB authority presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${FLY_API_TOKEN:-}"
+          machines="$(flyctl machines list -a "$APP" --json)"
+          id="$(printf '%s' "$machines" | jq -r '.[0].id')"
+          state="$(printf '%s' "$machines" | jq -r '.[0].state')"
+          test -n "$id"
+          if [ "$state" != "started" ]; then
+            flyctl machine start "$id" -a "$APP" >/dev/null
+          fi
+          for _ in $(seq 1 45); do
+            state="$(flyctl machines list -a "$APP" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state')"
+            [ "$state" = "started" ] && break
+            sleep 2
+          done
+          test "$state" = "started"
+          flyctl ssh console -a "$APP" -C 'node -e '"'"'const names=["SENTIENT_DATABASE_BOOTSTRAP_URL","SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL","DATABASE_URL","DIRECT_URL","SENTIENT_SOURCE_GITHUB_TOKEN","SENTIENT_TARGET_DEPLOYMENT_FLY_TOKEN","SENTIENT_FLY_DEPLOY_TOKEN"]; for(const n of names) console.log(n+"_PRESENT="+Boolean(String(process.env[n]??"").trim())); console.log("SECRET_VALUES_EXPOSED=false");'"'"''
