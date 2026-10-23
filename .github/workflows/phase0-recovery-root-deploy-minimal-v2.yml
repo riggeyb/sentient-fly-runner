@@ -1,0 +1,50 @@
+name: Phase0 Recovery Root Deploy Minimal V2
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET_SHA: 5d642c9e337e99639a4af8640249cc8f27595764
+      TARGET_TREE: 5a895ad4403792dffd64f004f392dd55ce7c1b63
+      GOVERNOR_APP: sentient-deployment-governor
+      RECOVERY_APP: sentient-governor-recovery-root
+    steps:
+      - uses: "actions/checkout\u0040v4"
+        with:
+          repository: riggeyb/sentient
+          ref: 5d642c9e337e99639a4af8640249cc8f27595764
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: "superfly/flyctl-actions/setup-flyctl\u0040master"
+      - name: Deploy recovery root
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
+          echo "CANONICAL_FENCE=PASS"
+
+          machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
+          id="$(printf '%s' "$machines" | jq -r '.[0].id')"
+          state="$(printf '%s' "$machines" | jq -r '.[0].state')"
+          if [ "$state" != "started" ]; then
+            flyctl machine start "$id" -a "$GOVERNOR_APP" >/dev/null
+          fi
+
+          DB="$(flyctl ssh console -a "$GOVERNOR_APP" -C 'printenv SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL' 2>/dev/null | tail -n1)"
+          test -n "$DB"
+          echo "::add-mask::$DB"
+          printf 'SENTIENT_DATABASE_BOOTSTRAP_URL=%s\n' "$DB" | flyctl secrets import -a "$RECOVERY_APP" --stage >/dev/null
+          unset DB
+          echo "RECOVERY_DATABASE_AUTHORITY=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
+
+          flyctl deploy --app "$RECOVERY_APP" --config fly.recovery.toml --remote-only --yes --ha=false
+          echo "RECOVERY_ROOT_EXACT_SOURCE_DEPLOY=PASS"
