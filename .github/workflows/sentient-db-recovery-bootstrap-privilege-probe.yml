@@ -1,0 +1,30 @@
+name: Sentient DB Recovery Bootstrap Privilege Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      MACHINE_ID: 8469e7b243d558
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe Sentient DATABASE_URL recovery bootstrap privileges
+        shell: bash
+        run: |
+          set -euo pipefail
+          state="$(flyctl machines list -a "$APP" --json | jq -r --arg id "$MACHINE_ID" '.[]|select(.id==$id)|.state')"
+          if [ "$state" != "started" ]; then
+            flyctl machine start "$MACHINE_ID" -a "$APP" >/dev/null
+          fi
+          for _ in $(seq 1 45); do
+            state="$(flyctl machines list -a "$APP" --json | jq -r --arg id "$MACHINE_ID" '.[]|select(.id==$id)|.state')"
+            [ "$state" = "started" ] && break
+            sleep 2
+          done
+          test "$state" = "started"
+          flyctl ssh console -a "$APP" -C 'node --input-type=module -e '"'"'import pg from "pg"; const {Pool}=pg; const cs=String(process.env.DATABASE_URL??"").trim(); if(!cs) process.exit(2); const p=new Pool({connectionString:cs,max:1,connectionTimeoutMillis:10000}); try { const r=await p.query(`SELECT current_database() AS db, has_database_privilege(current_user,current_database(), $1) AS db_create`,["CREATE"]); console.log("DATABASE_CREATE_PRIVILEGE="+(r.rows[0]?.db_create===true)); console.log("SECRET_VALUES_EXPOSED=false"); } finally { await p.end(); }'"'"''
