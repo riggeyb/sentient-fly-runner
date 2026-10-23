@@ -55,6 +55,8 @@ jobs:
           const v=await r.json().catch(()=>({}));
           const safe={
             httpStatus:r.status,
+            error:v.error??null,
+            reason:v.reason??null,
             DEPLOYMENT_ID:v.DEPLOYMENT_ID??null,
             REQUESTED_SHA:v.REQUESTED_SHA??null,
             REQUESTED_TREE:v.REQUESTED_TREE??null,
