@@ -30,22 +30,40 @@ jobs:
           cat >/tmp/deploy.mjs <<'NODE'
           const sha=process.env.S, tree=process.env.T, skillsSha=process.env.K;
           const token=String(process.env.SENTIENT_DEPLOYMENT_API_TOKEN??"").trim();
-          if(!token)throw new Error("GOVERNOR_RESIDENT_DEPLOYMENT_CREDENTIAL_MISSING");
-          const r=await fetch("http://127.0.0.1:8080/v1/deployments/sentient",{method:"POST",headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":"phase1-7-final-"+sha.slice(0,12)},body:JSON.stringify({sha:sha,tree:tree,skillsSha}),signal:AbortSignal.timeout(900000)});
-          const t=await r.text();let b={};try{b=JSON.parse(t)}catch{}
-          const allow=["DEPLOYMENT_ID","REQUESTED_SHA","REQUESTED_TREE","DEPLOYED_SHA","DEPLOYED_TREE","SKILLS_SHA","BUILD_RESULT_","BUILD_RESULT","READIZ_FAILURE","RETRY_LIMIT_STATE","RATE_LIMIT_STATE","RESOURCE_CHANGE_STATUS","RESOURCE_CHANGE_DETAIL"];
-          const out={HTTP_STATUS:r.status};for(const k of allow)if(kin b)out[k]=b[k];
-          if(b.HEALTHZ&&typeof b.HEALTHZ==="object")out.HEALTHZ={statusCode:b.HEALTHZ.statusCode??null,body:b.HEALTHZ.body??null};
-          if(b.READYZ&&typeof b.READYZ==="object")out.READYZ={statusCode:b.READYZ.statusCode??null,body:b.READYZ.body??null};
+          if(!token) throw new Error("GOVERNOR_RESIDENT_DEPLOYMENT_CREDENTIAL_MISSING");
+          const r=await fetch("http://127.0.0.1:8080/v1/deployments/sentient",{
+            method:"POST",
+            headers:{
+              authorization:"Bearer "+token,
+              "content-type":"application/json",
+              "x-sentient-objective-id":"phase1-7-final-"+sha.slice(0,12)
+            },
+            body:JSON.stringify({sha,tree,skillsSha}),
+            signal:AbortSignal.timeout(900000)
+          });
+          const raw=await r.text();
+          let b={};
+          try{b=JSON.parse(raw)}catch{}
+          const allow=["DEPLOYMENT_ID","REQUESTED_SHA","REQUESTED_TREE","DEPLOYED_SHA","DEPLOYED_TREE","SKILLS_SHA","BUILD_RESULT","BUILD_FAILURE","READYZ_FAILURE","RETRY_LIMIT_STATE","RATE_LIMIT_STATE","RESOURCE_CHANGE_STATUS","RESOURCE_CHANGE_DETAIL"];
+          const out={HTTP_STATUS:r.status};
+          for(const k of allow) if(k in b) out[k]=b[k];
+          if(b.HEALTHZ&&typeof b.HEALTHZ==="object") out.HEALTHZ={statusCode:b.HEALTHZ.statusCode??null,body:b.HEALTHZ.body??null};
+          if(b.READYZ&&typeof b.READYZ==="object") out.READYZ={statusCode:b.READYZ.statusCode??null,body:b.READYZ.body??null};
           console.log(JSON.stringify(out));
-          if(!r.ok)||b.REQUESTED_SHA!==sha||b.REQUESTED_TREE!==tree||b.DEPLOYED_SHA!==sha||b.DEPLOYED_TREE!==tree||b.BUILD_RESULT!=="SUCCEEDED")process.exit(21);
+          if(!r.ok || b.REQUESTED_SHA!==sha || b.REQUESTED_TREE!==tree || b.DEPLOYED_SHA!==sha || b.DEPLOYED_TREE!==tree || b.BUILD_RESULT!=="SUCCEEDED") process.exit(21);
           console.log("GOVERNOR_DEPLOY_EXACT=PASS");
           console.log("SECRET_VALUES_EXPOSED=false");
 NODE
           b64="$(base64 -w0 /tmp/deploy.mjs)"
           flyctl machines list -a sentient-deployment-governor --json >/tmp/m.json
-          id="$(jq -r '.[0]|select(.!"null").|id' /tmp/m.json)"
+          id="$(jq -r '.[0].id // empty' /tmp/m.json)"
           test -n "$id"
           flyctl machine start "$id" -a sentient-deployment-governor >/dev/null || true
+          for _ in $(seq 1 60); do
+            st="$(flyctl machines list -a sentient-deployment-governor --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
+            [ "$st" = "started" ] && break
+            sleep 2
+          done
+          test "$st" = "started"
           flyctl ssh console -a sentient-deployment-governor -C "sh -lc 'echo $b64 | base64 -d >/tmp/deploy.mjs && S=$S T=$T K=$K node /tmp/deploy.mjs; rc=\$?; rm -f /tmp/deploy.mjs; exit \$rc'"
           echo "RESULT=PASS"
