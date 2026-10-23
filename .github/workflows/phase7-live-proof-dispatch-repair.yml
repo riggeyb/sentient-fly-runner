@@ -69,6 +69,7 @@ jobs:
             const fver=await mkVer(failed,fv), rver=await mkVer(repaired,rv);
             const lesson=await s.createLesson({kind:"lesson",taskId:task.id,rule:"Prefer the verified repaired healthy path over the verified broken failure path.",sourceModelRunIds:[failed.id,repaired.id],sourceExperienceIds:[fe.id,re.id],sourceEvidenceIds:[fv.id,rv.id],verificationIds:[fver.id,rver.id],sourceSessionId:session.id,failedRunId:failed.id,repairRunId:repaired.id,applicability:{taskKinds:["phase7-verified-improvement"]},provenance:{actor:"system"},metadata:{phase7LiveProofId:proof,lessonCandidateId:`phase7-live-${proof}`,candidateCreatedAt:new Date().toISOString(),repairVerificationId:rver.id}});
             await s.promoteLessonCandidate(lesson.id,{decision:"promote",reasonCodes:["verified_repair_narrow_scope"]});
+            await s.createDerivedMemory(lesson.id,{kind:"memory",memoryType:"semantic",content:"Verified repaired Phase 7 proof lineage.",derivedFromExperienceIds:[fe.id,re.id],provenance:{actor:"system",modelRunId:repaired.id,sourceIds:[fv.id,rv.id]},metadata:{phase7LiveProofId:proof}});
 
             const hp=await mkRun("succeeded",3), hn=await mkRun("failed",4);
             await mkExp(hp,"success","positive healthy fixed successful held out outcome");
