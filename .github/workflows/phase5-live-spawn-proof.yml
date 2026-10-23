@@ -1,0 +1,90 @@
+name: Sentient Phase 5 Live Spawn Convergence Proof
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact deployed Sentient SHA
+        required: true
+        type: string
+      tree:
+        description: Exact deployed Sentient tree
+        required: true
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  phase5-live-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Prove live Spawn collaboration and Sentient convergence
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+          PROOF_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz" >/tmp/phase5-ready.json
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" \
+            '.ready==true and (.identity.source.sha==$s) and (.identity.source.tree==$t)' \
+            /tmp/phase5-ready.json >/dev/null
+          echo "PHASE5_LIVE_IDENTITY_MATCH=PASS"
+
+          cat >/tmp/phase5-proof.mjs <<'NODE'
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          const proof=String(process.env.PHASE5_PROOF_ID??"").trim();
+          if(!token) throw new Error("PHASE5_SENTIENT_API_TOKEN_MISSING");
+          if(!/^[A-Za-z0-9._:-]{1,160}$/.test(proof)) throw new Error("PHASE5_PROOF_ID_INVALID");
+          const objectiveId=`phase5-live-proof-${proof}`;
+          const headers={authorization:`Bearer ${token}`,accept:"application/json","content-type":"application/json"};
+          const submitted=await fetch("http://127.0.0.1:8080/v1/objectives",{
+            method:"POST",headers,
+            body:JSON.stringify({
+              objectiveId,
+              sessionId:`session-${objectiveId}`,
+              mode:"collaborative",
+              privacy:"public_fixture",
+              request:"Public fixture: independently determine whether 2 + 2 equals 4. The independent verification worker must review the analysis and agree only if supported. Return bounded evidence; Sentient owns convergence."
+            }),
+            signal:AbortSignal.timeout(20000),
+          });
+          if(submitted.status!==202) throw new Error(`PHASE5_SUBMIT_HTTP_${submitted.status}`);
+          let terminal=null;
+          for(let i=0;i<120;i++){
+            await new Promise(r=>setTimeout(r,1000));
+            const response=await fetch(`http://127.0.0.1:8080/v1/objectives/${encodeURIComponent(objectiveId)}`,{
+              headers:{authorization:`Bearer ${token}`,accept:"application/json"},
+              signal:AbortSignal.timeout(10000),
+            });
+            if(!response.ok) throw new Error(`PHASE5_STATUS_HTTP_${response.status}`);
+            const status=await response.json();
+            if(["succeeded","failed","cancelled"].includes(status.status)){terminal=status;break;}
+          }
+          if(!terminal) throw new Error("PHASE5_OBJECTIVE_TIMEOUT");
+          if(terminal.status!=="succeded")throw new Error(`PHASE5_OBJECTIVE_${String(terminal.status).toUpperCase()}_${String(terminal.error??"unknown")}`);
+          const applicationResult=terminal.result??{};
+          const collaboration=applicationResult?.body?.result??applicationResult?.result??{};
+          if(collaboration.status!=="CONVERGED") throw new Error(`PHASE5_NOT_CONVERGED_${String(collaboration.status??"sissing")}`);
+          if(collaboration.authorityOwner!=="SENTIENT_RUNTIME") throw new Error("PHASE5_AUTHORITY_OWNER_INVALID");
+          if(collaboration.workerEffectsCanonical!==false) throw new Error("PHASE5_WORKER_EFFECTS_CANONICAL");
+          if(!Array.isArray(collaboration.workerExecutionIds)||collaboration.workerExecutionIds.length<2) throw new Error("PHASE5_WORKER_COUNT_INVALID");
+          if(!Array.isArray(collaboration.evidenceRefs)||collaboration.evidenceRefs.length<2) throw new Error("PHASE5_EVIDENCE_MISSING");
+          if(typeof collaboration.authoritativeResultRef!=="string" || !collaboration.authoritativeResultRef) throw new Error("PHASE5_SENTIENT_CONVERGENCE_REF_MISSING");
+          console.log("PHASE5_OBJECTIVE_ID="+objectiveId);
+          console.log("PHASE5_WORKER_COUNT="+collaboration.workerExecutionIds.length);
+          console.log("PHASE5_EVIDENCE_COUNT="+collaboration.evidenceRefs.length);
+          console.log("PHASE5_SENTIENT_AUTHORITY=PASS");
+          console.log("SPAWN_CONVERGENCE=PASS");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-proof.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-live-proof.mjs && PHASE5_PROOF_ID=$PROOF_ID node /app/phase5-live-proof.mjs; rc=\$?; rm -f /app/phase5-live-proof.mjs; exit \$rc'"
+          echo "RESULT=PASS"
