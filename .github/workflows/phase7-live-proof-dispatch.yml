@@ -50,20 +50,22 @@ jobs:
           anchor='const heldPositive=await mkRun("succeeded",3);'
           if script.count(anchor)!=1:
               raise SystemExit(f"phase7_heldout_anchor_count:{script.count(anchor)}")
-          memory="""await service.createDerivedMemory(lesson.id,{
-  kind:"memory",
-  memoryType:"semantic",
-  content:"verified Phase 7 learning memory",
-  derivedFromExperienceIds:[failedExp.id,repairedExp.id],
-  provenance:{
-    actor:"system",
-    modelRunId:repaired.id,
-    sourceIds:[failedEv.id,repairedEv.id],
-  },
-});
-
-"""
-          script=script.replace(anchor,memory+anchor,1)
+          memory_lines=[
+              'await service.createDerivedMemory(lesson.id,{',
+              '  kind:"memory",',
+              '  memoryType:"semantic",',
+              '  content:"verified Phase 7 learning memory",',
+              '  derivedFromExperienceIds:[failedExp.id,repairedExp.id],',
+              '  provenance:{',
+              '    actor:"system",',
+              '    modelRunId:repaired.id,',
+              '    sourceIds:[failedEv.id,repairedEv.id],',
+              '  },',
+              '});',
+              '',
+              '',
+          ]
+          script=script.replace(anchor,"\n".join(memory_lines)+anchor,1)
           Path("/tmp/phase7-shared-proof.sh").write_text(script)
           PY
           bash /tmp/phase7-shared-proof.sh
