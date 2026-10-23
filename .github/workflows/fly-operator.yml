@@ -1,0 +1,37 @@
+name: Sentient Fly Operator
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Bounded Sentient/Fly operation
+        required: true
+        type: choice
+        options:
+          - health
+          - tools_list
+          - fly_machines_list
+          - fly_machine_get
+          - engineering_create
+          - engineering_get
+      arguments:
+        description: JSON arguments for the selected operation
+        required: false
+        default: "{}"
+        type: string
+permissions:
+  contents: read
+jobs:
+  operate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Invoke Sentient on Fly
+        env:
+          MCP_CLIENT_TOKEN: ${{ secrets.MCP_CLIENT_TOKEN }}
+          OPERATION: ${{ inputs.operation }}
+          ARGUMENTS: ${{ inputs.arguments }}
+        run: node operator.mjs
