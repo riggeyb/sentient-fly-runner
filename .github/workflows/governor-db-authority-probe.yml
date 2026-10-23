@@ -1,0 +1,45 @@
+name: Governor DB Authority Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-deployment-governor
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe Governor database authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          machines="$(flyctl machines list -a "$APP" --json)"
+          id="$(printf '%s' "$machines" | jq -r '.[0].id')"
+          state="$(printf '%s' "$machines" | jq -r '.[0].state')"
+          test -n "$id"
+          if [ "$state" != "started" ]; then flyctl machine start "$id" -a "$APP" >/dev/null; fi
+          for _ in $(seq 1 60); do
+            state="$(flyctl machines list -a "$APP" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
+            [ "$state" = "started" ] && break
+            sleep 2
+          done
+          test "$state" = "started"
+          cat >/tmp/probe.mjs <<'NODE'
+          import pg from "pg";
+          const names=["SENTIENT_DATABASE_BOOTSTRAP_URL","SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL","DATABASE_URL","DIRECT_URL"];
+          for (const n of names) console.log(`${n}_PRESENT=${Boolean(String(process.env[n]??"").trim())}`);
+          const url=String(process.env.SENTIENT_DATABASE_BOOTSTRAP_URL??process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
+          if(!url){ console.log("GOVERNOR_DB_AUTHORITY=ABSENT"); process.exit(3); }
+          const pool=new pg.Pool({connectionString:url,max:1,connectionTimeoutMillis:10000});
+          try {
+            const r=await pool.query("select has_database_privilege(current_user,current_database(),'CREATE') as can_create, has_database_privilege(current_user,current_database(),'CONNECT') as can_connect");
+            console.log(`GOVERNOR_DB_CONNECT_PRIVILEGE=${r.rows[0]?.can_connect===true}`);
+            console.log(`GOVERNOR_DB_CREATE_PRIVILEGE=${r.rows[0]?.can_create===true}`);
+          } finally { await pool.end(); }
+          NODE
+          b64="$(base64 -w0 /tmp/probe.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/probe.mjs && node /tmp/probe.mjs'"
+          echo "SECRET_VALUES_EXPOSED=false"
