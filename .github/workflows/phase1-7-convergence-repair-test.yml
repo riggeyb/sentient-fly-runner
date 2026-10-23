@@ -1,6 +1,5 @@
 name: Sentient Phase 1-7 Convergence Repair and Test
-on:
-  workflow_dispatch:
+on: [workflow_dispatch]
 permissions:
   contents: read
 jobs:
@@ -49,7 +48,7 @@ jobs:
           p7 = Path("src/application/production-model-improvement.ts")
           src = p7.read_text()
           typo = "PHASE7_MINIMUM_IMPROVEMEMENT_V1"
-          fixed = "PHASE7_MINIMUM_IMPROVEMENT_V1"
+          fixed = "PHASE7_MINIMUM_IMPROVEMEMENT_V1"
           if src.count(typo) != 2:
               raise SystemExit(f"unexpected Phase7 threshold typo count: {src.count(typo)}")
           bad = 'decisionOwner:"SENTIENT_RUNTIME as const,'
