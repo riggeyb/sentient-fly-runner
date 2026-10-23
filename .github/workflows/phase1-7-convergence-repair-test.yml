@@ -40,13 +40,14 @@ jobs:
           if s.count(typo) != 2 or s.count(bad) != 1:
               raise SystemExit("phase7_patch_fence_failed")
           p.write_text(s.replace(typo,fixed).replace(bad,good))
-          print("PATCH_VERSION=phase1-7-minimal-v2")
+          print("PATCH_VERSION=phase1-7-minimal-v3")
           PY
       - name: Build and cumulative targeted tests
         shell: bash
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
+          npm run build
           node --test \
             dist/test/phase1-core-runtime.test.js \
             dist/test/phase2-skill-execution.test.js \
