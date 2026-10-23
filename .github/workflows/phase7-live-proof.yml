@@ -1,5 +1,5 @@
-name: Sentient Phase 7 Live Improvement Proof
-on:
+name: Sentient Phase 7 Live Improvement Proof V2
+'on':
   workflow_dispatch:
     inputs:
       sha:
@@ -211,25 +211,37 @@ jobs:
               throw new Error("PHASE7_DURABLE_ARTIFACT_MISSING");
             }
             const persisted=JSON.parse(artifact.content);
-             if(persisted?.result?.decision!==improvement.decision) {
+            if(persisted?.result?.decision!==improvement.decision) {
               throw new Error("PHASE7_DURABLE_DECISION_MISMATCH");
             }
-            const checkpoint=persisted?.checkpoint??null;
-            if(!checkpoint||typeof checkpoint.baseModel!=="string"||typeof checkpoint.baseRevision!=="string") {
-              throw new Error("PHASE7_IMMUTABLE_CANDIDATE_IDENTITY_MISSING");
+            if(typeof result.datasetId!=="string"||typeof result.baselineId!=="string"||
+               typeof result.candidateId!=="string"||typeof result.evaluationId!=="string") {
+              throw new Error("PHASE7_IMMUTABLE_LIFECYCLE_IDENTITY_MISSING");
             }
-            const baselineId=`${result.component}:deterministic-baseline:${checkpoint.baseModel}@${checkpoint.baseRevision}`;
+            if(result.promotionDecisionOwner!=="SENTIENT_RUNTIME"||
+               result.modelMayProposeImprovement!==true||result.modelMayPromoteItself!==false) {
+              throw new Error("PHASE7_AUTHORITY_POLICY_MISMATCH");
+            }
+            if(result.evaluationEligibility?.heldOutDisjoint!==true||result.evaluationEligibility?.bothLabels!==true) {
+              throw new Error("PHASE7_EVALUATION_ELIGIBILITY_MISMATCH");
+            }
             console.log("PHASE7_PROOF_JSON="+JSON.stringify({
               proofId,
               lessonId:lesson.id,
-              baselineId,
-              candidateId:improvement.candidateCheckpointRef,
-              baseModel:checkpoint.baseModel,
-              baseRevision:checkpoint.baseRevision,
+              datasetId:result.datasetId,
+              baselineId:result.baselineId,
+              candidateId:result.candidateId,
+              evaluationId:result.evaluationId,
               baselineScore:improvement.baselineScore,
               candidateScore:improvement.candidateScore,
               decision:improvement.decision,
               reason:improvement.reason,
+              promotionPolicyId:result.promotionPolicyId,
+              promotionThreshold:result.promotionThreshold,
+              promotionDecisionOwner:result.promotionDecisionOwner,
+              modelMayProposeImprovement:result.modelMayProposeImprovement,
+              modelMayPromoteItself:result.modelMayPromoteItself,
+              evaluationEligibility:result.evaluationEligibility,
               artifactMemoryId:result.artifactMemoryId,
               trainingRunIds:result.trainingRunIds,
               heldOutRunIds:result.heldOutRunIds,
@@ -238,7 +250,7 @@ jobs:
             console.log("PHASE7_LOCAL_TRAINING=PASS");
             console.log("PHASE7_HELD_OUT_EVALUATION=PASS");
             console.log("PHASE7_SENTIENT_POLICY_DECISION=PASS");
-            console.log("PHASE7_DECISION_PERSISTEE=PASS");
+            console.log("PHASE7_DECISION_PERSISTED=PASS");
             console.log("PHASE7_REAL_IMPROVEMENT_CYCLE=PASS");
             console.log("SECRET_VALUES_EXPOSED=false");
           } finally {
