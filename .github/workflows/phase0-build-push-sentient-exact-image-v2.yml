@@ -11,15 +11,15 @@ jobs:
     timeout-minutes: 20
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      SHA: b07e90c43e2336dfb5cba0066ae8004976d67179
-      TREE: 8086ac182ca08d86a386e8f6952746f5e624a238
-      PARENT: d62260ec6b295bf9f155964ac05fbc6ca467c8d1
+      SHA: b58b7e44f156ebbd62dbc302d8c62b9ddb10c381
+      TREE: 8a6f70aa95402e0c35f30234992727f5c083d639
+      PARENT: d83342897d0c2ca38ec4f3e38d795b633af4dc66
       SKILLS: d85eb820f18ad6d944ab93b03150d606273891a5
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: b07e90c43e2336dfb5cba0066ae8004976d67179
+          ref: b58b7e44f156ebbd62dbc302d8c62b9ddb10c381
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
@@ -32,12 +32,7 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$TREE"
           test "$(git rev-parse HEAD^)" = "$PARENT"
           git bundle create sentient-source.bundle HEAD
-          flyctl deploy -a sentient-validation-runner -c fly.toml --remote-only --build-only --push \
-            --image-label "phase0-$SHA" \
-            --build-arg "SENTIENT_RUNTIME_SHA=$SHA" \
-            --build-arg "SENTIENT_RUNTIME_TREE=$TREE" \
-            --build-arg "SENTIENT_SKILLS_SHA=$SKILLS" \
-            --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=$PARENT"
+          flyctl deploy -a sentient-validation-runner -c fly.toml --remote-only --build-only --push             --image-label "phase0-$SHA"             --build-arg "SENTIENT_RUNTIME_SHA=$SHA"             --build-arg "SENTIENT_RUNTIME_TREE=$TREE"             --build-arg "SENTIENT_SKILLS_SHA=$SKILLS"             --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=$PARENT"
           rm -f sentient-source.bundle
           echo "EXACT_IMAGE_BUILD_PUSH=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
