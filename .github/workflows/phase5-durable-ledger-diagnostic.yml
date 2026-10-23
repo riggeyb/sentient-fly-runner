@@ -1,0 +1,74 @@
+name: Sentient Phase 5 Durable Ledger Diagnostic
+"on":
+  workflow_dispatch:
+    inputs:
+      objective_id:
+        required: true
+        type: string
+      session_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect only the target durable work/spawn records
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          OBJECTIVE_ID: ${{ inputs.objective_id }}
+          SESSION_ID: ${{ inputs.session_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          [[ "$SESSION_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          cat >/tmp/phase5-ledger.mjs <<'NODE'
+          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const objectiveId=String(process.env.PHASE5_OBJECTIVE_ID??"").trim();
+          const sessionId=String(process.env.PHASE5_SESSION_ID??"").trim();
+          const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString});
+          try{
+            const snap=await repo.snapshot();
+            const works=(snap.collaborationActiveWork?.records??[])
+              .filter(x=>x.objectiveId===objectiveId||x.sessionId===sessionId)
+              .map(x=>({
+                workId:x.workId,workKey:x.workKey,status:x.status,revision:x.revision,
+                participantId:x.participantId,reclaimCount:x.reclaimCount,
+                leaseExpiresAt:x.leaseExpiresAt??null
+              }));
+            const spawn=snap.spawn?.records;
+            const executions=(spawn?.executions??[])
+              .filter(x=>x.identity?.taskId===objectiveId)
+              .map(x=>({
+                id:x.id,requestId:x.requestId,role:x.identity.role,status:x.identity.status,
+                parentExecutionId:x.identity.parentExecutionId,
+                reservationReconciled:x.reservationReconciled
+              }));
+            const executionIds=new Set(executions.map(x=>x.id));
+            const results=(spawn?.results??[])
+              .filter(x=>executionIds.has(x.executionId))
+              .map(x=>({executionId:x.executionId,terminalStatus:x.result?.terminalStatus??null}));
+            const episodes=(spawn?.episodes??[])
+              .filter(x=>x.taskId===objectiveId)
+              .map(x=>({id:x.id,executionId:x.executionId,finalOutcome:x.finalOutcome??null}));
+            console.log("PHASE5_ACTIVE_WORK_SANITIZED="+JSON.stringify(works));
+            console.log("PHASE5_SPAWN_EXECUTIONS_SANITIZED="+JSON.stringify(executions));
+            console.log("PHASE5_SPAWN_RESULTS_SANITIZED="+JSON.stringify(results));
+            console.log("PHASE5_SPAWN_EPISODES_SANITIZED="+JSON.stringify(episodes));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally {
+            await repo.close();
+          }
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-ledger.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-ledger.mjs && PHASE5_OBJECTIVE_ID=$OBJECTIVE_ID PHASE5_SESSION_ID=$SESSION_ID node /app/phase5-ledger.mjs; rc=\$?; rm -f /app/phase5-ledger.mjs; exit \$rc'"
+          echo "RESULT=PASS"
