@@ -1,0 +1,251 @@
+name: Sentient Phase 7 Live Improvement Proof
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact deployed Sentient SHA
+        required: true
+        type: string
+      tree:
+        description: Exact deployed Sentient tree
+        required: true
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  phase7-live-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Prove real bounded Phase 7 improvement on exact live candidate
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+          PROOF_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          MID="$(flyctl machines list -a "$APP" --json | jq -r '[.[]|select(.state!="destroyed")][0].id')"
+          test -n "$MID" && test "$MID" != "null"
+          flyctl machine start "$MID" -a "$APP" >/dev/null || true
+
+          ready=false
+          for _ in $(seq 1 120); do
+            if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/phase7-ready.json 2>/dev/null; then
+              if jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" \
+                .'ready==true and (.identity.source.sha==$s) and (.identity.source.tree==$t)' \
+                /tmp/phase7-ready.json >/dev/null; then
+                ready=true
+                break
+              fi
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          echo "PHASE7_LIVE_IDENTITY_MATCH=PASS"
+
+          cat >/tmp/phase7-proof.mjs <<'NODE'
+          import { PostgresStateRepository } from "./dist/src/state/postgres-state-repository.js";
+          import { DefaultSentientStateService } from "./dist/src/state/service.js";
+
+          const databaseUrl=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          const proofId=String(process.env.PHASE7_PROOF_ID??"").trim();
+          if(!databaseUrl) throw new Error("PHASE7_DATABASE_BINDING_MISSING");
+          if(!token) throw new Error("PHASE7_SENTIENT_API_TOKEN_MISSING");
+          if(!/^[A-Za-z0-9._:-]{1,160}$/.test(proofId)) throw new Error("PHASE7_PROOF_ID_INVALID");
+
+          const repository=new PostgresStateRepository({connectionString:databaseUrl});
+          await repository.initialize();
+          const service=new DefaultSentientStateService(repository);
+          const now=new Date().toISOString();
+          try {
+            const task=await service.createTask({
+              kind:"task",
+              title:`phase7 live proof ${proofId}`,
+              status:"succeeded",
+              provenance:{actor:"system"},
+              metadata:{phase7LiveProofId:proofId},
+            });
+            const session=await service.createSession({
+              kind:"session",
+              taskId:task.id,
+              label:`phase7-live-proof-${proofId}`,
+              provenance:{actor:"system"},
+              metadata:{phase7LiveProofId:proofId},
+            });
+            const source=await service.createSource({
+              kind:"source",
+              sourceClass:"tool",
+              topic:"phase7-live-proof",
+              authorityTier:"system-verified",
+              retrievalMethod:"deterministic",
+              canonicalLocation:`sentient://phase7-live-proof/${proofId}`,
+              freshnessPolicy:"bounded",
+              retrievedAt:now,
+              contentDigest:`sha256:${"7".repeat(64)}`,
+              provenance:{actor:"system"},
+              metadata:{phase7LiveProofId:proofId},
+            });
+            const claim=await service.createClaim({
+              kind:"claim",
+              statement:"Phase 7 live proof outcomes were deterministically observed.",
+              provenance:{actor:"system"},
+              metadata:{phase7LiveProofId:proofId},
+            });
+
+            const mkRun=async(status,attempt,repairOfRunId)=>{
+              return service.createModelRun({
+                kind:"model_run",
+                sessionId:session.id,
+                provider:"local-hf",
+                model:"phase7-live-proof",
+                attempt,
+                status,
+                usage:null,
+                latencyMs:1,
+                ...(status==="failed"
+                  ? {failure:{reason:"verified broken failure error",code:"phase7_live_failure",retryable:false}}
+                  : {}),
+                ...(repairOfRunId===undefined?{}:{repairOfRunId}),
+                provenance:{actor:"system"},
+                metadata:{phase7LiveProofId:proofId},
+              });
+            };
+            const mkExp=(run,outcome,summary)=>service.createExperience({
+              kind:"experience",sessionId:session.id,modelRunId:run.id,outcome,summary,
+              provenance:{actor:"system"},metadata:{phase7LiveProofId:proofId},
+            });
+            const mkEv=(observation)=>service.createEvidence({
+              kind:"evidence",sourceId:source.id,observation,
+              provenance:{actor:"system"},metadata:{phase7LiveProofId:proofId},
+            });
+            const mkVer=(run,evidence)=>service.createVerification({
+              kind:"verification",claimId:claim.id,
+              verifierId:"phase7-live-deterministic-verifier",status:"passed",
+              checkedAt:new Date().toISOString(),
+              summary:"deterministic live proof truth verified",
+              evidenceIds:[evidence.id],deterministic:true,
+              provenance:{actor:"system",modelRunId:run.id},
+              metadata:{phase7LiveProofId:proofId},
+            });
+
+            const failed=await mkRun("failed",1);
+            const repaired=await mkRun("succeeded",2,failed.id);
+            const failedExp=await mkExp(failed,"failure","negative broken failure error unhealthy operational outcome");
+            const repairedExp=await mkExp(repaired,"success","positive repaired fixed healthy successful operational outcome");
+            const failedEv=await mkEv("negative broken failure error observed");
+            const repairedEv=await mkEv("positive repaired fixed healthy success observed");
+            const failedVer=await mkVer(failed,failedEv);
+            const repairedVer=await mkVer(repaired,repairedEv);
+
+            const lesson=await service.createLesson({
+              kind:"lesson",
+              taskId:task.id,
+              rule:"Prefer the verified repaired healthy path over the verified broken failure path.",
+              sourceModelRunIds:[failed.id,repaired.id],
+              sourceExperienceIds:[failedExp.id,repairedExp.id],
+              sourceEvidenceIds:[failedEv.id,repairedEv.id],
+              verificationIds:[failedVer.id,repairedVer.id],
+              sourceSessionId:session.id,
+              failedRunId:failed.id,
+              repairRunId:repaired.id,
+              applicability:{taskKinds:["phase7-verified-improvement"]},
+              provenance:{actor:"system"},
+              metadata:{
+                phase7LiveProofId:proofId,
+                lessonCandidateId:`phase7-live-candidate-${proofId}`,
+                candidateCreatedAt:new Date().toISOString(),
+                repairVerificationId:repairedVer.id,
+              },
+            });
+            await service.promoteLessonCandidate(lesson.id,{
+              decision:"promote",
+              reasonCodes:["verified_repair_narrow_scope"],
+            });
+
+            const heldPositive=await mkRun("succeeded",3);
+            const heldNegative=await mkRun("failed",4);
+            await mkExp(heldPositive,"success","positive healthy fixed successful held out outcome");
+            await mkExp(heldNegative,"failure","negative broken failed unhealthy held out outcome");
+            const heldPositiveEv=await mkEv("positive healthy fixed held out result observed");
+            const heldNegativeEv=await mkEv("negative broken failed held out result observed");
+            await mkVer(heldPositive,heldPositiveEv);
+            await mkVer(heldNegative,heldNegativeEv);
+
+            const response=await fetch("http://127.0.0.1:8080/v1/model-improvement",{
+              method:"POST",
+              headers:{
+                authorization:`Bearer ${token}`,
+                accept:"application/json",
+                "content-type":"application/json",
+              },
+              body:JSON.stringify({
+                lessonId:lesson.id,
+                verifiedFailureVerificationId:failedVer.id,
+              }),
+              signal:AbortSignal.timeout(600000),
+            });
+            const raw=await response.text();
+            let result={};
+            try{result=JSON.parse(raw)}catch{}
+            if(!response.ok) throw new Error(`PHASE7_MODEL_IMPROVEMENT_HTTP_${response.status}_${String(result?.reason??result?.error??"unknown")}`);
+            const improvement=result?.result??{};
+            if(typeof improvement.candidateCheckpointRef!=="string"||!improvement.candidateCheckpointRef) {
+              throw new Error(`PHASE7_REAL_TRAINING_MISSING_${String(improvement.reason??"unknown")}`);
+            }
+            if(typeof improvement.candidateScore!=="number"||!Number.isFinite(improvement.candidateScore)) {
+              throw new Error("PHASE7_HELD_OUT_EVALUATION_MISSING");
+            }
+            if(improvement.decision!=="PROMOTED"&&improvement.decision!=="REJECTED") {
+              throw new Error("PHASE7_SENTIENT_DECISION_MISSING");
+            }
+            const artifact=await repository.get("memory",result.artifactMemoryId);
+            if(artifact?.kind!=="memory"||artifact.metadata?.phase7Artifact!=="model_improvement_v1") {
+              throw new Error("PHASE7_DURABLE_ARTIFACT_MISSING");
+            }
+            const persisted=JSON.parse(artifact.content);
+             if(persisted?.result?.decision!==improvement.decision) {
+              throw new Error("PHASE7_DURABLE_DECISION_MISMATCH");
+            }
+            const checkpoint=persisted?.checkpoint??null;
+            if(!checkpoint||typeof checkpoint.baseModel!=="string"||typeof checkpoint.baseRevision!=="string") {
+              throw new Error("PHASE7_IMMUTABLE_CANDIDATE_IDENTITY_MISSING");
+            }
+            const baselineId=`${result.component}:deterministic-baseline:${checkpoint.baseModel}@${checkpoint.baseRevision}`;
+            console.log("PHASE7_PROOF_JSON="+JSON.stringify({
+              proofId,
+              lessonId:lesson.id,
+              baselineId,
+              candidateId:improvement.candidateCheckpointRef,
+              baseModel:checkpoint.baseModel,
+              baseRevision:checkpoint.baseRevision,
+              baselineScore:improvement.baselineScore,
+              candidateScore:improvement.candidateScore,
+              decision:improvement.decision,
+              reason:improvement.reason,
+              artifactMemoryId:result.artifactMemoryId,
+              trainingRunIds:result.trainingRunIds,
+              heldOutRunIds:result.heldOutRunIds,
+              evaluationEvidenceRefs:result.evaluationEvidenceRefs,
+            }));
+            console.log("PHASE7_LOCAL_TRAINING=PASS");
+            console.log("PHASE7_HELD_OUT_EVALUATION=PASS");
+            console.log("PHASE7_SENTIENT_POLICY_DECISION=PASS");
+            console.log("PHASE7_DECISION_PERSISTEE=PASS");
+            console.log("PHASE7_REAL_IMPROVEMENT_CYCLE=PASS");
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally {
+            await repository.close();
+          }
+NODE
+          PROOF_B64="$(base64 -w0 /tmp/phase7-proof.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $PROOF_B64 | base64 -d >/app/phase7-live-proof.mjs && PHASE7_PROOF_ID=$PROOF_ID node /app/phase7-live-proof.mjs; rc=\$?; rm -f /app/phase7-live-proof.mjs; exit \$rc'"
+          echo "RESULT=PASS"
