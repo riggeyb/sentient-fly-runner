@@ -44,7 +44,7 @@ jobs:
             httpStatus:r.status,error:v.error??null,reason:v.reason??null,
             DEPLOYMENT_ID:v.DEPLOYMENT_ID??null,REQUESTED_SHA:v.REQUESTED_SHA??null,REQUESTED_TREE:v.REQUESTED_TREE??null,
             DEPLOYED_SHA:v.DEPLOYED_SHA??null,DEPLOYED_TREE:v.DEPLOYED_TREE??null,SKILLS_SHA:v.SKILLS_SHA??null,
-            BUILD_RESULT:v.BUILD_RESULT??null,HEALTHZ_STATUS:v.HEALTHZ?.statusCode??null,
+            BUILD_RESULT:v.BUILD_RESULT??null,BUILD_FAILURE:v.BUILD_FAILURE??null,RATE_LIMIT_STATE:v.RATE_LIMIT_STATE??null,RETRY_LIMIT_STATE:v.RETRY_LIMIT_STATE??null,HEALTHZ_STATUS:v.HEALTHZ?.statusCode??null,
             READYZ_STATUS:v.READYZ?.statusCode??null,READYZ_FAILURE:v.READYZ_FAILURE??null,
             RESOURCE_CHANGE_STATUS:v.RESOURCE_CHANGE_STATUS??null
           };
@@ -77,4 +77,4 @@ jobs:
           echo "READYZ=PASS"
           echo "LIVE_SENTIENT_EXACT_IDENTITY=PASS"
           echo "CERTIFICATION_TARGET_READY_TO_FREEZE=true"
-          echo "SECRET_VALUES_EXPOSGD=false"
+          echo "SECRET_VALUES_EXPOSED=false"
