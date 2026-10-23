@@ -1,0 +1,36 @@
+name: Phase1 Authority Staging Test
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact Sentient staging ref
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build and test Phase1 authority staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "STAGING_HEAD=$(git rev-parse HEAD)"
+          echo "STAGING_TREE=$(git rev-parse HEAD^{tree})"
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/production-phase3-cognition.test.js
+          echo "PHASE1_AUTHORITY_STAGING=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
