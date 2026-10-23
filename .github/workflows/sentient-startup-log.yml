@@ -20,15 +20,15 @@ jobs:
         run: |
           set -euo pipefail
           app=sentient-validation-runner
-          image=registry.fly.io/sentient-validation-runner:phase0-997f59484e5ee1455d8eaf3694af487f47b7b24e
+          image=registry.fly.io/sentient-validation-runner:phase0-6965f80c7a50356407078fa5ef8fdd36377f1d44
           script="$(cat <<'NODE'
           import { createLocalRepositoryActionExecutorV1 } from "/app/dist/src/action-fabric/local-repository-executor.js";
           import { ProductionRepositoryCapabilityV1 } from "/app/dist/src/application/production-repository.js";
 
           const source = {
             repository: "riggeyb/sentient",
-            commitSha: "997f59484e5ee1455d8eaf3694af487f47b7b24e",
-            treeSha: "567f2675dc1e15ea7232f67ae39e15e6473ba03b",
+            commitSha: "6965f80c7a50356407078fa5ef8fdd36377f1d44",
+            treeSha: "92ba0474b904b2fd3f622cc60554bf578ee4d667",
           };
           const executor = createLocalRepositoryActionExecutorV1({
             repositoryPaths: { "riggeyb/sentient": "/opt/sentient-source" },
