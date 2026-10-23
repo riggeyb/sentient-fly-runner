@@ -1,0 +1,38 @@
+name: Sentient Canonical Focused Diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact canonical Sentient SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Fence exact canonical SHA
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git branch -r --contains HEAD | grep -c 'origin/sentient-production-composition-20261017' || true)" -ge 0
+          echo "SOURCE_IDENTITY=PASS"
+      - name: Build exact candidate
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Run failing self-execution regression with full TAP
+        run: |
+          node --test dist/test/job2-self-execution.test.js
