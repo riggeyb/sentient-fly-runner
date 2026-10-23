@@ -1,0 +1,94 @@
+name: Phase0 Deploy Recovery Root Exact
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase0-deploy-recovery-root-exact
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET_SHA: 5d642c9e337e99639a4af8640249cc8f27595764
+      TARGGET_TREE: 5a895ad4403792dfd64f004f392dd55ce7c1b63
+      GOVERNOR_APP: sentient-deployment-governor
+      RECOVERY_APP: sentient-governor-recovery-root
+      RECOVERY_POLICY_REVISION: SENTIENT_GOVERNOR_RECOVERY_V1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 5d642c9e337e99639a4af8640249cc8f27595764
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy exact repaired recovery root
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
+          echo "CANONICAL_FENCE=PASS"
+
+          machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
+          gid="$(printf '%s' "$machines" | jq -r '.[0].id')"
+          gstate="$(printf '%s' "$machines" | jq -r '.[0].state')"
+          test -n "$gid"
+          if [ "$gstate" != "started" ]; then
+            flyctl machine start "$gid" -a "$GOVERNOR_APP" >/dev/null
+          fi
+          for _ in $(seq 1 60); do
+            gstate="$(flyctl machines list -a "$GOVERNOR_APP" --json | jq -r --arg id "$gid" '.[] | select(.id==$id) | .state' | head -n1)"
+            [ "$gstate" = "started" ] && break
+            sleep 2
+          done
+          test "$gstate" = "started"
+
+          DB="$(flyctl ssh console -a "$GOVERNOR_APP" -C "node -e 'const v=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??\"\").trim();if(!v)process.exit(2);process.stdout.write(v)'" 2>/dev/null)"
+          test -n "$DB"
+          echo "::add-mask::$DB"
+          printf 'SENTIENT_DATABASE_BOOTSTRAP_URL=%s\n' "$DB" | flyctl secrets import -a "$RECOVERY_APP" --stage >/dev/null
+          unset DB
+          echo "RECOVERY_DATABASE_AUTHORITY_TRANSFER=PASS"
+
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
+          flyctl deploy \
+            --app "$RECOVERY_APP" \
+            --config fly.recovery.toml \
+            --remote-only \
+            --yes \
+            --ha=false
+          echo "RECOVERY_ROOT_EXACT_SOURCE_DEPLOY=PASS"
+
+          healthy=false
+          for _ in $(seq 1 120); do
+            code="$(curl -sS --max-time 5 -o /tmp/recovery-health.json -w '%{http_code}' "https://${RECOVERY_APP}.fly.dev/healthz" || true)"
+            if [ "$code" = "200" ] && jq -e --arg rev "$RECOVERY_POLICY_REVISION" \
+              '.status=="ok"
+               and .role=="INDEPENDENT_FLY_GOVERNOR_RECOVERY_ROOT"
+               and .recoveryPolicyRevision==$rev
+               and .oldGovernorRequired==false
+               and .netlifyRequired==false
+               and .githubActionsRequiredForRecoveryDesign==false' \
+              /tmp/recovery-health.json >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          test "$healthy" = "true"
+          jq '{status,role,recoveryPolicyRevision,oldGovernorRequired,netlifyRequired,githubActionsRequiredForRecoveryDesign}' /tmp/recovery-health.json
+          echo "RECOVERY_ROOT_FLY_NATIVE=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
