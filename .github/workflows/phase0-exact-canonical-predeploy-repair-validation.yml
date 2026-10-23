@@ -1,20 +1,22 @@
 name: Phase0 Exact Canonical Predeploy Repair Validation
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      TARGET_SHA: d2ae0d7d77ebb4c2ad52d9bd4ca667f860071cb3
-      TARGET_TREE: 715b9323f7928d2fa31a43e4d4fae51b2f4b2980
+      TARGET_SHA: 64d46db2e6a78048a07f81d683ce08ec7d95e367
+      TARGET_TREE: dd2261700980b3da0764dcfe7e865b6bf3174a29
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: d2ae0d7d77ebb4c2ad52d9bd4ca667f860071cb3
+          ref: 64d46db2e6a78048a07f81d683ce08ec7d95e367
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
@@ -24,36 +26,34 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
-          echo "CANONICAL_FENCE=PASS"
       - name: Install
         run: npm ci --no-audit --no-fund
       - name: Strict build
         run: npm run build
-      - name: Run required predeploy repair and Phase0 regressions
+      - name: Required predeploy regressions
         shell: bash
         run: |
           set -euo pipefail
           node --test \
-          dist/test/phase0-control-recovery.test.js \
-          dist/test/phase0-engineering-readiness.test.js \
-          dist/test/deployment-governor-boundaries.test.js \
-          dist/test/deployment-governor-cloud-bootstrap.test.js \
-          dist/test/deployment-governor-fly-token-durability.test.js \
-          dist/test/deployment-governor-skills-fence.test.js \
-          dist/test/deployment-governor.test.js \
-          dist/test/phase1-core-runtime.test.js \
-          dist/test/phase2-dependency-boundary.test.js \
-          dist/test/phase2-skill-execution.test.js \
-          dist/test/phase3-cognitive-components.test.js \
-          dist/test/phase3-local-hf-adapter.test.js \
-          dist/test/phase4-multistep-autonomy.test.js \
-          dist/test/phase5-collaborative-convergence.test.js \
-          dist/test/phase5-knowledge-contracts.test.js \
-          dist/test/phase6-capability-integration.test.js \
-          dist/test/phase7-local-hf-feature-head.test.js \
-          dist/test/phase7-model-improvement.test.js \
-          dist/test/job2-self-execution.test.js \
-          dist/test/job2-production-convergence.test.js
+            dist/test/phase0-control-recovery.test.js \
+            dist/test/phase0-engineering-readiness.test.js \
+            dist/test/deployment-governor-boundaries.test.js \
+            dist/test/deployment-governor-cloud-bootstrap.test.js \
+            dist/test/deployment-governor-fly-token-durability.test.js \
+            dist/test/deployment-governor-skills-fence.test.js \
+            dist/test/deployment-governor.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase2-dependency-boundary.test.js \
+            dist/test/phase2-skill-execution.test.js \
+            dist/test/phase3-cognitive-components.test.js \
+            dist/test/phase3-local-hf-adapter.test.js \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/phase5-knowledge-contracts.test.js \
+            dist/test/phase6-capability-integration.test.js \
+            dist/test/phase7-local-hf-feature-head.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/job2-self-execution.test.js \
+            dist/test/job2-production-convergence.test.js
           echo "PREDEPLOY_TESTS=PASS"
-      - name: Secret exposure invariant
-        run: echo "SECRET_VALUES_EXPOSGD=false"
+          echo "SECRET_VALUES_EXPOSED=false"
