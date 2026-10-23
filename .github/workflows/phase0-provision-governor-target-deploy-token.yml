@@ -22,16 +22,24 @@ jobs:
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Provision target-scoped deploy token into Governor
+      - name: Provision bounded deploy token into Governor
         shell: bash
         run: |
           set -euo pipefail
 
-          target_token="$(flyctl tokens create deploy --app "$TARGET_APP")"
+          flyctl tokens debug -t "$FLY_API_TOKEN" >/tmp/base-token.json
+          org_id="$(jq -r '.. | objects | select(.type?=="Organization") | .body.id' /tmp/base-token.json | head -n1)"
+          test "$org_id" -gt 0
+          printf '[{"type":"Organization","body":{"id":%s,"mask":"rwcC"}}]' "$org_id" >/tmp/caveats.json
+
+          raw="$(flyctl tokens attenuate -t "$FLY_API_TOKEN" -f /tmp/caveats.json)"
+          target_token="$(printf '%s\n' "$raw" | awk 'NF{v=$NF} END{print v}')"
+          unset raw
           test -n "$target_token"
           test "$target_token" != "$FLY_API_TOKEN"
           echo "::add-mask::$target_token"
 
+          FLY_API_TOKEN="$target_token" flyctl status -a "$TARGET_APP" >/dev/null
           flyctl secrets set --app "$GOVERNOR_APP"             SENTIENT_TARGET_DEPLOYMENT_FLY_TOKEN="$target_token" >/dev/null
           unset target_token
 
