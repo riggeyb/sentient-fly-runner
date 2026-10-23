@@ -35,7 +35,7 @@ jobs:
           if(!token) process.exit(20);
           const r=await fetch("http://127.0.0.1:8080/v1/deployments/sentient",{
             method:"POST",
-            headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":"phase0-certification-reconciliation-public"},
+            headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":"phase0-certification-reconciliation-64d46db2"},
             body:JSON.stringify({sha,tree,skillsSha}),
             signal:AbortSignal.timeout(1100000)
           });
