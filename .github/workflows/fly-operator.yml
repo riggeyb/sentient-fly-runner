@@ -61,7 +61,7 @@ jobs:
           if(b?.READYZ&&typeof b.READYZ==="object")out.READYZ={statusCode:b.READYZ.statusCode??null,body:b.READYZ.body??null};
           console.log(`HTTP_STATUS=${r.status}`);console.log(`DATA=${JSON.stringify(out)}`);
           if(r.status===401||r.status===403)throw new Error("GOVERNOR_DEPLOY_AUTH_FAILED");
-          if(r.status>=300&&r.status<400	throw new Error("GOVERNOR_DEPLOY_REDIRECT_REJECTED");
+          if(r.status>=300&&r.status<400)throw new Error("GOVERNOR_DEPLOY_REDIRECT_REJECTED");
           if(!r.ok)throw new Error(`GOVERNOR_DEPLOY_HTTP_${r.status}`);
           if(b?.REQUESTED_SHA!==a.sha||b?.REQUESTED_TREE!==a.tree||b?.DEPLOYED_SHA!==a.sha||b?.DEPLOYED_TREE!==a.tree||b?.BUILD_RESULT!=="SUCCEEDED")throw new Error("GOVERNOR_DEPLOY_IDENTITY_MISMATCH");
           console.log("DEPLOY_REQUEST=PASS");console.log("DEPLOY_EXACT_SHA=PASS");console.log("DEPLOY_EXACT_TREE=PASS");console.log("SECRET_VALUES_EXPOSED=false");console.log("RESULT=PASS");
