@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "5d642c9e337e99639a4af8640249cc8f27595764"
-          test "$(git rev-parse 'HEAD^{tree}')" = "5a895ad4403792dfd64f004f392dd55ce7c1b63"
+          test "$(git rev-parse 'HEAD^{tree}')" = "5a895ad4403792dffd64f004f392dd55ce7c1b63"
 
           machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
           gid="$(printf '%s' "$machines" | jq -r '.[0].id')"
