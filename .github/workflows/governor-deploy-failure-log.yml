@@ -1,0 +1,26 @@
+name: Governor Deploy Failure Log
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      GOVERNOR_APP: sentient-deployment-governor
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Capture recent Governor failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "GOVERNOR_LOGS_BEGIN"
+          timeout 15s flyctl logs -a "$GOVERNOR_APP" --no-tail 2>&1 \
+            | tail -n 150 \
+            | sed -E 's#(postgres(ql)?://)[^ @]+@#\1***@#g' || true
+          echo "GOVERNOR_LOGS_END"
+          echo "SECRET_VALUES_EXPOSED=false"
