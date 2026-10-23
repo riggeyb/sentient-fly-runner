@@ -1,0 +1,48 @@
+name: Engineering Job Durable Status Diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Read durable EngineeringJob and worker machine status
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          JOB_ID: ${{ inputs.job_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$JOB_ID" =~ ^[0-9a-f-]{36}$ ]]
+          cat >/tmp/job-status.mjs <<'NODE'
+          import { PostgresEngineeringJobRepository } from "/app/dist/src/engineering/postgres-jobs.js";
+          const id=String(process.env.ENGINEERING_JOB_ID??"").trim();
+          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!db) throw new Error("DATABASE_BINDING_MISSING");
+          const repo=new PostgresEngineeringJobRepository(db);
+          try{
+            const job=await repo.get(id);
+            if(!job) throw new Error("ENGINEERING_JOB_NOT_FOUND");
+            const safe={
+              jobId:job.jobId,status:job.status,startSha:job.startSha,startTree:job.startTree,
+              workerMachineId:job.workerMachineId,buildResult:job.buildResult,endSha:job.endSha,endTree:job.endTree,
+              changedFiles:job.changedFiles,testResult:job.testResult,pushResult:job.pushResult,errorCode:job.errorCode,
+              createdAt:job.createdAt,startedAt:job.startedAt,completedAt:job.completedAt,
+              stepNames:job.steps.map(s=>({name:s.name??null,category:s.category??null,status:s.status??null}))
+            };
+            console.log("ENGINEERING_JOB_DURABLE="+JSON.stringify(safe));
+          } finally { await repo.close(); }
+          NODE
+          B64="$(base64 -w0 /tmp/job-status.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/job-status.mjs && ENGINEERING_JOB_ID=$JOB_ID node /app/job-status.mjs; rc=\$?; rm -f /app/job-status.mjs; exit \$rc'"
+          echo "WORKER_MACHINE_LOOKUP_BEGIN"
+          flyctl machines list -a "$APP" --json | jq -c '[.[] | {id:.id,state:.state,name:.name,created_at:.created_at,updated_at:.updated_at}]'
+          echo "SECRET_VALUES_EXPOSED=false"
