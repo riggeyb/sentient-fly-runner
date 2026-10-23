@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 30
     env:
       TARGET_SHA: 5d642c9e337e99639a4af8640249cc8f27595764
-      TARGET_TREE: 5a895ad4403792dffd64f004f392dd55ce7c1b63
+      TARGGET_TREE: 5a895ad4403792dfd64f004f392dd55ce7c1b63
       RECOVERY_POLICY_REVISION: SENTIENT_GOVERNOR_RECOVERY_V1
       GOVERNOR_APP: sentient-deployment-governor
       RECOVERY_APP: sentient-governor-recovery-root
@@ -71,19 +71,19 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
           flyctl deploy \
-            --app "$RECOVERV_APP" \
+            --app "$RECOVERY_APP" \
             --config fly.recovery.toml \
             --remote-only \
             --yes \
             --ha=false
-          echo "RECOVERV_ROOT_EXACT_SOURCE_DEPLOY=PASS"
+          echo "RECOVERY_ROOT_EXACT_SOURCE_DEPLOY=PASS"
       - name: Verify recovery root health
         shell: bash
         run: |
           set -euo pipefail
           ok=false
           for _ in $(seq 1 120); do
-            code="$(curl -sS --max-time 5 -o /tmp/recovery-health.json -w '%{http_code}' "https://${RECOVERV_APP}.fly.dev/healthz" || true)"
+            code="$(curl -sS --max-time 5 -o /tmp/recovery-health.json -w '%{http_code}' "https://${RECOVERY_APP}.fly.dev/healthz" || true)"
             if [ "$code" = "200" ] && jq -e --arg rev "$RECOVERY_POLICY_REVISION" \
               '.status=="ok" and .role=="INDEPENDENT_FLY_GOVERNOR_RECOVERY_ROOT" and .recoveryPolicyRevision==$rev and .oldGovernorRequired==false and .netlifyRequired==false and .githubActionsRequiredForRecoveryDesign==false' \
               /tmp/recovery-health.json >/dev/null; then
@@ -93,7 +93,7 @@ jobs:
             sleep 2
           done
           test "$ok" = "true"
-          echo "RECOVERV_ROOT_FLY_NATIVE=PASS"
+          echo "RECOVERY_ROOT_FLY_NATIVE=PASS"
       - name: Invoke exact Governor recovery from inside recovery root
         shell: bash
         env:
