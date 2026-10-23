@@ -11,15 +11,15 @@ jobs:
     timeout-minutes: 20
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      SHA: b58b7e44f156ebbd62dbc302d8c62b9ddb10c381
-      TREE: 8a6f70aa95402e0c35f30234992727f5c083d639
-      PARENT: d83342897d0c2ca38ec4f3e38d795b633af4dc66
+      SHA: 997f59484e5ee1455d8eaf3694af487f47b7b24e
+      TREE: 567f2675dc1e15ea7232f67ae39e15e6473ba03b
+      PARENT: 326fa75c84aea4cbf5077e1e8a8a68cad7975c90
       SKILLS: d85eb820f18ad6d944ab93b03150d606273891a5
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: b58b7e44f156ebbd62dbc302d8c62b9ddb10c381
+          ref: 997f59484e5ee1455d8eaf3694af487f47b7b24e
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
