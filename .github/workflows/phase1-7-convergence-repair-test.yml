@@ -27,68 +27,76 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          path=Path("src/application/production-model-improvement.ts")
-          src=path.read_text()
-          typo="PHASE7_MINIMUM_IMPROVEMEMENT_V1"
+          path = Path("src/application/production-model-improvement.ts")
+          src = path.read_text()
+          typo = "PHASE7_MINIMUM_IMPROVEMEMENT_V1"
+          fixed = "PHASE7_MINIMUM_IMPROVEMENT_V1"
           if src.count(typo) != 2:
               raise SystemExit(f"unexpected Phase7 threshold typo count: {src.count(typo)}")
-          bad='decisionOwner:"SENTIENT_RUNTIME as const,'
+          bad = 'decisionOwner:"SENTIENT_RUNTIME as const,'
+          good = 'decisionOwner:"SENTIENT_RUNTIME" as const,'
           if src.count(bad) != 1:
               raise SystemExit(f"unexpected Phase7 decision-owner defect count: {src.count(bad)}")
-          src=src.replace(typo,"PHASE7_MINIMUM_IMPROVEMEMENT_V1")
-          src=src.replace(bad,'decisionOwner:"SENTIENT_RUNTIME" as const,')
+          src = src.replace(typo, fixed)
+          src = src.replace(bad, good)
+          if typo in src or bad in src:
+              raise SystemExit("Phase7 transcription repair did not fully apply")
           path.write_text(src)
 
-          test=Path("test/production-model-improvement.test.ts")
-          body=test.read_text()
-          needle='assert.equal(result.result.candidateScore, 1);'
+          test = Path("test/production-model-improvement.test.ts")
+          body = test.read_text()
+          needle = 'assert.equal(result.result.candidateScore, 1);'
           if body.count(needle) != 1:
               raise SystemExit(f"unexpected Phase7 result assertion count: {body.count(needle)}")
-          extra='''\n  assert.match(result.datasetId, /^phase7-dataset:sha256:[0-9a-f]{64}$/);
-          assert.match(result.baselineId, /^phase7-baseline:sha256:[0-9a-f]{64}$/);
-          assert.match(result.candidateId ?? "", /^phase7-candidate:sha256:[0-9a-f]{64}$/);
-          assert.match(result.evaluationId, /^phase7-evaluation:sha256:[0-9a-f]{64}$/);
-          assert.equal(result.promotionPolicyId, "sentient-phase7-material-improvement-policy/v1");
-          assert.equal(result.promotionThreshold, 0.01);
-          assert.equal(result.promotionDecisionOwner, "SENTIENT_RUNTIME");
-          assert.equal(result.modelMayProposeImprovement, true);
-          assert.equal(result.modelMayPromoteItself, false);
-          assert.deepEqual(result.evaluationEligibility, { heldOutDisjoint: true, bothLabels: true });'
-          body=body.replace(needle, needle+extra, 1)
+          extra_lines = [
+              '  assert.match(result.datasetId, /^phase7-dataset:sha256:[0-9a-f]{64}$/);',
+              '  assert.match(result.baselineId, /^phase7-baseline:sha256:[0-9a-f]{64}$/);',
+              '  assert.match(result.candidateId ?? "", /^phase7-candidate:sha256:[0-9a-f]{64}$/);',
+              '  assert.match(result.evaluationId, /^phase7-evaluation:sha256:[0-9a-f]{64}$/);',
+              '  assert.equal(result.promotionPolicyId, "sentient-phase7-material-improvement-policy/v1");',
+              '  assert.equal(result.promotionThreshold, 0.01);',
+              '  assert.equal(result.promotionDecisionOwner, "SENTIENT_RUNTIME");',
+              '  assert.equal(result.modelMayProposeImprovement, true);',
+              '  assert.equal(result.modelMayPromoteItself, false);',
+              '  assert.deepEqual(result.evaluationEligibility, { heldOutDisjoint: true, bothLabels: true });',
+          ]
+          body = body.replace(needle, needle + "\n" + "\n".join(extra_lines), 1)
 
-          persisted_needle='assert.equal(persisted.checkpoint?.baseRevision, PHASE7_HF_FEATURE_MODEL_REVISION_V1);'
+          persisted_needle = 'assert.equal(persisted.checkpoint?.baseRevision, PHASE7_HF_FEATURE_MODEL_REVISION_V1);'
           if body.count(persisted_needle) != 1:
               raise SystemExit(f"unexpected Phase7 persisted assertion count: {body.count(persisted_needle)}")
-          persisted_extra='''\n  const lifecycle = JSON.parse(artifact.content) as {
-            datasetId: string;
-            baselineId: string;
-            candidateId: string | null;
-            evaluationId: string;
-            promotionPolicy: {
-              policyId: string;
-              minimumImprovement: number;
-              decisionOwner: string;
-              modelMayProposeImprovement: boolean;
-              modelMayPromoteItself: boolean;
-            };
-            evaluationEligibility: { heldOutDisjoint: boolean; bothLabels: boolean };
-          };
-          assert.equal(lifecycle.datasetId, result.datasetId);
-          assert.equal(lifecycle.baselineId, result.baselineId);
-          assert.equal(lifecycle.candidateId, result.candidateId);
-          assert.equal(lifecycle.evaluationId, result.evaluationId);
-          assert.equal(lifecycle.promotionPolicy.decisionOwner, "SENTIENT_RUNTIME");
-          assert.equal(lifecycle.promotionPolicy.modelMayProposeImprovement, true);
-          assert.equal(lifecycle.promotionPolicy.modelMayPromoteItself, false);
-          assert.deepEqual(lifecycle.evaluationEligibility, { heldOutDisjoint: true, bothLabels: true });
-          assert.equal(artifact.metadata?.datasetId, result.datasetId);
-          assert.equal(artifact.metadata?.baselineId, result.baselineId);
-          assert.equal(artifact.metadata?.candidateId, result.candidateId);
-          assert.equal(artifact.metadata?.evaluationId, result.evaluationId);
-          assert.equal(artifact.metadata?.promotionDecisionOwner, "SENTIENT_RUNTIME");
-          assert.equal(artifact.metadata?.modelMayProposeImprovement, true);
-          assert.equal(artifact.metadata?.modelMayPromoteItself, false);'
-          body=body.replace(persisted_needle, persisted_needle+persisted_extra, 1)
+          persisted_lines = [
+              '  const lifecycle = JSON.parse(artifact.content) as {',
+              '    datasetId: string;',
+              '    baselineId: string;',
+              '    candidateId: string | null;',
+              '    evaluationId: string;',
+              '    promotionPolicy: {',
+              '      policyId: string;',
+              '      minimumImprovement: number;',
+              '      decisionOwner: string;',
+              '      modelMayProposeImprovement: boolean;',
+              '      modelMayPromoteItself: boolean;',
+              '    };',
+              '    evaluationEligibility: { heldOutDisjoint: boolean; bothLabels: boolean };',
+              '  };',
+              '  assert.equal(lifecycle.datasetId, result.datasetId);',
+              '  assert.equal(lifecycle.baselineId, result.baselineId);',
+              '  assert.equal(lifecycle.candidateId, result.candidateId);',
+              '  assert.equal(lifecycle.evaluationId, result.evaluationId);',
+              '  assert.equal(lifecycle.promotionPolicy.decisionOwner, "SENTIENT_RUNTIME");',
+              '  assert.equal(lifecycle.promotionPolicy.modelMayProposeImprovement, true);',
+              '  assert.equal(lifecycle.promotionPolicy.modelMayPromoteItself, false);',
+              '  assert.deepEqual(lifecycle.evaluationEligibility, { heldOutDisjoint: true, bothLabels: true });',
+              '  assert.equal(artifact.metadata?.datasetId, result.datasetId);',
+              '  assert.equal(artifact.metadata?.baselineId, result.baselineId);',
+              '  assert.equal(artifact.metadata?.candidateId, result.candidateId);',
+              '  assert.equal(artifact.metadata?.evaluationId, result.evaluationId);',
+              '  assert.equal(artifact.metadata?.promotionDecisionOwner, "SENTIENT_RUNTIME");',
+              '  assert.equal(artifact.metadata?.modelMayProposeImprovement, true);',
+              '  assert.equal(artifact.metadata?.modelMayPromoteItself, false);',
+          ]
+          body = body.replace(persisted_needle, persisted_needle + "\n" + "\n".join(persisted_lines), 1)
           test.write_text(body)
           PY
       - name: Install and build
