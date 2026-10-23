@@ -1,0 +1,52 @@
+name: Sentient Phase 7 Live Improvement Proof Dispatch
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact deployed Sentient SHA
+        required: true
+        type: string
+      tree:
+        description: Exact deployed Sentient tree
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  phase7-live-proof-dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Execute the existing shared Phase 7 proof body
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+          PROOF_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path(".github/workflows/phase7-live-proof.yml").read_text()
+          marker = "        run: |\n"
+          if marker not in source:
+              raise SystemExit("phase7_shared_proof_body_missing")
+          body = source.split(marker, 1)[1]
+          normalized = []
+          for line in body.splitlines():
+              if line == "NODE":
+                  normalized.append(line)
+              elif line.startswith("          "):
+                  normalized.append(line[10:])
+              elif line == "":
+                  normalized.append("")
+              else:
+                  raise SystemExit(f"phase7_shared_proof_unexpected_indentation:{line[:40]}")
+          Path("/tmp/phase7-shared-proof.sh").write_text("\n".join(normalized) + "\n")
+          PY
+          bash /tmp/phase7-shared-proof.sh
