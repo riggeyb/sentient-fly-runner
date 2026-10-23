@@ -1,0 +1,45 @@
+name: Recovery Root Machine Diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect recovery-root machine state
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          node --input-type=module - <<'NODE'
+          const token=String(process.env.FLY_API_TOKEN??"").trim();
+          if(!token) throw new Error("FLY_API_TOKEN_MISSING");
+          const app="sentient-governor-recovery-root";
+          const r=await fetch(`https://api.machines.dev/v1/apps/${app}/machines`,{
+            headers:{authorization:`Bearer ${token}`,accept:"application/json"},
+            signal:AbortSignal.timeout(20000)
+          });
+          console.log(`HTTP_STATUS=${r.status}`);
+          if(!r.ok) throw new Error(`MACHINES_HTTP_${r.status}`);
+          const rows=await r.json();
+          const safe=(Array.isArray(rows)?rows:[]).map(m=>({
+            id:m.id??null,
+            name:m.name??null,
+            state:m.state??null,
+            region:m.region??null,
+            version:m.version??null,
+            image:m?.config?.image??m?.image_ref?.tag??null,
+            imageDigest:m?.image_ref?.digest??null,
+            checks:Array.isArray(m.checks)?m.checks.map(c=>({name:c.name??null,status:c.status??null,output:String(c.output??"").slice(0,500),updated_at:c.updated_at??null})):[],
+            events:Array.isArray(m.events)?m.events.slice(0,8).map(e=>({
+              type:e.type??null,status:e.status??null,timestamp:e.timestamp??null,
+              exit_code:e?.request?.exit_event?.exit_code??null,
+              guest_exit_code:e?.request?.exit_event?.guest_exit_code??null,
+              oom_killed:e?.request?.exit_event?.oom_killed??null,
+              error:String(e?.request?.exit_event?.error??"").slice(0,300)
+            })):[]
+          }));
+          console.log(`DATA=${JSON.stringify(safe)}`);
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
