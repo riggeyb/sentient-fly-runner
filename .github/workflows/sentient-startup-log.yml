@@ -13,7 +13,7 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl logs -a sentient-validation-runner --no-tail | tail -n 200
-      - name: Diagnose exact live repository witness
+      - name: Diagnose exact live repository witness as runtime user
         shell: bash
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -22,14 +22,12 @@ jobs:
           app=sentient-validation-runner
           id="$(flyctl machines list -a "$app" --json | jq -r '.[0].id')"
           state="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
-          if [ "$state" != started ]; then
-            flyctl machine start "$id" -a "$app" >/dev/null || true
-          fi
+          if [ "$state" != started ]; then flyctl machine start "$id" -a "$app" >/dev/null || true; fi
           for _ in $(seq 1 30); do
             state="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
             [ "$state" = started ] && break
             sleep 2
           done
           test "$state" = started
-          flyctl ssh console -a "$app" -C "sh -lc 'cd /opt/sentient-source || exit 40; echo REPOSITORY_WITNESS_BEGIN; git rev-parse HEAD; git rev-parse HEAD^{tree}; git status --short --branch; set +e; git fsck --connectivity-only --no-reflogs; fsck_rc=\$?; tmp=\$(mktemp -d); git clone --local --no-hardlinks --no-checkout -- /opt/sentient-source \$tmp/workspace; clone_rc=\$?; if [ \$clone_rc -eq 0 ]; then git -C \$tmp/workspace checkout --detach --force 997f59484e5ee1455d8eaf3694af487f47b7b24e; checkout_rc=\$?; else checkout_rc=99; fi; rm -rf \$tmp; echo REPO_FSCK_EXIT=\$fsck_rc; echo REPO_CLONE_EXIT=\$clone_rc; echo REPO_CHECKOUT_EXIT=\$checkout_rc; echo REPOSITORY_WITNESS_END; exit 0'"
+          flyctl ssh console -a "$app" -C "sh -lc 'echo OWNER_WITNESS_BEGIN; stat -c "%u:%g %U:%G %n" /opt/sentient-source /opt/sentient-source/.git; echo OWNER_WITNESS_END; su -s /bin/sh node -c "cd /opt/sentient-source || exit 40; echo NODE_REPOSITORY_WITNESS_BEGIN; git rev-parse HEAD; git rev-parse HEAD^{tree}; git status --short --branch; set +e; git fsck --connectivity-only --no-reflogs; fsck_rc=\\$?; tmp=\\$(mktemp -d); git clone --local --no-hardlinks --no-checkout -- /opt/sentient-source \\$tmp/workspace; clone_rc=\\$?; if [ \\$clone_rc -eq 0 ]; then git -C \\$tmp/workspace checkout --detach --force 997f59484e5ee1455d8eaf3694af487f47b7b24e; checkout_rc=\\$?; else checkout_rc=99; fi; rm -rf \\$tmp; echo NODE_REPO_FSCK_EXIT=\\$fsck_rc; echo NODE_REPO_CLONE_EXIT=\\$clone_rc; echo NODE_REPO_CHECKOUT_EXIT=\\$checkout_rc; echo NODE_REPOSITORY_WITNESS_END; exit 0"'"
           echo "SECRET_VALUES_EXPOSED=false"
