@@ -5,119 +5,76 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: phase0-deploy-sentient-exact
-  cancel-in-progress: false
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      GOVERNOR_APP: sentient-deployment-governor
-      SENTIENT_APP: sentient-validation-runner
-      TARGET_SHA: d2ae0d7d77ebb4c2ad52d9bd4ca667f860071cb3
-      TARGET_TREE: 715b9323f7928d2fa31a43e4d4fae51b2f4b2980
-      SKILLS_SHA: d85eb820f18ad6d944ab93b03150d606273891a5
+      S: 64d46db2e6a78048a07f81d683ce08ec7d95e367
+      T: dd2261700980b3da0764dcfe7e865b6bf3174a29
+      K: d85eb820f18ad6d944ab93b03150d606273891a5
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy exact Sentient candidate through recovered Governor and verify live identity
+      - name: Deploy exact Sentient through recovered Governor
         shell: bash
         run: |
           set -euo pipefail
-
-          machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
-          gid="$(printf '%s' "$machines" | jq -r '.[0].id')"
-          gstate="$(printf '%s' "$machines" | jq -r '.[0].state')"
-          test -n "$gid"
-          if [ "$gstate" != "started" ]; then
-            flyctl machine start "$gid" -a "$GOVERNOR_APP" >/dev/null
-          fi
-
-          cat >/tmp/deploy-sentient.mjs <<'NODE'
-          const sha=process.env.TARGET_SHA;
-          const tree=process.env.TARGET_TREE;
-          const skillsSha=process.env.SKILLS_SHA;
+          app=sentient-deployment-governor
+          id="$(flyctl machines list -a "$app" --json | jq -r '.[0].id')"
+          flyctl machine start "$id" -a "$app" >/dev/null || true
+          for _ in $(seq 1 60); do
+            st="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
+            [ "$st" = started ] && break
+            sleep 2
+          done
+          test "$st" = started
+          cat >/tmp/deploy.mjs <<'NODE'
+          const sha=process.env.S, tree=process.env.T, skillsSha=process.env.K;
           const token=String(process.env.SENTIENT_DEPLOYMENT_API_TOKEN??"").trim();
           if(!token) process.exit(20);
           const r=await fetch("http://127.0.0.1:8080/v1/deployments/sentient",{
             method:"POST",
-            headers:{
-              authorization:"Bearer "+token,
-              "content-type":"application/json",
-              "x-sentient-objective-id":"phase0-certification-reconciliation-public"
-            },
+            headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":"phase0-certification-reconciliation-public"},
             body:JSON.stringify({sha,tree,skillsSha}),
             signal:AbortSignal.timeout(1100000)
           });
           const v=await r.json().catch(()=>({}));
           const safe={
-            httpStatus:r.status,
-            error:v.error??null,
-            reason:v.reason??null,
-            DEPLOYMENT_ID:v.DEPLOYMENT_ID??null,
-            REQUESTED_SHA:v.REQUESTED_SHA??null,
-            REQUESTED_TREE:v.REQUESTED_TREE??null,
-            DEPLOYED_SHA:v.DEPLOYED_SHA??null,
-            DEPLOYED_TREE:v.DEPLOYED_TREE??null,
-            SKILLS_SHA:v.SKILLS_SHA??null,
-            BUILD_RESULT:v.BUILD_RESULT??null,
-            BUILD_FAILURE:v.BUILD_FAILURE??null,
-            HEALTHZ_STATUS:v.HEALTHZ?.statusCode??null,
-            READYZ_STATUS:v.READYZ?.statusCode??null,
-            READYZ_FAILURE:v.READYZ_FAILURE??null,
-            RESOURCE_CHANGE_STATUS:v.RESOURCE_CHANGE_STATUS??null,
-            RESOURCE_CHANGE_DETAIL:v.RESOURCE_CHANGE_DETAIL??null,
-            DEPLOYMENT_ATTEMPT_NUMBER:v.DEPLOYMENT_ATTEMPT_NUMBER??null
+            httpStatus:r.status,error:v.error??null,reason:v.reason??null,
+            DEPLOYMENT_ID:v.DEPLOYMENT_ID??null,REQUESTED_SHA:v.REQUESTED_SHA??null,REQUESTED_TREE:v.REQUESTED_TREE??null,
+            DEPLOYED_SHA:v.DEPLOYED_SHA??null,DEPLOYED_TREE:v.DEPLOYED_TREE??null,SKILLS_SHA:v.SKILLS_SHA??null,
+            BUILD_RESULT:v.BUILD_RESULT??null,HEALTHZ_STATUS:v.HEALTHZ?.statusCode??null,
+            READYZ_STATUS:v.READYZ?.statusCode??null,READYZ_FAILURE:v.READYZ_FAILURE??null,
+            RESOURCE_CHANGE_STATUS:v.RESOURCE_CHANGE_STATUS??null
           };
           console.log(JSON.stringify(safe));
-          if(!r.ok ||
-             v.REQUESTED_SHA!==sha ||
-             v.REQUESTED_TREE!==tree ||
-             v.DEPLOYED_SHA!==sha ||
-             v.DEPLOYED_TREE!==tree ||
-             v.SKILLS_SHA!==skillsSha ||
-             v.BUILD_RESULT!=="SUCCEEDED" ||
-             v.HEALTHZ?.statusCode!==200 ||
-             v.READYZ?.statusCode!==200 ||
-             v.READYZ_FAILURE!==null ||
-             v.RESOURCE_CHANGE_STATUS!=="APPROVED_BASELINE") process.exit(21);
+          if(!r.ok || v.REQUESTED_SHA!==sha || v.REQUESTED_TREE!==tree || v.DEPLOYED_SHA!==sha || v.DEPLOYED_TREE!==tree ||
+             v.SKILLS_SHA!==skillsSha || v.BUILD_RESULT!=="SUCCEEDED" || v.HEALTHZ?.statusCode!==200 ||
+             v.READYZ?.statusCode!==200 || v.READYZ_FAILURE!==null || v.RESOURCE_CHANGE_STATUS!=="APPROVED_BASELINE") process.exit(21);
           NODE
-
-          script_b64="$(base64 -w0 /tmp/deploy-sentient.mjs)"
-          set +e
-          flyctl ssh console -a "$GOVERNOR_APP" -C \
-            "sh -lc 'echo $script_b64 | base64 -d >/tmp/deploy-sentient.mjs && TARGET_SHA=$TARGET_SHA TARGET_TREE=$TARGET_TREE SKILLS_SHA=$SKILLS_SHA node /tmp/deploy-sentient.mjs'" \
-            > /tmp/deployment-evidence.json
-          rc=$?
-          set -e
-          cat /tmp/deployment-evidence.json
-          test "$rc" -eq 0
-          echo "SENTIENT_EXACT_DEPLOY=PASS"
+          b64="$(base64 -w0 /tmp/deploy.mjs)"
+          flyctl ssh console -a "$app" -C "sh -lc 'echo $b64 | base64 -d >/tmp/deploy.mjs && S=$S T=$T K=$K node /tmp/deploy.mjs'" | tee /tmp/deploy-result.json
 
           live=false
           for _ in $(seq 1 180); do
-            hc="$(curl -sS --max-time 5 -o /tmp/sentient-health.json -w '%{http_code}' "https://${SENTIENT_APP}.fly.dev/healthz" || true)"
-            rcod="$(curl -sS --max-time 5 -o /tmp/sentient-ready.json -w '%{http_code}' "https://${SENTIENT_APP}.fly.dev/readyz" || true)"
-            if [ "$hc" = "200" ] && [ "$rcod" = "200" ] \
-              && grep -Fq "$TARGET_SHA" /tmp/sentient-health.json \
-              && grep -Fq "$TARGET_TREE" /tmp/sentient-health.json \
-              && grep -Fq "$TARGET_SHA" /tmp/sentient-ready.json \
-              && grep -Fq "$TARGET_TREE" /tmp/sentient-ready.json; then
+            hc="$(curl -sS --max-time 5 -o /tmp/h.json -w '%{http_code}' https://sentient-validation-runner.fly.dev/healthz || true)"
+            rc="$(curl -sS --max-time 5 -o /tmp/r.json -w '%{http_code}' https://sentient-validation-runner.fly.dev/readyz || true)"
+            if [ "$hc" = 200 ] && [ "$rc" = 200 ] &&
+               grep -Fq "$S" /tmp/h.json && grep -Fq "$T" /tmp/h.json &&
+               grep -Fq "$S" /tmp/r.json && grep -Fq "$T" /tmp/r.json; then
               live=true
               break
             fi
             sleep 2
           done
-          test "$live" = "true"
-          echo "RUNTIME_SHA=$TARGET_SHA"
-          echo "RUNTIME_TREE=$TARGET_TREE"
+          test "$live" = true
+          echo "RUNTIME_SHA=$S"
+          echo "RUNTIME_TREE=$T"
           echo "RUNTIME_SHA_MATCH=PASS"
           echo "RUNTIME_TREE_MATCH=PASS"
           echo "HEALTHZ=PASS"
           echo "READYZ=PASS"
           echo "LIVE_SENTIENT_EXACT_IDENTITY=PASS"
           echo "CERTIFICATION_TARGET_READY_TO_FREEZE=true"
-          echo "SECRET_VALUES_EXPOSED=false"
+          echo "SECRET_VALUES_EXPOSGD=false"
