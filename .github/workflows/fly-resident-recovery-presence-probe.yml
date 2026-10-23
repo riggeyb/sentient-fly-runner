@@ -6,14 +6,29 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Probe resident recovery authority presence
+      - name: Wake exact existing Sentient machine
         shell: bash
         run: |
           set -euo pipefail
           test -n "${FLY_API_TOKEN:-}"
+          flyctl machine start 8469e7b243d558 -a sentient-validation-runner
+          for _ in $(seq 1 45); do
+            state="$(flyctl machines list -a sentient-validation-runner --json | jq -r '.[] | select(.id=="8469e7b243d558") | .state')"
+            if [ "$state" = "started" ]; then
+              echo "SENTIENT_MACHINE_STARTED=PASS"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "sentient_machine_did_not_start" >&2
+          exit 1
+      - name: Probe resident recovery authority presence
+        shell: bash
+        run: |
+          set -euo pipefail
           flyctl ssh console -a sentient-validation-runner -C 'node -e '"'"'const names=["SENTIENT_GOVERNOR_RECOVERY_API_TOKEN","SENTIENT_GOVERNOR_RECOVERY_FLY_TOKEN","SENTIENT_DATABASE_BOOTSTRAP_URL","DATABASE_URL","DIRECT_URL","SENTIENT_SOURCE_GITHUB_TOKEN"]; for(const n of names) console.log(n+"_PRESENT="+Boolean(String(process.env[n]??"").trim())); console.log("SECRET_VALUES_EXPOSED=false");'"'"''
