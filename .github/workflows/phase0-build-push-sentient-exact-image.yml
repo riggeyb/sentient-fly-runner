@@ -22,7 +22,7 @@ jobs:
           ref: d2ae0d7d77ebb4c2ad52d9bd4ca667f860071cb3
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 0
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
