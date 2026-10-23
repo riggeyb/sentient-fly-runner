@@ -1,0 +1,19 @@
+name: Governor Crash Log
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Capture Governor startup logs
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          flyctl logs -a sentient-deployment-governor --no-tail | tail -n 200
