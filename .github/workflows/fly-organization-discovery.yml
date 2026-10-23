@@ -1,0 +1,32 @@
+name: Sentient Fly Organization Discovery
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Resolve Sentient Fly organization metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${FLY_API_TOKEN:-}"
+          flyctl apps list --json > /tmp/apps.json
+          node --input-type=module - <<'NODE'
+          import fs from "node:fs";
+          const raw=JSON.parse(fs.readFileSync("/tmp/apps.json","utf8"));
+          const rows=Array.isArray(raw)?raw:(Array.isArray(raw?.apps)?raw.apps:[]);
+          const wanted=rows.filter(r=>["sentient-validation-runner","sentient-deployment-governor","sentient-governor-recovery-root"].includes(String(r?.Name??r?.name??"")));
+          for (const r of wanted) {
+            const name=String(r?.Name??r?.name??"");
+            const org=String(r?.Organization?.Slug??r?.organization?.slug??r?.Organization?.Name??r?.organization?.name??r?.OrgSlug??r?.org_slug??"");
+            const id=String(r?.ID??r?.id??"");
+            console.log(`APP=${name} APP_ID=${id.replace(/[^A-Za-z0-9_-]/g,"")} ORG=${org.replace(/[^A-Za-z0-9_.-]/g,"")}`);
+          }
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
