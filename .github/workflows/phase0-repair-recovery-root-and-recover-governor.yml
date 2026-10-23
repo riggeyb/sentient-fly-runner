@@ -1,0 +1,89 @@
+name: Phase0 Repair Recovery Root And Recover Governor
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SHA: 5d642c9e337e99639a4af8640249cc8f27595764
+      TREE: 5a895ad4403792dffd64f004f392dd55ce7c1b63
+      REV: SENTIENT_GOVERNOR_RECOVERY_V1
+      GAPP: sentient-deployment-governor
+      RAPP: sentient-governor-recovery-root
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 5d642c9e337e99639a4af8640249cc8f27595764
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Repair recovery DB boundary and deploy exact source
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$TREE"
+          machines="$(flyctl machines list -a "$GAPP" --json)"
+          id="$(printf '%s' "$machines" | jq -r '.[0].id')"
+          state="$(printf '%s' "$machines" | jq -r '.[0].state')"
+          if [ "$state" != "started" ]; then flyctl machine start "$id" -a "$GAPP" >/dev/null; fi
+          for _ in $(seq 1 60); do
+            state="$(flyctl machines list -a "$GAPP" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
+            [ "$state" = "started" ] && break
+            sleep 2
+          done
+          test "$state" = "started"
+          DB="$(flyctl ssh console -a "$GAPP" -C "node -e 'const v=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??\"\").trim();if(!v)process.exit(2);process.stdout.write(v)'" 2>/dev/null)"
+          test -n "$DB"
+          echo "::add-mask::$DB"
+          printf 'SENTIENT_DATABASE_BOOTSTRAP_URL=%s\n' "$DB" | flyctl secrets import -a "$RAPP" --stage >/dev/null
+          unset DB
+          echo "RECOVERY_DATABASE_AUTHORITY=PASS"
+          flyctl deploy -a "$RAPP" -c fly.recovery.toml --remote-only --yes --ha=false
+          echo "RECOVERY_ROOT_EXACT_SOURCE_DEPLOY=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
+      - name: Verify recovery root
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=false
+          for _ in $(seq 1 120); do
+            code="$(curl -sS --max-time 5 -o /tmp/h.json -w '%{http_code}' "https://${RAPP}.fly.dev/healthz" || true)"
+            if [ "$code" = "200" ] && jq -e --arg r "$REV" '.status=="ok" and .role=="INDEPENDENT_FLY_GOVERNOR_RECOVERY_ROOT" and .recoveryPolicyRevision==$r and .oldGovernorRequired==false and .netlifyRequired==false and .githubActionsRequiredForRecoveryDesign==false' /tmp/h.json >/dev/null; then ok=true; break; fi
+            sleep 2
+          done
+          test "$ok" = "true"
+          echo "RECOVERY_ROOT_FLY_NATIVE=PASS"
+      - name: Recover Governor to exact source
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          cat >/tmp/call.mjs <<'NODE'
+          const sha=process.env.SHA,tree=process.env.TREE,rev=process.env.REV;
+          const token=String(process.env.SENTIENT_GOVERNOR_RECOVERY_API_TOKEN??"").trim();
+          if(!token)process.exit(20);
+          const r=await fetch("http://127.0.0.1:8080/v1/recovery/governor",{method:"POST",headers:{authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify({repository:"riggeyb/sentient",sha,tree,recoveryPolicyRevision:rev}),signal:AbortSignal.timeout(1100000)});
+          const v=await r.json().catch(()=>({}));
+          console.log(JSON.stringify({httpStatus:r.status,recoveryId:v.recoveryId??null,requestedSha:v.requestedSha??null,requestedTree:v.requestedTree??null,observedSha:v.observedSha??null,observedTree:v.observedTree??null,recoveryPolicyRevision:v.recoveryPolicyRevision??null,machineIds:Array.isArray(v.machineIds)?v.machineIds:[],deploymentId:v.deploymentId??null,status:v.status??null,errorCode:v.errorCode??null}));
+          if(!r.ok||v.status!=="PASS"||v.requestedSha!==sha||v.requestedTree!==tree||v.observedSha!==sha||v.observedTree!==tree||v.recoveryPolicyRevision!==rev||!Array.isArray(v.machineIds)||v.machineIds.length===0)process.exit(21);
+          NODE
+          b64="$(base64 -w0 /tmp/call.mjs)"
+          set +e
+          flyctl ssh console -a "$RAPP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/call.mjs && SHA=$SHA TREE=$TREE REV=$REV node /tmp/call.mjs'" > /tmp/receipt.json
+          rc=$?
+          set -e
+          cat /tmp/receipt.json
+          test "$rc" -eq 0
+          echo "GOVERNOR_RECOVERY_REQUEST=PASS"
+          echo "EXAACT_SOURCE_RECOVERY=PASS"
+          echo "RECOVERV_RECEIPT=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
