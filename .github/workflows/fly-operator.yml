@@ -14,6 +14,7 @@ on:
           - engineering_create
           - engineering_get
           - public_probe
+          - fly_token_probe
           - governor_deploy_exact
       arguments:
         description: JSON arguments for the selected operation
@@ -32,12 +33,35 @@ jobs:
         with:
           node-version: "22"
       - name: Invoke Sentient on Fly
-        if: ${{ inputs.operation != 'governor_deploy_exact' }}
+        if: ${{ inputs.operation != 'governor_deploy_exact' && inputs.operation != 'fly_token_probe' }}
         env:
           MCP_CLIENT_TOKEN: ${{ secrets.MCP_CLIENT_TOKEN }}
           OPERATION: ${{ inputs.operation }}
           ARGUMENTS: ${{ inputs.arguments }}
         run: node operator.mjs
+      - name: Probe scoped Fly API token
+        if: ${{ inputs.operation == 'fly_token_probe' }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          node --input-type=module -e '
+          const token=String(process.env.FLY_API_TOKEN??"").trim();
+          if(!token){
+            console.log("FLY_API_TOKEN_PRESENT=false");
+            console.log("SECRET_VALUES_EXPOSED=false");
+            throw new Error("FLY_API_TOKEN_MISSING");
+          }
+          const url="https://api.machines.dev/v1/apps/sentient-validation-runner/machines?limit=1";
+          const r=await fetch(url,{method:"GET",redirect:"manual",signal:AbortSignal.timeout(20000),headers:{authorization:`Bearer ${token}`,accept:"application/json"}});
+          console.log("FLY_API_TOKEN_PRESENT=true");
+          console.log(`HTTP_STATUS=${r.status}`);
+          if(r.status===401||r.status===403)throw new Error("FLY_API_TOKEN_READ_PROBE_DENIED");
+          if(r.status>=300&&r.status<400)throw new Error("FLY_API_TOKEN_READ_PROBE_REDIRECT_REJECTED");
+          if(!r.ok)throw new Error(`FLY_API_TOKEN_READ_PROBE_HTTP_${r.status}`);
+          console.log("FLY_API_TOKEN_READ_ONLY_PROBE=PASS");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          console.log("RESULT=PASS");
+          '
       - name: Deploy exact Sentient candidate through Governor
         if: ${{ inputs.operation == 'governor_deploy_exact' }}
         env:
