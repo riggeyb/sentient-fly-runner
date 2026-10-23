@@ -1,0 +1,31 @@
+name: Sentient Fly Recovery Authority Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe recovery authority presence
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          RECOVERY_API_TOKEN: ${{ secrets.SENTIENT_GOVERNOR_RECOVERY_API_TOKEN }}
+          RECOVERY_FLY_TOKEN: ${{ secrets.SENTIENT_GOVERNOR_RECOVERY_FLY_TOKEN }}
+          DATABASE_BOOTSTRAP_URL: ${{ secrets.SENTIENT_DATABASE_BOOTSTRAP_URL }}
+          SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: |
+          node --input-type=module - <<'NODE'
+          const p = (name) => Boolean(String(process.env[name] ?? "").trim());
+          const presence = {
+            FLY_API_TOKEN: p("FLY_API_TOKEN"),
+            SENTIENT_GOVERNOR_RECOVERY_API_TOKEN: p("RECOVERY_API_TOKEN"),
+            SENTIENT_GOVERNOR_RECOVERY_FLY_TOKEN: p("RECOVERY_FLY_TOKEN"),
+            SENTIENT_DATABASE_BOOTSTRAP_URL: p("DATABASE_BOOTSTRAP_URL"),
+            SENTIENT_SOURCE_GITHUB_TOKEN: p("SOURCE_GITHUB_TOKEN"),
+          };
+          for (const [k,v] of Object.entries(presence)) console.log(`${k}_PRESENT=${v}`);
+          console.log(`RECOVERY_AUTHORITY_COMPLETE=${Object.values(presence).every(Boolean)}`);
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
