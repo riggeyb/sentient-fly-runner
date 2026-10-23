@@ -10,13 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      TARGET_SHA: 64d46db2e6a78048a07f81d683ce08ec7d95e367
-      TARGET_TREE: dd2261700980b3da0764dcfe7e865b6bf3174a29
+      TARGET_SHA: 09dd263c5d31dc15359840f0f3bbf5b75f8297fe
+      TARGGET_TREE: 5fbc895330ae78932f583ceab110bfe82dc44fa2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout4
         with:
           repository: riggeyb/sentient
-          ref: 64d46db2e6a78048a07f81d683ce08ec7d95e367
+          ref: 09dd263c5d31dc15359840f0f3bbf5b75f8297fe
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
