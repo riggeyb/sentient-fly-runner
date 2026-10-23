@@ -1,0 +1,35 @@
+name: Sentient Recovery Root Diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-governor-recovery-root
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect fixed recovery root
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${FLY_API_TOKEN:-}"
+          echo "RECOVERY_ROOT_MACHINE_INVENTORY_BEGIN"
+          flyctl machines list -a "$APP" --json | jq '[.[] | {id,name,state,region,instance_id,config:{image:.config.image,guest:.config.guest,services:.config.services}}]'
+          echo "RECOVERY_ROOT_MACHINE_INVENTORY_END"
+          set +e
+          code="$(curl -sS --max-time 10 -o /tmp/h.json -w '%{http_code}' "https://${APP}.fly.dev/healthz")"
+          rc=$?
+          set -e
+          echo "RECOVERY_ROOT_PUBLIC_CURL_RC=$rc"
+          echo "RECOVERY_ROOT_PUBLIC_HTTP_STATUS=$code"
+          if [ -s /tmp/h.json ]; then
+            jq '{status,role,targetApp,recoveryPolicyRevision,oldGovernorRequired,netlifyRequired,githubActionsRequiredForRecoveryDesign}' /tmp/h.json || true
+          fi
+          echo "RECOVERY_ROOT_LOGS_BEGIN"
+          flyctl logs -a "$APP" --no-tail 2>&1 | tail -n 160 || true
+          echo "RECOVERY_ROOT_LOGS_END"
+          echo "SECRET_VALUES_EXPOSED=false"
