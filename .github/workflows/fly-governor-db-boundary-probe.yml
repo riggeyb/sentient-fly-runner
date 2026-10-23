@@ -1,0 +1,29 @@
+name: Sentient Governor DB Boundary Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-deployment-governor
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe fixed database privilege boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          machines="$(flyctl machines list -a "$APP" --json)"
+          id="$(printf '%s' "$machines" | jq -r '.[0].id')"
+          state="$(printf '%s' "$machines" | jq -r '.[0].state')"
+          if [ "$state" != "started" ]; then flyctl machine start "$id" -a "$APP" >/dev/null; fi
+          for _ in $(seq 1 45); do
+            state="$(flyctl machines list -a "$APP" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state')"
+            [ "$state" = "started" ] && break
+            sleep 2
+          done
+          test "$state" = "started"
+          flyctl ssh console -a "$APP" -C 'node --input-type=module -e '"'"'import pg from "pg"; const {Pool}=pg; const cs=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim(); if(!cs) process.exit(2); const p=new Pool({connectionString:cs,max:1,connectionTimeoutMillis:10000}); try { const r=await p.query(`SELECT has_database_privilege(current_user,current_database(), $1) AS db_create, to_regnamespace($2) IS NOT NULL AS recovery_schema_exists`,["CREATE","sentient_governor_recovery"]); const exists=r.rows[0]?.recovery_schema_exists===true; let usage=false,create=false; if(exists){const q=await p.query(`SELECT has_schema_privilege(current_user,$1,$2) AS usage, has_schema_privilege(current_user,$1,$3) AS create`,["sentient_governor_recovery","USAGE","CREATE"]); usage=q.rows[0]?.usage===true; create=q.rows[0]?.create===true;} console.log("DATABASE_CREATE_PRIVILEGE="+(r.rows[0]?.db_create===true)); console.log("RECOVERY_SCHEMA_EXISTS="+exists); console.log("RECOVERY_SCHEMA_USAGE="+usage); console.log("RECOVERY_SCHEMA_CREATE="+create); console.log("SECRET_VALUES_EXPOSED=false"); } finally { await p.end(); }'"'"''
