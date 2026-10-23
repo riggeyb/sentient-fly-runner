@@ -31,6 +31,11 @@ jobs:
           unset engineering_token
 
           for app in "$GOVERNOR_APP" "$TARGET_APP"; do
+            machines="$(flyctl machines list -a "$app" --json)"
+            id="$(printf '%s' "$machines" | jq -r '.[0].id // empty')"
+            test -n "$id"
+            flyctl machine start "$id" -a "$app" >/dev/null || true
+
             ready=false
             for _ in $(seq 1 90); do
               machines="$(flyctl machines list -a "$app" --json)"
