@@ -1,24 +1,37 @@
 name: Phase0 Governor Deploy Exact Retry
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   retry:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      SCRIPT_B64: Y29uc3QgdD1TdHJpbmcocHJvY2Vzcy5lbnYuU0VOVElFTlRfREVQTE9ZTUVOVF9BUElfVE9LRU4/PyIiKS50cmltKCk7aWYoIXQpdGhyb3cgRXJyb3IoInRva2VuX21pc3NpbmciKTtjb25zdCByPWF3YWl0IGZldGNoKCJodHRwczovL3NlbnRpZW50LWRlcGxveW1lbnQtZ292ZXJub3IuZmx5LmRldi92MS9kZXBsb3ltZW50cy9zZW50aWVudCIse21ldGhvZDoiUE9TVCIsaGVhZGVyczp7YXV0aG9yaXphdGlvbjoiQmVhcmVyICIrdCwiY29udGVudC10eXBlIjoiYXBwbGljYXRpb24vanNvbiIsIngtc2VudGllbnQtb2JqZWN0aXZlLWlkIjoicGhhc2UwLWNlcnRpZmljYXRpb24tcmVjb25jaWxpYXRpb24tcHVibGljIn0sYm9keTpKU09OLnN0cmluZ2lmeSh7c2hhOiI1ZDY0MmM5ZTMzN2U5OTYzOWE0YWY4NjQwMjQ5Y2M4ZjI3NTk1NzY0Iix0cmVlOiI1YTg5NWFkNDQwMzc5MmRmZmQ2NGYwMDRmMzkyZGQ1NWNlN2MxYjYzIixza2lsbHNTaGE6ImQ4NWViODIwZjE4YWQ2ZDk0NGFiOTNiMDMxNTBkNjA2MjczODkxYTUifSksc2lnbmFsOkFib3J0U2lnbmFsLnRpbWVvdXQoMTEwMDAwMCl9KTtjb25zdCB2PWF3YWl0IHIuanNvbigpLmNhdGNoKCgpPT4oe30pKTtjb25zb2xlLmxvZyhKU09OLnN0cmluZ2lmeSh7aHR0cFN0YXR1czpyLnN0YXR1cyxlcnJvcjp2LmVycm9yPz9udWxsLHJlYXNvbjp2LnJlYXNvbj8/bnVsbCxERVBMT1lNRU5UX0lEOnYuREVQTE9ZTUVOVF9JRD8/bnVsbCxSRVFVRVNURURfU0hBOnYuUkVRVUVTVEVEX1NIQT8/bnVsbCxSRVFVRVNURURfVFJFRTp2LlJFUVVFU1RFRF9UUkVFPz9udWxsLERFUExPWUVEX1NIQTp2LkRFUExPWUVEX1NIQT8/bnVsbCxERVBMT1lFRF9UUkVFOnYuREVQTE9ZRURfVFJFRT8/bnVsbCxCVUlMRF9SRVNVTFQ6di5CVUlMRF9SRVNVTFQ/P251bGwsSEVBTFRIWl9TVEFUVVM6di5IRUFMVEhaPy5zdGF0dXNDb2RlPz9udWxsLFJFQURZWl9TVEFUVVM6di5SRUFEWVo/LnN0YXR1c0NvZGU/P251bGwsUkVBRFlaX0ZBSUxVUkU6di5SRUFEWVpfRkFJTFVSRT8/bnVsbCxSRVNPVVJDRV9DSEFOR0VfU1RBVFVTOnYuUkVTT1VSQ0VfQ0hBTkdFX1NUQVRVUz8/bnVsbH0pKTtpZighci5vaylwcm9jZXNzLmV4aXQoMjEpOw==
+      S: b58b7e44f156ebbd62dbc302d8c62b9ddb10c381
+      T: 8a6f70aa95402e0c35f30234992727f5c083d639
+      K: d85eb820f18ad6d944ab93b03150d606273891a5
+      SCRIPT_B64: Y29uc3Qgcz1wcm9jZXNzLmVudi5TLHQ9cHJvY2Vzcy5lbnYuVCxrPXByb2Nlc3MuZW52Lks7CmNvbnN0IHRva2VuPVN0cmluZyhwcm9jZXNzLmVudi5TRU5USUVOVF9ERVBMT1lNRU5UX0FQSV9UT0tFTj8/IiIpLnRyaW0oKTsKaWYoIXRva2VuKSBwcm9jZXNzLmV4aXQoMjApOwpjb25zdCByPWF3YWl0IGZldGNoKCJodHRwOi8vMTI3LjAuMC4xOjgwODAvdjEvZGVwbG95bWVudHMvc2VudGllbnQiLHsKICBtZXRob2Q6IlBPU1QiLAogIGhlYWRlcnM6e2F1dGhvcml6YXRpb246IkJlYXJlciAiK3Rva2VuLCJjb250ZW50LXR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIiwieC1zZW50aWVudC1vYmplY3RpdmUtaWQiOiJwaGFzZTAtY2VydGlmaWNhdGlvbi1yZWNvbmNpbGlhdGlvbi1iNThiN2U0NCJ9LAogIGJvZHk6SlNPTi5zdHJpbmdpZnkoe3NoYTpzLHRyZWU6dCxza2lsbHNTaGE6a30pLAogIHNpZ25hbDpBYm9ydFNpZ25hbC50aW1lb3V0KDExMDAwMDApCn0pOwpjb25zdCB2PWF3YWl0IHIuanNvbigpLmNhdGNoKCgpPT4oe30pKTsKY29uc29sZS5sb2coSlNPTi5zdHJpbmdpZnkoewogIGh0dHBTdGF0dXM6ci5zdGF0dXMsCiAgREVQTE9ZTUVOVF9JRDp2LkRFUExPWU1FTlRfSUQ/P251bGwsCiAgUkVRVUVTVEVEX1NIQTp2LlJFUVVFU1RFRF9TSEE/P251bGwsCiAgUkVRVUVTVEVEX1RSRUU6di5SRVFVRVNURURfVFJFRT8/bnVsbCwKICBERVBMT1lFRF9TSEE6di5ERVBMT1lFRF9TSEE/P251bGwsCiAgREVQTE9ZRURfVFJFRTp2LkRFUExPWUVEX1RSRUU/P251bGwsCiAgU0tJTExTX1NIQTp2LlNLSUxMU19TSEE/P251bGwsCiAgQlVJTERfUkVTVUxUOnYuQlVJTERfUkVTVUxUPz9udWxsLAogIEhFQUxUSFpfU1RBVFVTOnYuSEVBTFRIWj8uc3RhdHVzQ29kZT8/bnVsbCwKICBSRUFEWVpfU1RBVFVTOnYuUkVBRFlaPy5zdGF0dXNDb2RlPz9udWxsLAogIFJFQURZWl9GQUlMVVJFOnYuUkVBRFlaX0ZBSUxVUkU/P251bGwsCiAgUkVTT1VSQ0VfQ0hBTkdFX1NUQVRVUzp2LlJFU09VUkNFX0NIQU5HRV9TVEFUVVM/P251bGwsCiAgZXJyb3I6di5lcnJvcj8/bnVsbCwKICByZWFzb246di5yZWFzb24/P251bGwKfSkpOwppZighci5va3x8di5SRVFVRVNURURfU0hBIT09c3x8di5SRVFVRVNURURfVFJFRSE9PXR8fHYuREVQTE9ZRURfU0hBIT09c3x8di5ERVBMT1lFRF9UUkVFIT09dHx8CiAgIHYuU0tJTExTX1NIQSE9PWt8fHYuQlVJTERfUkVTVUxUIT09IlNVQ0NFRURFRCJ8fHYuSEVBTFRIWj8uc3RhdHVzQ29kZSE9PTIwMHx8CiAgIHYuUkVBRFlaPy5zdGF0dXNDb2RlIT09MjAwfHx2LlJFQURZWl9GQUlMVVJFIT09bnVsbHx8di5SRVNPVVJDRV9DSEFOR0VfU1RBVFVTIT09IkFQUFJPVkVEX0JBU0VMSU5FIikgcHJvY2Vzcy5leGl0KDIxKTsK
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Retry exact deployment through Fly service
+      - name: Deploy exact candidate through resident Governor
         shell: bash
         run: |
           set -euo pipefail
-          flyctl machine start 874dd1a647dd28 -a sentient-deployment-governor >/dev/null || true
+          app=sentient-deployment-governor
+          id="$(flyctl machines list -a "$app" --json | jq -r '.[0].id')"
+          flyctl machine start "$id" -a "$app" >/dev/null || true
+          for _ in $(seq 1 60); do
+            st="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
+            [ "$st" = started ] && break
+            sleep 2
+          done
+          test "$st" = started
           set +e
-          flyctl ssh console -a sentient-deployment-governor -C "sh -lc 'echo $SCRIPT_B64 | base64 -d >/tmp/d.mjs && node /tmp/d.mjs'" > /tmp/result.json
+          flyctl ssh console -a "$app" -C "sh -lc 'echo $SCRIPT_B64 | base64 -d >/tmp/d.mjs && S=$S T=$T K=$K node /tmp/d.mjs'" > /tmp/result.json
           rc=$?
           set -e
           cat /tmp/result.json
