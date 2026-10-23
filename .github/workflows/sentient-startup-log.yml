@@ -1,4 +1,4 @@
-name: Phase0 Objective Stall Diagnostic
+name: Phase0 Active Cert Observer
 on:
   workflow_dispatch:
 
@@ -6,29 +6,20 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  observe:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
-      OBJECTIVE_ID: phase0-live-cert-40021105488
+      OBJECTIVE_ID: phase0-live-cert-40022553521
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Observe exact persisted objective result
+      - name: Observe current certification objective
         shell: bash
         run: |
           set -euo pipefail
-          mid="$(flyctl machines list -a "$APP" --json | jq -r '[.[]|select(.state!="destroyed")][0].id')"
-          test -n "$mid" && test "$mid" != "null"
-          flyctl machine start "$mid" -a "$APP" >/dev/null || true
-          for _ in $(seq 1 60); do
-            state="$(flyctl machines list -a "$APP" --json | jq -r --arg id "$mid" '.[]|select(.id==$id)|.state' | head -n1)"
-            [ "$state" = started ] && break
-            sleep 2
-          done
-          test "$state" = started
-          cat >/tmp/result.mjs <<'NODE'
+          cat >/tmp/observe.mjs <<'NODE'
           const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
           const oid=String(process.env.OBJECTIVE_ID??"").trim();
           if(!token||!oid) process.exit(20);
@@ -37,25 +28,24 @@ jobs:
             signal:AbortSignal.timeout(20000)
           });
           const b=await r.json().catch(()=>({}));
-          const result=(b.result && typeof b.result==="object" && !Array.isArray(b.result)) ? b.result : null;
-          const body=result && result.body && typeof result.body==="object" && !Array.isArray(result.body) ? result.body : null;
-          const inner=body && body.result && typeof body.result==="object" && !Array.isArray(body.result) ? body.result : null;
-          console.log("OBJECTIVE_RESULT_DIAGNOSTIC="+JSON.stringify({
+          const receipt=b.lastEngineeringReceipt??null;
+          console.log("ACTIVE_CERT_OBJECTIVE="+JSON.stringify({
             httpStatus:r.status,
             objectiveId:b.objectiveId??null,
-            objectiveStatus:b.status??null,
+            status:b.status??null,
             activeEngineeringJobId:b.activeEngineeringJobId??null,
+            lastEngineeringReceipt:receipt?{
+              jobId:receipt.jobId??null,
+              status:receipt.status??null,
+              errorCode:receipt.errorCode??null,
+              pushResult:receipt.pushResult??null,
+              changedFiles:Array.isArray(receipt.changedFiles)?receipt.changedFiles.length:null
+            }:null,
             error:b.error??null,
-            applicationHttpStatus:result?.httpStatus??null,
-            mode:body?.mode??null,
-            resultStatus:inner?.status??null,
-            resultReason:inner?.reason??null,
-            authoritativeResultRef:inner?.authoritativeResultRef??null,
-            completedStepIds:Array.isArray(inner?.completedStepIds)?inner.completedStepIds:null,
-            readinessReady:inner?.readiness?.ready??null
+            updatedAt:b.updatedAt??null
           }));
           console.log("SECRET_VALUES_EXPOSED=false");
           if(!r.ok) process.exit(21);
           NODE
-          b64="$(base64 -w0 /tmp/result.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/result.mjs && OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/result.mjs'"
+          b64="$(base64 -w0 /tmp/observe.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/observe.mjs && OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/observe.mjs'"
