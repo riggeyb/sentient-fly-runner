@@ -12,7 +12,7 @@ jobs:
       APP: sentient-deployment-governor
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Probe Governor database authority
+      - name: Probe Governor database authority and active deployment lease
         shell: bash
         run: |
           set -euo pipefail
@@ -29,15 +29,32 @@ jobs:
           test "$state" = "started"
           cat >/tmp/probe.mjs <<'NODE'
           import pg from "pg";
-          const names=["SENTIENT_DATABASE_BOOTSTRAP_URL","SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL","DATABASE_URL","DIRECT_URL"];
-          for (const n of names) console.log(`${n}_PRESENT=${Boolean(String(process.env[n]??"").trim())}`);
           const url=String(process.env.SENTIENT_DATABASE_BOOTSTRAP_URL??process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
           if(!url){ console.log("GOVERNOR_DB_AUTHORITY=ABSENT"); process.exit(3); }
           const pool=new pg.Pool({connectionString:url,max:1,connectionTimeoutMillis:10000});
           try {
-            const r=await pool.query("select has_database_privilege(current_user,current_database(),'CREATE') as can_create, has_database_privilege(current_user,current_database(),'CONNECT') as can_connect");
-            console.log(`GOVERNOR_DB_CONNECT_PRIVILEGE=${r.rows[0]?.can_connect===true}`);
-            console.log(`GOVERNOR_DB_CREATE_PRIVILEGE=${r.rows[0]?.can_create===true}`);
+            const p=await pool.query("select has_database_privilege(current_user,current_database(),'CONNECT') as can_connect");
+            console.log(`GOVERNOR_DB_CONNECT_PRIVILEGE=${p.rows[0]?.can_connect===true}`);
+            const r=await pool.query(`
+              select objective_id, requested_sha, requested_tree, started_at,
+                     extract(epoch from (now()-started_at))::bigint as age_seconds,
+                     attempt_number, result
+              from sentient_deployment_governor.deployment_attempts
+              where completed_at is null and result='ACTIVE'
+              order by started_at desc
+            `);
+            console.log(`ACTIVE_DEPLOYMENT_COUNT=${r.rowCount}`);
+            for (const row of r.rows) {
+              console.log("ACTIVE_DEPLOYMENT="+JSON.stringify({
+                objectiveId: row.objective_id,
+                requestedSha: row.requested_sha,
+                requestedTree: row.requested_tree,
+                startedAt: row.started_at,
+                ageSeconds: Number(row.age_seconds),
+                attemptNumber: row.attempt_number,
+                result: row.result
+              }));
+            }
           } finally { await pool.end(); }
           NODE
           b64="$(base64 -w0 /tmp/probe.mjs)"
