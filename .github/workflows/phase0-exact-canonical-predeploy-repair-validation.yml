@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout4
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: 762124501fd44350ae8dad1dbad49ee7b00dcf4b
