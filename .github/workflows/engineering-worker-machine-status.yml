@@ -1,0 +1,26 @@
+name: Engineering Worker Machine Status Diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      machine_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect worker machine only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          MACHINE_ID: ${{ inputs.machine_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$MACHINE_ID" =~ ^[0-9a-f]{14}$ ]]
+          echo "ENGINEERING_WORKER_MACHINE=$(flyctl machine status "$MACHINE_ID" -a "$APP" --json | jq -c '{id:.id,state:.state,name:.name,created_at:.created_at,updated_at:.updated_at,definition:{"image":.config.image,"metadata:.config.metadata}}}')"
+          echo "SECRET_VALUES_EXPOSED=false"
