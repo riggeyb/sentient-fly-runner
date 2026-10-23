@@ -51,13 +51,37 @@ jobs:
           done
           test "$gstate" = "started"
 
-          DB="$(flyctl ssh console -a "$GOVERNOR_APP" -C "node -e 'const v=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??\"\").trim();if(!v)process.exit(2);process.stdout.write(v)'" 2>/dev/null)"
-          test -n "$DB"
+          echo "GOVERNOR_DB_HANDOFF=START"
+          DB=""
+          ssh_ok=false
+          for _ in $(seq 1 20); do
+            set +e
+            DB="$(flyctl ssh console -a "$GOVERNOR_APP" -C "node -e 'const v=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??\"\").trim();if(!v)process.exit(2);process.stdout.write(v)'" 2>/tmp/governor-db-handoff.err)"
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ] && [ -n "$DB" ]; then
+              ssh_ok=true
+              break
+            fi
+            DB=""
+            sleep 2
+          done
+          if [ "$ssh_ok" != "true" ]; then
+            echo "GOVERNOR_DB_HANDOFF=FAIL"
+            sed -E 's#(postgres(ql)?://)[^ @]+@#\1***@#g' /tmp/governor-db-handoff.err || true
+            exit 41
+          fi
           echo "::add-mask::$DB"
+          echo "GOVERNOR_DB_HANDOFF=PASS"
+
+          echo "RECOVERY_SECRET_IMPORT=START"
           printf 'SENTIENT_DATABASE_BOOTSTRAP_URL=%s\n' "$DB" | flyctl secrets import -a "$RECOVERY_APP" --stage >/dev/null
           unset DB
+          echo "RECOVERY_SECRET_IMPORT=PASS"
 
+          echo "RECOVERY_FLY_DEPLOY=START"
           flyctl deploy --app "$RECOVERY_APP" --config fly.recovery.toml --remote-only --yes --ha=false
+          echo "RECOVERY_FLY_DEPLOY=PASS"
 
           healthy=false
           for _ in $(seq 1 120); do
