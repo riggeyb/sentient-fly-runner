@@ -1,65 +1,50 @@
-name: Sentient Phase0 Critical Regression Diagnostic
-on:
+name: Sentient Phase 7 Live Proof Launcher
+'on':
   workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact deployed Sentient SHA
+        required: true
+        type: string
+      tree:
+        description: Exact deployed Sentient tree
+        required: true
+        type: string
 permissions:
   contents: read
+
 jobs:
-  diagnose:
+  launch-phase7-proof:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          repository: riggeyb/sentient
-          ref: a6eb540a33fcb509d7aa3e833096d5d6a88d7167
-          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 1
-      - name: Fence exact candidate
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Execute shared Phase 7 proof implementation
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+          PROOF_ID: ${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "a6eb540a33fcb509d7aa3e833096d5d6a88d7167"
-          test "$(git rev-parse HEAD^{tree})" = "07f1d6a0c7990706e06fedd9005b72d925b82d71"
-          echo "CANONICAL_SHA_MATCH=PASS"
-          echo "CANONICAL_TREE_MATCH=PASS"
-      - name: Build exact candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --no-audit --no-fund
-          npm run build
-          echo "CUMULATIVE_BUILD=PASS"
-      - name: Isolate Phase0 critical regressions
-        shell: bash
-        run: |
-          set -uo pipefail
-          tests=(
-            active-work-core
-            active-work-expiry-fencing
-            active-work-persistence
-            active-work-restart-edge
-            engineering-jobs
-            objective-continuation
-            objective-continuation-readiness
-            permanent-continuation-http
-            permanent-continuation-multiprocess
-            phase0-control-recovery
-            phase0-engineering-readiness
-            deployment-governor
-            deployment-governor-boundaries
-            deployment-governor-skills-fence
-          )
-          failures=0
-          for t in "${tests[@]}"; do
-            echo "=== TEST:$t ==="
-            if node --test "dist/test/$t.test.js"; then
-              echo "REGRESSION:$t=PASS"
-            else
-              echo "REGRESSION:$t=FAIL"
-              failures=$((failures+1))
-            fi
-          done
-          echo "REGRESSION_FAILURE_COUNT=$failures"
-          echo "SECRET_VALUES_EXPOSED=false"
-          test "$failures" -eq 0
+          python - <<'PY'
+          from pathlib import Path
+          source = Path(".github/workflows/phase7-live-proof.yml").read_text()
+          marker = "        run: |\n"
+          if source.count(marker) != 1:
+              raise SystemExit("phase7_shared_run_block_not_unique")
+          block = source.split(marker, 1)[1]
+          lines = block.splitlines()
+          out = []
+          for line in lines:
+              if line.startswith("          "):
+                  out.append(line[10:])
+              elif not line.strip():
+                  out.append("")
+              else:
+                  raise SystemExit("phase7_shared_run_block_indentation_invalid")
+          Path("/tmp/phase7-shared-proof.sh").write_text("\n".join(out) + "\n")
+          PY
+          bash /tmp/phase7-shared-proof.sh
