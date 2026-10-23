@@ -1,0 +1,19 @@
+name: Sentient Fly Resident Recovery Presence Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe resident recovery authority presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${FLY_API_TOKEN:-}"
+          flyctl ssh console -a sentient-validation-runner -C 'node -e '"'"'const names=["SENTIENT_GOVERNOR_RECOVERY_API_TOKEN","SENTIENT_GOVERNOR_RECOVERY_FLY_TOKEN","SENTIENT_DATABASE_BOOTSTRAP_URL","DATABASE_URL","DIRECT_URL","SENTIENT_SOURCE_GITHUB_TOKEN"]; for(const n of names) console.log(n+"_PRESENT="+Boolean(String(process.env[n]??"").trim())); console.log("SECRET_VALUES_EXPOSED=false");'"'"''
