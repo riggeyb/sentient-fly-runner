@@ -10,17 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      TARGET_SHA: 09dd263c5d31dc15359840f0f3bbf5b75f8297fe
-      TARGGET_TREE: 5fbc895330ae78932f583ceab110bfe82dc44fa2
+      TARGET_SHA: b07e90c43e2336dfb5cba0066ae8004976d67179
+      TARGGET_TREE: 8086ac182ca08d86a386e8f6952746f5e624a238
     steps:
-      - uses: actions/checkout4
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: 09dd263c5d31dc15359840f0f3bbf5b75f8297fe
+          ref: b07e90c43e2336dfb5cba0066ae8004976d67179
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Fence exact canonical identity
+      - name: Fence exact candidate
         shell: bash
         run: |
           set -euo pipefail
