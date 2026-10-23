@@ -22,6 +22,6 @@ jobs:
           set -euo pipefail
           APP="sentient-validation-runner"
           [[ "$MACHINE_ID" =~ ^[0-9a-f]{14}$ ]]
-          flyctl machine status "$MACHINE_ID" -a "$APP" --json >/tmp/machine.json
-          jq -c '{id:.id,state:.state,name:.name,created_at:.created_at,updated_at:.updated_at,image:.config.image,metadata:.config.metadata}' /tmp/machine.json | sed 's/^/ENGINEERING_WORKER_MACHINE=/'
+          flyctl machines list -a "$APP" --json >/tmp/machines.json
+          jq -c --arg id "$MACHINE_ID" '[.[] | select(.id==$id) | {id:.id,state:.state,name:.name,created_at:.created_at,updated_at:.updated_at,image:.config.image,metadata:.config.metadata}]' /tmp/machines.json | sed 's/^/ENGINEERING_WORKER_MACHINE=/'
           echo "SECRET_VALUES_EXPOSED=false"
