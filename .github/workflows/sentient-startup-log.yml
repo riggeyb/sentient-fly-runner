@@ -6,28 +6,50 @@ permissions:
 jobs:
   logs:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Capture Sentient startup logs
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl logs -a sentient-validation-runner --no-tail | tail -n 200
-      - name: Diagnose exact live repository witness as runtime user
+        run: flyctl logs -a sentient-validation-runner --no-tail | tail -n 160
+      - name: Diagnose repository capability in exact immutable image
         shell: bash
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           set -euo pipefail
           app=sentient-validation-runner
-          id="$(flyctl machines list -a "$app" --json | jq -r '.[0].id')"
-          state="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
-          if [ "$state" != started ]; then flyctl machine start "$id" -a "$app" >/dev/null || true; fi
-          for _ in $(seq 1 30); do
-            state="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
-            [ "$state" = started ] && break
-            sleep 2
-          done
-          test "$state" = started
-          flyctl ssh console -a "$app" -u node -C "sh -lc 'cd /opt/sentient-source || exit 40; echo NODE_REPOSITORY_WITNESS_BEGIN; stat -c \"%u:%g %U:%G %n\" . .git; git rev-parse HEAD; git rev-parse HEAD^{tree}; git status --short --branch; set +e; git fsck --connectivity-only --no-reflogs; fsck_rc=\$?; tmp=\$(mktemp -d); git clone --local --no-hardlinks --no-checkout -- /opt/sentient-source \"\$tmp/workspace\"; clone_rc=\$?; if [ \"\$clone_rc\" -eq 0 ]; then git -C \"\$tmp/workspace\" checkout --detach --force 997f59484e5ee1455d8eaf3694af487f47b7b24e; checkout_rc=\$?; else checkout_rc=99; fi; rm -rf \"\$tmp\"; echo NODE_REPO_FSCK_EXIT=\$fsck_rc; echo NODE_REPO_CLONE_EXIT=\$clone_rc; echo NODE_REPO_CHECKOUT_EXIT=\$checkout_rc; echo NODE_REPOSITORY_WITNESS_END; exit 0'"
-          echo "SECRET_VALUES_EXPOSED=false"
+          image=registry.fly.io/sentient-validation-runner:phase0-997f59484e5ee1455d8eaf3694af487f47b7b24e
+          script="$(cat <<'NODE'
+          import { createLocalRepositoryActionExecutorV1 } from "/app/dist/src/action-fabric/local-repository-executor.js";
+          import { ProductionRepositoryCapabilityV1 } from "/app/dist/src/application/production-repository.js";
+
+          const source = {
+            repository: "riggeyb/sentient",
+            commitSha: "997f59484e5ee1455d8eaf3694af487f47b7b24e",
+            treeSha: "567f2675dc1e15ea7232f67ae39e15e6473ba03b",
+          };
+          const executor = createLocalRepositoryActionExecutorV1({
+            repositoryPaths: { "riggeyb/sentient": "/opt/sentient-source" },
+          });
+          const description = await executor.describe();
+          console.log("REPOSITORY_EXECUTOR=" + JSON.stringify({
+            executorId: description.executorId,
+            executorVersion: description.executorVersion,
+            availability: description.availability,
+            availabilityReason: description.availabilityReason,
+          }));
+          const capability = new ProductionRepositoryCapabilityV1({ source, actionExecutor: executor });
+          const result = await capability.execute({
+            objectiveId: "phase0-repository-live-defect-diagnostic",
+            request: "verify repository connectivity",
+          });
+          console.log("REPOSITORY_CAPABILITY_RESULT=" + JSON.stringify(result));
+          console.log("SECRET_VALUES_EXPOSED=false");
+          if (result.status !== "SUCCEEDED") process.exit(42);
+          NODE
+          )"
+          flyctl machine run --rm -a "$app" --region iad \
+            --name "phase0-repo-diag-${GITHUB_RUN_ID}" \
+            "$image" node --input-type=module -e "$script"
