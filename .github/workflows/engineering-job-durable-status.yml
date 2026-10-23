@@ -23,26 +23,28 @@ jobs:
           APP="sentient-validation-runner"
           [[ "$JOB_ID" =~ ^[0-9a-f-]{36}$ ]]
           cat >/tmp/job-status.mjs <<'NODE'
-          import { PostgresEngineeringJobRepository } from "/app/dist/src/engineering/postgres-jobs.js";
+          import pg from "/app/node_modules/pg/lib/index.js";
+          const {Pool}=pg;
           const id=String(process.env.ENGINEERING_JOB_ID??"").trim();
           const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!db) throw new Error("DATABASE_BINDING_MISSING");
-          const repo=new PostgresEngineeringJobRepository(db);
+          const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
           try{
-            const job=await repo.get(id);
-            if(!job) throw new Error("ENGINEERING_JOB_NOT_FOUND");
+            const r=await pool.query(`select job_id,status,start_sha,start_tree,worker_machine_id,build_result,end_sha,end_tree,changed_files,steps,test_result,push_result,error_code,created_at,started_at,completed_at from sentient_deployment_governor.engineering_jobs where job_id=$1`,[id]);
+            const x=r.rows[0];
+            if(!x) throw new Error("ENGINEERING_JOB_NOT_FOUND");
             const safe={
-              jobId:job.jobId,status:job.status,startSha:job.startSha,startTree:job.startTree,
-              workerMachineId:job.workerMachineId,buildResult:job.buildResult,endSha:job.endSha,endTree:job.endTree,
-              changedFiles:job.changedFiles,testResult:job.testResult,pushResult:job.pushResult,errorCode:job.errorCode,
-              createdAt:job.createdAt,startedAt:job.startedAt,completedAt:job.completedAt,
-              stepNames:job.steps.map(s=>({name:s.name??null,category:s.category??null,status:s.status??null}))
+              jobId:x.job_id,status:x.status,startSha:x.stat_sha, startTree:x.start_tree,
+              workerMachineId:x.worker_machine_id,buildResult:x.build_result,endSha:x.end_sha,endTree:x.end_tree,
+              changedFiles:x.changed_files,testResult:x.test_result,pushResult:x.push_result,errorCode:x.error_code,
+              createdAt:x.created_at,startedAt:x.started_at,completedAt:x.completed_at,
+              steps:Array.isArray(x.steps)?x.steps.map(s=>({name:s.name??null,category:s.category??null,status:s.status??null,exitCode:s.exitCode??null})):[],
             };
             console.log("ENGINEERING_JOB_DURABLE="+JSON.stringify(safe));
-          } finally { await repo.close(); }
+          } finally { await pool.end(); }
           NODE
           B64="$(base64 -w0 /tmp/job-status.mjs)"
           flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/job-status.mjs && ENGINEERING_JOB_ID=$JOB_ID node /app/job-status.mjs; rc=\$?; rm -f /app/job-status.mjs; exit \$rc'"
-          echo "WORKER_MACHINE_LOOKUP_BEGIN"
+          echo "WORKER_MACHINES_SANITIZED="
           flyctl machines list -a "$APP" --json | jq -c '[.[] | {id:.id,state:.state,name:.name,created_at:.created_at,updated_at:.updated_at}]'
           echo "SECRET_VALUES_EXPOSED=false"
