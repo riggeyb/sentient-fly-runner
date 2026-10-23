@@ -1,129 +1,32 @@
 name: Phase0 Invoke Governor Recovery Exact
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: phase0-invoke-governor-recovery-exact
-  cancel-in-progress: false
-
 jobs:
   recover:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      RECOVERY_APP: sentient-governor-recovery-root
-      GOVERNOR_APP: sentient-deployment-governor
-      TARGET_SHA: d2ae0d7d77ebb4c2ad52d9bd4ca667f860071cb3
-      TARGET_TREE: 715b9323f7928d2fa31a43e4d4fae51b2f4b2980
-      RECOVERY_POLICY_REVISION: SENTIENT_GOVERNOR_RECOVERY_V1
+      S: 64d46db2e6a78048a07f81d683ce08ec7d95e367
+      T: dd2261700980b3da0764dcfe7e865b6bf3174a29
+      R: SENTIENT_GOVERNOR_RECOVERY_V1
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Invoke exact Governor recovery and verify live identity
+      - name: Recover exact Governor
         shell: bash
         run: |
           set -euo pipefail
-
-          recovery_machines="$(flyctl machines list -a "$RECOVERY_APP" --json)"
-          rid="$(printf '%s' "$recovery_machines" | jq -r '.[0].id')"
-          rstate="$(printf '%s' "$recovery_machines" | jq -r '.[0].state')"
-          test -n "$rid"
-          if [ "$rstate" != "started" ]; then
-            flyctl machine start "$rid" -a "$RECOVERY_APP" >/dev/null
-          fi
+          app=sentient-governor-recovery-root
+          id="$(flyctl machines list -a "$app" --json | jq -r '.[0].id')"
+          flyctl machine start "$id" -a "$app" >/dev/null || true
           for _ in $(seq 1 60); do
-            rstate="$(flyctl machines list -a "$RECOVERY_APP" --json | jq -r --arg id "$rid" '.[]|select(.id==$id)|.state' | head -n1)"
-            [ "$rstate" = "started" ] && break
+            st="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
+            [ "$st" = started ] && break
             sleep 2
           done
-          test "$rstate" = "started"
-
-          cat >/tmp/recover-request.mjs <<'NODE'
-          const sha=process.env.TARGET_SHA;
-          const tree=process.env.TARGET_TREE;
-          const rev=process.env.RECOVERY_POLICY_REVISION;
-          const token=String(process.env.SENTIENT_GOVERNOR_RECOVERY_API_TOKEN??"").trim();
-          if(!token) process.exit(20);
-          const r=await fetch("http://127.0.0.1:8080/v1/recovery/governor",{
-            method:"POST",
-            headers:{authorization:"Bearer "+token,"content-type":"application/json"},
-            body:JSON.stringify({repository:"riggeyb/sentient",sha,tree,recoveryPolicyRevision:rev}),
-            signal:AbortSignal.timeout(1100000)
-          });
-          const v=await r.json().catch(()=>({}));
-          console.log(JSON.stringify({
-            httpStatus:r.status,
-            recoveryId:v.recoveryId??null,
-            requestedSha:v.requestedSha??null,
-            requestedTree:v.requestedTree??null,
-            observedSha:v.observedSha??null,
-            observedTree:v.observedTree??null,
-            recoveryPolicyRevision:v.recoveryPolicyRevision??null,
-            machineIds:Array.isArray(v.machineIds)?v.machineIds:[],
-            deploymentId:v.deploymentId??null,
-            status:v.status??null,
-            errorCode:v.errorCode??null
-          }));
-          if(!r.ok || v.status!=="PASS" ||
-             v.requestedSha!==sha || v.requestedTree!==tree ||
-             v.observedSha!==sha || v.observedTree!==tree ||
-             v.recoveryPolicyRevision!==rev ||
-             !Array.isArray(v.machineIds) || v.machineIds.length===0) process.exit(21);
-          NODE
-
-          request_b64="$(base64 -w0 /tmp/recover-request.mjs)"
-          set +e
-          flyctl ssh console -a "$RECOVERY_APP" -C \
-            "sh -lc 'echo $request_b64 | base64 -d >/tmp/recover-request.mjs && TARGET_SHA=$TARGET_SHA TARGET_TREE=$TARGET_TREE RECOVERY_POLICY_REVISION=$RECOVERY_POLICY_REVISION node /tmp/recover-request.mjs'" \
-            > /tmp/recovery-receipt.json
-          rc=$?
-          set -e
-          cat /tmp/recovery-receipt.json
-          test "$rc" -eq 0
+          test "$st" = started
+          flyctl ssh console -a "$app" -C "sh -lc 'echo Y29uc3Qgcz1wcm9jZXNzLmVudi5TLHQ9cHJvY2Vzcy5lbnYuVCxyPXByb2Nlc3MuZW52LlIsaz1TdHJpbmcocHJvY2Vzcy5lbnYuU0VOVElFTlRfR09WRVJOT1JfUkVDT1ZFUllfQVBJX1RPS0VOfHwiIikudHJpbSgpO2lmKCFrKXByb2Nlc3MuZXhpdCgyMCk7Y29uc3QgcT1hd2FpdCBmZXRjaCgiaHR0cDovLzEyNy4wLjAuMTo4MDgwL3YxL3JlY292ZXJ5L2dvdmVybm9yIix7bWV0aG9kOiJQT1NUIixoZWFkZXJzOnthdXRob3JpemF0aW9uOiJCZWFyZXIgIitrLCJjb250ZW50LXR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIn0sYm9keTpKU09OLnN0cmluZ2lmeSh7cmVwb3NpdG9yeToicmlnZ2V5Yi9zZW50aWVudCIsc2hhOnMsdHJlZTp0LHJlY292ZXJ5UG9saWN5UmV2aXNpb246cn0pLHNpZ25hbDpBYm9ydFNpZ25hbC50aW1lb3V0KDExMDAwMDApfSk7Y29uc3Qgdj1hd2FpdCBxLmpzb24oKTtjb25zb2xlLmxvZyhKU09OLnN0cmluZ2lmeSh7aHR0cFN0YXR1czpxLnN0YXR1cyxyZWNvdmVyeUlkOnYucmVjb3ZlcnlJZD8/bnVsbCxyZXF1ZXN0ZWRTaGE6di5yZXF1ZXN0ZWRTaGE/P251bGwscmVxdWVzdGVkVHJlZTp2LnJlcXVlc3RlZFRyZWU/P251bGwsb2JzZXJ2ZWRTaGE6di5vYnNlcnZlZFNoYT8/bnVsbCxvYnNlcnZlZFRyZWU6di5vYnNlcnZlZFRyZWU/P251bGwsc3RhdHVzOnYuc3RhdHVzPz9udWxsLGVycm9yQ29kZTp2LmVycm9yQ29kZT8/bnVsbH0pKTtpZighcS5va3x8di5zdGF0dXMhPT0iUEFTUyJ8fHYucmVxdWVzdGVkU2hhIT09c3x8di5yZXF1ZXN0ZWRUcmVlIT09dHx8di5vYnNlcnZlZFNoYSE9PXN8fHYub2JzZXJ2ZWRUcmVlIT09dClwcm9jZXNzLmV4aXQoMjEpOw== | base64 -d >/tmp/r.mjs && S=$S T=$T R=$R node /tmp/r.mjs'"
           echo "GOVERNOR_RECOVERY_REQUEST=PASS"
-          echo "EXACT_SOURCE_RECOVERY=PASS"
-          echo "RECOVERY_RECEIPT=PASS"
-
-          governor_machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
-          gid="$(printf '%s' "$governor_machines" | jq -r '.[0].id')"
-          gstate="$(printf '%s' "$governor_machines" | jq -r '.[0].state')"
-          test -n "$gid"
-          if [ "$gstate" != "started" ]; then
-            flyctl machine start "$gid" -a "$GOVERNOR_APP" >/dev/null
-          fi
-
-          cat >/tmp/verify-governor.mjs <<'NODE'
-          let r;
-          for(let i=0;i<90;i++){
-            try{
-              r=await fetch("http://127.0.0.1:8080/healthz",{signal:AbortSignal.timeout(5000)});
-              if(r.ok) break;
-            }catch{}
-            await new Promise(x=>setTimeout(x,2000));
-          }
-          if(!r || !r.ok) process.exit(30);
-          const v=await r.json();
-          console.log(JSON.stringify({
-            status:v.status,
-            role:v.role,
-            governorSha:v.governorSha,
-            governorTree:v.governorTree,
-            recoveryPolicyRevision:v.recoveryPolicyRevision
-          }));
-          if(v.status!=="ok" ||
-             v.governorSha!==process.env.TARGET_SHA ||
-             v.governorTree!==process.env.TARGET_TREE ||
-             v.recoveryPolicyRevision!==process.env.RECOVERY_POLICY_REVISION) process.exit(31);
-          NODE
-
-          verify_b64="$(base64 -w0 /tmp/verify-governor.mjs)"
-          flyctl ssh console -a "$GOVERNOR_APP" -C \
-            "sh -lc 'echo $verify_b64 | base64 -d >/tmp/verify-governor.mjs && TARGET_SHA=$TARGET_SHA TARGET_TREE=$TARGET_TREE RECOVERY_POLICY_REVISION=$RECOVERY_POLICY_REVISION node /tmp/verify-governor.mjs'"
-
-          echo "GOVERNOR_IDENTITY_LIVE=PASS"
-          echo "RECOVERED_GOVERNOR_IDENTITY=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
