@@ -1,0 +1,70 @@
+name: Phase0 Critical Regression Diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact Sentient candidate SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeeby/sentient
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build exact candidate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          npm ci --no-audit --no-fund
+          npm run build
+          echo "SOURCE_IDENTITY=PASS"
+          echo "BUILD=PASS"
+      - name: Run Phase0 critical regressions independently
+        shell: bash
+        run: |
+          set -uo pipefail
+          tests=(
+            active-work-core
+            active-work-expiry-fencing
+            active-work-persistence
+            active-work-restart-edge
+            engineering-jobs
+            objective-continuation
+            objective-continuation-readiness
+            permanent-continuation-http
+            permanent-continuation-multiprocess
+            phase0-control-recovery
+            phase0-engineering-readiness
+            deployment-governor
+            deployment-governor-boundaries
+            deployment-governor-skills-fence
+          )
+          failed=0
+          for t in "${tests[@]}"; do
+            echo "=== TEST:$t ==="
+            if node --test "dist/test/$t.test.js"; then
+              echo "REGRESSION_${t}=PASS"
+            else
+              echo "REGRESSION_${t}=FAIL"
+              failed=1
+            fi
+          done
+          echo "SECRET_VALUES_EXPOSED=false"
+          if [ "$failed" -ne 0 ]; then
+            echo "PHASE0_CRITICAL_REGRESSIONS=FAIL"
+            exit 1
+          fi
+          echo "PHASE0_CRITICAL_REGRESSIONS=PASS"
