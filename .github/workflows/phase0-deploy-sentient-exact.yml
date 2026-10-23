@@ -33,7 +33,7 @@ jobs:
           const sha=process.env.S, tree=process.env.T, skillsSha=process.env.K;
           const token=String(process.env.SENTIENT_DEPLOYMENT_API_TOKEN??"").trim();
           if(!token) process.exit(20);
-          const r=await fetch("https://sentient-deployment-governor.fly.dev/v1/deployments/sentient",{
+          const r=await fetch("http://127.0.0.1:8080/v1/deployments/sentient",{
             method:"POST",
             headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":"phase0-certification-997f5948"},
             body:JSON.stringify({sha,tree,skillsSha}),
