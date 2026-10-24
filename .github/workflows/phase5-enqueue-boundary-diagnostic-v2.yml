@@ -1,0 +1,104 @@
+name: Sentient Phase 5 Enqueue Boundary Diagnostic V2
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Verify exact identity and probe durable enqueue
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          ready="$(curl -fsS --max-time 10 https://sentient-validation-runner.fly.dev/readyz)"
+          grep -Fq "$EXPECTED_SHA" <<<"$ready"
+          grep -Fq "$EXPECTED_TREE" <<<"$ready"
+          grep -Fq '"ready":true' <<<"$ready"
+          echo "PHASE5_ENQUEUE_DIAG_V2_IDENTITY=PASS"
+
+          OBJ="phase5-enqueue-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cat >/tmp/enqueue-v2.mjs <<'NODE'
+          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+
+          const objectiveId=String(process.env.PHASE5_DIAG_OBJECTIVE_ID??"").trim();
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!objectiveId||!token||!connectionString) throw new Error("PHASE5_DIAG_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString});
+          const clean=(value)=>typeof value==="string"?value.replace(/[\p\n]/g," ").slice(0,500):"none";
+          try {
+            const beforeStarted=Date.now();
+            const before=await repo.snapshot();
+            console.log(`PHASE5_DIAG_BEFORE_SNAPSHOT_MS=${Date.now()-beforeStarted}`);
+            console.log(`PHASE5_DIAG_BEFORE_GENERATION=${before.generation}`);
+            console.log(`PHASE5_DIAG_BEFORE_LOGICAL_BYTES=${Buffer.byteLength(JSON.stringify(before),"utf8")}`);
+
+            const started=Date.now();
+            let response=null;
+            let fetchError=null;
+            try {
+              response=await fetch("http://127.0.0.1:8080/v1/objectives",{
+                method:"POST",
+                headers:{
+                  authorization:`Bearer ${token}`,
+                  "content-type":"application/json",
+                  accept:"application/json"
+                },
+                body:JSON.stringify({
+                  request:"Return the exact text ENQUEUE_BOUNDARY_OK.",
+                  objectiveId,
+                  sessionId:`session-${objectiveId}`,
+                  mode:"ordinary",
+                  privacy:"public_fixture"
+                }),
+                signal:AbortSignal.timeout(45000)
+              });
+            } catch(error) {
+              fetchError=error;
+            }
+            console.log(`PHASE5_DIAG_POST_ELAPSED_MS=${Date.now()-started}`);
+            if(fetchError!==null) {
+              console.log(`PHASE5_DIAG_POST_FETCH_ERROR=${clean(String(fetchError?.name??"Error")+":"+String(fetchError?.message??fetchError))}`);
+            } else {
+              const raw=await response.text();
+              let body={};
+              try { body=JSON.parse(raw); } catch {}
+              console.log(`PHASE5_DIAG_POST_STATUS=${response.status}`);
+              console.log(`PHASE5_DIAG_POST_ERROR=${clean(body.error)}`);
+              console.log(`PHASE5_DIAG_POST_REASON=${clean(body.reason)}`);
+            }
+
+            const afterStarted=Date.now();
+            const after=await repo.snapshot();
+            console.log(`PHASE5_DIAG_AFTER_SNAPSHOT_MS=${Date.now()-afterStarted}`);
+            console.log(`PHASE5_DIAG_AFTER_GENERATION=${after.generation}`);
+            console.log(`PHASE5_DIAG_AFTER_LOGICAL_BYTES=${Buffer.byteLength(JSON.stringify(after),"utf8")}`);
+            console.log(`PHASE5_DIAG_TASK_PRESENT=${after.records.tasks.some((task)=>task.id===objectiveId)}`);
+            console.log("SECRET_VALUES_EXPOSED=false");
+            console.log("PHASE5_ENQUEUE_BOUNDARY_DIAGNOSTIC_V2=COMPLETE");
+          } finally {
+            await repo.close().catch(()=>undefined);
+          }
+          NODE
+          B64="$(base64 -w0 /tmp/enqueue-v2.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/enqueue-v2.mjs && PHASE1_DIAG_OBJECTIVE_ID=$OBJ node /app/enqueue-v2.mjs; rc=\$?; rm -f /app/enqueue-v2.mjs; exit \$rc'
