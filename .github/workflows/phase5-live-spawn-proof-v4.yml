@@ -10,6 +10,7 @@ name: Sentient Phase 5 Live Restart Reclaim Proof V4
         type: string
 permissions:
   contents: read
+
 jobs:
   phase5-live-restart:
     runs-on: ubuntu-latest
@@ -29,6 +30,7 @@ jobs:
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
           OBJ="phase5-v4-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           SESSION="session-${OBJ}"
+
           ready_exact() {
             for _ in $(seq 1 "$1"); do
               r="$(curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/readyz || true)"
@@ -37,6 +39,7 @@ jobs:
             done
             return 1
           }
+
           ready_exact 120
           echo PHASE5_PRE_INTERRUPT_IDENTITY=PASS
 
@@ -49,32 +52,50 @@ jobs:
           const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
           try {
             const response=await fetch("http://127.0.0.1:8080/v1/objectives",{
-              method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},
-              body:JSON.stringify({request:"Independently analyze restart-safe durable collaboration, verify it, and converge under Sentient authority.",objectiveId,sessionId,mode:"collaborative",privacy:"public_fixture"}),
+              method:"POST",
+              headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},
+              body:JSON.stringify({
+                request:"Independently analyze restart-safe durable collaboration, verify it, and converge under Sentient authority.",
+                objectiveId,sessionId,mode:"collaborative",privacy:"public_fixture"
+              }),
               signal:AbortSignal.timeout(120000)
             });
             if(response.status!==202) throw new Error(`PHASE5_OBJECTIVE_HTTP_${response.status}`);
-            let armed=false;
             for(let i=0;i<1200;i++){
-              const work=(await repo.activeWork(sessionId,true)).find(r=>r.objectiveId===objectiveId&&r.workKey==="independent-analysis"&&r.status==="ACTIVE");
+              const work=(await repo.activeWork(sessionId,true)).find(r=>
+                r.objectiveId===objectiveId&&r.workKey==="independent-analysis"&&r.status==="ACTIVE"
+              );
               if(work) {
                 const s=await repo.spawnSnapshot();
-                const child=s.records.executions.find(r=>r.requestId===work.participantId&&["reserved","running"].includes(r.identity.status)&&r.reservationReconciled===false);
+                const child=s.records.executions.find(r=>
+                  r.requestId===work.participantId
+                  && ["reserved","running"].includes(r.identity.status)
+                  && r.reservationReconciled===false
+                );
                 if(child) {
-                  console.log(JSON.stringify({event:"PHASE5_INTERRUPT_ARMED",workId:work.workId,requestId:work.participantId,childExecutionId:child.id}));
+                  console.log(JSON.stringify({
+                    event:"PHASE5_INTERRUPT_ARMED",
+                    workId:work.workId,
+                    requestId:work.participantId,
+                    childExecutionId:child.id
+                  }));
                   console.log("PHASE5_INTERRUPT_ARMED=PASS");
-                  armed=true;
-                  break;
+                  process.exitCode=0;
+                  return;
                 }
               }
               await new Promise(r=>setTimeout(r,50));
             }
-            if(!armed) throw new Error("PHASE5_INTERRUPT_WINDOW_NOT_OBSERVED");
-          } finally {await repo.close().catch(()=>undefined);}
+            throw new Error("PHASE5_INTERRUPT_WINDOW_NOT_OBSERVED");
+          } finally {
+            await repo.close().catch(()=>undefined);
+          }
           NODE
 
           ARM_B64="$(base64 -w0 /tmp/arm.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $ARM_B64 | base64 -d >/tmp/arm.mjs && PHASE5_OBJECTIVE_ID=$OBJ PHASE5_SESSION_ID=$SESSION node /tmp/arm.mjs; rc=\$?; rm -f /tmp/arm.mjs; exit \$rc'" | tee /tmp/arm.out
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $ARM_B64 | base64 -d >/tmp/arm.mjs && PHASE5_OBJECTIVE_ID=$OBJ PHASE5_SESSION_ID=$SESSION node /tmp/arm.mjs; rc=\$?; rm -f /tmp/arm.mjs; exit \$rc'" \
+            | tee /tmp/arm.out
           grep -Fq 'PHASE5_INTERRUPT_ARMED=PASS' /tmp/arm.out
           J="$(grep -F '"event":"PHASE5_INTERRUPT_ARMED"' /tmp/arm.out | tail -n1)"
           WORK_ID="$(jq -er '.workId' <<<"$J")"
@@ -90,7 +111,7 @@ jobs:
           ready_exact 180
           echo PHASE5_POST_RESTART_IDENTITY=PASS
 
-          cat >/tmp/observe.mjs <<'NODE'
+          cat >/tmp/observe-once.mjs <<'NODE'
           import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
           const objectiveId=process.env.PHASE5_OBJECTIVE_ID,sessionId=process.env.PHASE5_SESSION_ID;
           const workId=process.env.PHASE5_WORK_ID,requestId=process.env.PHASE5_REQUEST_ID,childId=process.env.PHASE5_CHILD_ID;
@@ -99,43 +120,71 @@ jobs:
           const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
           const terminalWork=new Set(["COMPLETED","ABANDONED"]);
           const terminalChild=new Set(["succeeded","failed","cancelled","timed_out","rejected"]);
-          let last=null,passed=false;
           try {
-            for(let i=0;i<480;i++){
-              const works=await repo.activeWork(sessionId,true);
-              const spawn=await repo.spawnSnapshot();
-              const work=works.find(w=>w.workId===workId);
-              const old=spawn.records.executions.find(e=>e.id===childId);
-              const oldResult=spawn.records.results.find(r=>r.executionId===childId)?.result;
-              const analyses=spawn.records.executions.filter(e=>e.identity.taskId===objectiveId&&e.identity.role==="independent-analysis");
-              const retries=analyses.filter(e=>e.id!==childId);
-              const retry=retries[0]??null;
-              last={workStatus:work?.status,reclaimCount:work?.reclaimCount,workId:work?.workId,
-                oldStatus:old?.identity.status,oldReconciled:old?.reservationReconciled,
-                analysisCount:analyses.length,retryCount:retries.length,retryStatus:retry?.identity.status,
-                retryReconciled:retry?.reservationReconciled};
-              passed=Boolean(work&&work.reclaimCount===1&&work.participantId!==requestId&&terminalWork.has(work.status)
-                &&old?.identity.status==="timed_out"&&old.reservationReconciled===true
-                &&oldResult?.terminalStatus==="timed_out"&&oldResult?.failure?.class==="restart_interrupted"&&oldResult?.failure?.retryable===true
-                &&analyses.length===2&&retries.length===1&&retry&&terminalChild.has(retry.identity.status)&&retry.reservationReconciled===true);
-              if(passed){
-                console.log("PHASE5_RECOVERY_STATE="+JSON.stringify(last));
-                for(const m of ["PHASE5_SAME_WORK_ID_RECLAIM=PASS","PHASE5_RECLAIM_COUNT=1","PHASE5_PARTICIPANT_ROTATED=PASS","PHASE5_OLD_CHILD_RECONCILED=PASS","PHASE5_OLD_RESERVATION_RECONCILED=PASS","PHASE5_ONE_BOUNDED_RETRY=PASS","PHASE5_NO_DUPLICATE_ANALYSIS_CHILD=PASS","PHASE5_RETRY_RESERVATION_RECONCILED=PASS","DURABLE_SPAWN_RECOVERY=PASS","SECRET_VALUES_EXPOSED=false"]) console.log(m);
-                console.log("PHASE5_RETRY_TERMINAL_STATUS="+retry.identity.status);
-                console.log("PHASE5_RECOVERED_WORK_TERMINAL_STATUS="+work.status);
-                break;
-              }
-              await new Promise(r=>setTimeout(r,500));
-            }
-            if(!passed) {
-              console.log("PHASE5_RECOVERY_STATE_TIMEOUT="+JSON.stringify(last));
-              throw new Error("PHASE5_AUTOMATIC_RECOVERY_NOT_TERMINAL");
-            }
-          } finally {await repo.close().catch(()=>undefined);}
+            const works=await repo.activeWork(sessionId,true);
+            const spawn=await repo.spawnSnapshot();
+            const work=works.find(w=>w.workId===workId);
+            const old=spawn.records.executions.find(e=>e.id===childId);
+            const oldResult=spawn.records.results.find(r=>r.executionId===childId)?.result;
+            const analyses=spawn.records.executions.filter(e=>e.identity.taskId===objectiveId&&e.identity.role==="independent-analysis");
+            const retries=analyses.filter(e=>e.id!==childId);
+            const retry=retries[0]??null;
+            const state={
+              workStatus:work?.status??null,reclaimCount:work?.reclaimCount??null,workId:work?.workId??null,
+              participantId:work?.participantId??null,oldStatus:old?.identity.status??null,
+              oldReconciled:old?.reservationReconciled??null,oldTerminalStatus:oldResult?.terminalStatus??null,
+              oldFailureClass:oldResult?.failure?.class??null,oldRetryable:oldResult?.failure?.retryable??null,
+              analysisCount:analyses.length,retryCount:retries.length,retryStatus:retry?.identity.status??null,
+              retryReconciled:retry?.reservationReconciled??null
+            };
+            const passed=Boolean(
+              work&&work.workId===workId&&work.reclaimCount===1&&work.participantId!==requestId&&terminalWork.has(work.status)
+              &&old?.identity.status==="timed_out"&&old.reservationReconciled===true
+              &&oldResult?.terminalStatus==="timed_out"&&oldResult?.failure?.class==="restart_interrupted"&&oldResult?.failure?.retryable===true
+              &&analyses.length===2&&retries.length===1&&retry&&terminalChild.has(retry.identity.status)&&retry.reservationReconciled===true
+            );
+            console.log("PHASE5_OBSERVATION_STATE="+JSON.stringify(state));
+            console.log("PHASE5_OBSERVATION_PASS="+String(passed));
+          } finally {
+            await repo.close().catch(()=>undefined);
+          }
           NODE
 
-          OBS_B64="$(base64 -w0 /tmp/observe.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $OBS_B64 | base64 -d >/tmp/observe.mjs && PHASE5_OBJECTIVE_ID=$OBJ PHASE5_SESSION_ID=$SESSION PHASE5_WORK_ID=$WORK_ID PHASE5_REQUEST_ID=$REQUEST_ID PHASE5_CHILD_ID=$CHILD_ID node /tmp/observe.mjs; rc=\$?; rm -f /tmp/observe.mjs; exit \$rc'"
+          OBS_B64="$(base64 -w0 /tmp/observe-once.mjs)"
+          passed=false
+          : >/tmp/last-observation.out
+          for _ in $(seq 1 180); do
+            # Keep the autostart/stop target reachable without changing the sealed Phase0 resource envelope.
+            curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/readyz >/dev/null || true
+            set +e
+            out="$(flyctl ssh console -a "$APP" -C \
+              "sh -lc 'cd /app && echo $OBS_B64 | base64 -d >/tmp/observe-once.mjs && PHASE5_OBJECTIVE_ID=$OBJ PHASE5_SESSION_ID=$SESSION PHASE5_WORK_ID=$WORK_ID PHASE5_REQUEST_ID=$REQUEST_ID PHASE5_CHILD_ID=$CHILD_ID node /tmp/observe-once.mjs; rc=\$?; rm -f /tmp/observe-once.mjs; exit \$rc'" 2>&1)"
+            rc=$?
+            set -e
+            printf '%s\n' "$out" >/tmp/last-observation.out
+            if [ "$rc" -eq 0 ] && grep -Fq 'PHASE5_OBSERVATION_PASS=true' <<<"$out"; then
+              passed=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$passed" != true ]; then
+            cat /tmp/last-observation.out
+            echo PHASE5_LIVE_RESTART_RECOVERY_PROOF=FAIL
+            exit 1
+          fi
+
+          STATE="$(grep -F 'PHASE5_OBSERVATION_STATE=' /tmp/last-observation.out | tail -n1)"
+          echo "$STATE"
+          echo PHASE5_SAME_WORK_ID_RECLAIM=PASS
+          echo PHASE5_RECLAIM_COUNT=1
+          echo PHASE5_PARTICIPANT_ROTATED=PASS
+          echo PHASE5_OLD_CHILD_RECONCILED=PASS
+          echo PHASE5_OLD_RESERVATION_RECONCILED=PASS
+          echo PHASE5_ONE_BOUNDED_RETRY=PASS
+          echo PHASE5_NO_DUPLICATE_ANALYSIS_CHILD=PASS
+          echo PHASE5_RETRY_RESERVATION_RECONCILED=PASS
+          echo DURABLE_SPAWN_RECOVERY=PASS
           echo "PHASE5_OBJECTIVE_ID=$OBJ"
           echo "PHASE5_SESSION_ID=$SESSION"
           echo PHASE5_LIVE_RESTART_RECOVERY_PROOF=PASS
