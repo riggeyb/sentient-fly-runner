@@ -1,0 +1,85 @@
+name: Sentient Phase5 Guarded Stale Root Cleanup
+"on":
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      S: ${{ inputs.sha }}
+      T: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Clean only the verified stale canonical-row root blocker
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$S" =~ ^[0-9a-f]{40}$ ]]; [[ "$T" =~ ^[0-9a-f]{40}$ ]]
+          id="$(flyctl machines list -a "$APP" --json | jq -r '.[0].id')"
+          test -n "$id"; flyctl machine start "$id" -a "$APP" >/dev/null || true
+          ready=""
+          for _ in $(seq 1 60); do
+            ready="$(curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/readyz 2>/dev/null || true)"
+            if grep -Fq "$S" <<<"$ready" && grep -Fq "$T" <<<"$ready" && grep -Fq '"ready":true' <<<"$ready"; then break; fi
+            sleep 2
+          done
+          grep -Fq "$S" <<<"$ready"; grep -Fq "$T" <<<"$ready"; grep -Fq '"ready":true' <<<"$ready"
+          echo PHASE1_STALE_ROOT_CLEANUP_IDENTITY=PASS
+          cat >/tmp/c.mjs <<'NODE'
+          import {Pool} from "pg";
+          const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!cs) throw Error("DB_BINDING_MISSING");
+          const p=new Pool({connectionString:cs,max:3,connectionTimeoutMillis:10000});
+          const w=await p.connect(), o=await p.connect(), sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          try{
+            await w.query("BEGIN"); await w.query("SET LOCAL lock_timeout='8s'");
+            const wp=Number((await w.query("SELECT pg_backend_pid()::int pid")).rows[0].pid);
+            const wait=w.query("SELECT generation FROM sentient_durable_state WHERE state_key=$1 FOR UPDATE",["canonical"])
+              .then(()=>({ok:true,code:"none"}),e=>({ok:false,code:String(e?.code??"unknown")}));
+            await sleep(250);
+            const q=[wp], seen=new Set(), all=new Set(), edges=[];
+            while(q.length&&seen.size<32){
+              const pid=q.shift(); if(seen.has(pid)) continue; seen.add(pid);
+              const bs=(await o.query("SELECT pg_blocking_pids($1::int) b",[pid])).rows[0]?.b??[];
+              for(const x of bs.map(Number).filter(Number.isInteger)){edges.push([pid,x]); if(x!==wp)all.add(x); if(!seen.has(x))q.push(x);}
+            }
+            const blocked=new Set(edges.map(x=>x[0])), roots=[...all].filter(x=>!blocked.has(x));
+            console.log(`PHASE5_STALE_ROOT_ROOT_COUNT=${roots.length}`); if(roots.length!==1) throw Error("ROOT_NOT_UNIQUE");
+            const pid=roots[0];
+            const a=(await o.query(`SELECT COALESCE(application_name,'') app,COALESCE(state,'') state,
+              COALESCE(wait_event_type,'') wt,COALESCE(wait_event,'') we,
+              COALESCE(floor(EXTRACT(EPOCH FROM(now()-xact_start))*1000),0)::bigint age
+              FROM pg_stat_activity WHERE pid=$1`,[pid])).rows[0];
+            if(!a) throw Error("ROOT_MISSING");
+            const age=Number(a.age??0);
+            console.log(`PHASE5_STALE_ROOT_PID=${pid}`);
+            console.log(`PHASE5_STALE_ROOT_APPLICATION=${a.app}`);
+            console.log(`PHASE5_STALE_ROOT_STATE=${a.state}`);
+            console.log(`PHASE5_STALE_ROOT_WAIT=${a.wt}/${a.we}`);
+            console.log(`PHASE5_STALE_ROOT_XACT_AGE_MS=${age}`);
+            if(a.app!=="Supavisor"||a.state!=="active"||a.wt!=="Client"||a.we!=="ClientWrite"||age<300000) throw Error("ROOT_GUARD_MISMATCH");
+            const ls=(await o.query("SELECT locktype,mode,granted,COALESCE(relation::regclass::text,'') rel FROM pg_locks WHERE pid=$1",[pid])).rows;
+            const tx=ls.some(x=>x.locktype==="transactionid"&&x.mode==="ExclusiveLock"&&x.granted===true);
+            const dr=ls.some(x=>x.rel==="sentient_durable_state"&&x.granted===true);
+            console.log(`PHASE5_STALE_ROOT_TXN_EXCLUSIVE=${tx}`); console.log(`PHASE5_STALE_ROOT_DURABLE_RELATION_LOCK=${dr}`);
+            if(!tx||!dr) throw Error("ROOT_LOCK_GUARD_MISMATCH");
+            const term=(await o.query("SELECT pg_terminate_backend($1::int) terminated",[pid])).rows[0]?.terminated===true;
+            console.log(`PHASE5_STALE_ROOT_TERMINATED=${term}`); if(!term) throw Error("TERMINATION_FAILED");
+            const wo=await wait; console.log(`PHASE5_STALE_ROOT_WAITER_OK=${wo.ok}`); console.log(`PHASE5_STALE_ROOT_WAITER_CODE=${wo.code}`);
+            await w.query("ROLLBACK").catch(()=>{});
+            const v=await p.connect();
+            try{await v.query("BEGIN"); const st=Date.now(); await v.query("SELECT generation FROM sentient_durable_state WHERE state_key=$1 FOR UPDATE NOWAIT",["canonical"]);
+              console.log(`PHASE5_STALE_ROOT_POST_LOCK_MS=${Date.now()-st}`); console.log("PHASE1_STALE_ROOT_POST_LOCK_AVAILABLE=true"); await v.query("ROLLBACK");
+            }finally{v.release();}
+            console.log("SECRET_VALUES_EXPOSED=false"); console.log("PHASE1_STALE_ROOT_CLEANUP=PASS");
+          }finally{await w.query("ROLLBACK").catch(()=>{});w.release();o.release();await p.end().catch(()=>{});}
+          NODE
+          B="$(base64 -w0 /tmp/c.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B | base64 -d >/app/c.mjs && node /app/c.mjs; r=\$?; rm -f /app/c.mjs; exit \$r'"
