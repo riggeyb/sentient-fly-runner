@@ -1,0 +1,137 @@
+name: Sentient Phase 5 Durable Lock Chain Diagnostic
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Trace canonical durable-state blocker chain without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          ready="$(curl -fsS --max-time 20 https://sentient-validation-runner.fly.dev/readyz)"
+          grep -Fq "$EXPECTED_SHA" <<<"$ready"
+          grep -Fq "$EXPECTED_TREE" <<<"$ready"
+          grep -Fq '"ready":true' <<<"$ready"
+          echo "PHASE5_LOCK_CHAIN_IDENTITY=PASS"
+
+          cat >/tmp/phase5-lock-chain.mjs <<'NODE'
+          import { Pool } from "pg";
+          const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
+          const pool=new Pool({connectionString,max:3,connectionTimeoutMillis:10000});
+          const waiter=await pool.connect();
+          const observer=await pool.connect();
+          const sleep=(ms)=>new Promise(resolve=>setTimeout(resolve,ms));
+          try {
+            await waiter.query("BEGIN");
+            await waiter.query("SET LOCAL lock_timeout = '5s'");
+            const pidRow=await waiter.query("SELECT pg_backend_pid()::int AS pid");
+            const waiterPid=Number(pidRow.rows[0]?.pid??0);
+            if(!Number.isInteger(waiterPid)||waiterPid<=0) throw new Error("PHASE5_WAITER_PID_INVALID");
+
+            const started=Date.now();
+            const waitPromise=waiter.query(
+              `SELECT generation FROM sentient_durable_state
+                WHERE state_key=$1 FOR UPDATE`,
+              ["canonical"],
+            ).then(
+              ()=>({ok:true,code:"none",elapsedMs:Date.now()-started}),
+              error=>({ok:false,code:String(error?.code??"unknown"),elapsedMs:Date.now()-started}),
+            );
+            await sleep(250);
+
+            const queue=[waiterPid];
+            const expanded=new Set();
+            const discovered=new Set();
+            const edges=[];
+            while(queue.length>0 && expanded.size<32) {
+              const pid=queue.shift();
+              if(expanded.has(pid)) continue;
+              expanded.add(pid);
+              const r=await observer.query(
+                "SELECT pg_blocking_pids($1::int) AS blockers",
+                [pid],
+              );
+              const blockers=(r.rows[0]?.blockers??[])
+                .map(Number)
+                .filter(value=>Number.isInteger(value)&&value>0);
+              for(const blocker of blockers) {
+                edges.push({waiterPid:pid,blockerPid:blocker});
+                if(blocker!==waiterPid) discovered.add(blocker);
+                if(!expanded.has(blocker)) queue.push(blocker);
+              }
+            }
+
+            const blockerPids=[...discovered].sort((a,b)=>a-b);
+            const blockedPids=new Set(edges.map(edge=>edge.waiterPid));
+            const rootPids=blockerPids.filter(pid=>!blockedPids.has(pid));
+
+            console.log(`PHASE5_LOCK_CHAIN_WAITER_PID=${waiterPid}`);
+            console.log(`PHASE5_LOCK_CHAIN_EDGES=${JSON.stringify(edges)}`);
+            console.log(`PHASE5_LOCK_CHAIN_BLOCKER_PIDS=${JSON.stringify(blockerPids)}`);
+            console.log(`PHASE5_LOCK_CHAIN_ROOT_PIDS=${JSON.stringify(rootPids)}`);
+
+            if(blockerPids.length>0) {
+              const activity=await observer.query(
+                `SELECT pid::int,
+                        COALESCE(application_name,'') AS "applicationName",
+                        COALESCE(state,'') AS state,
+                        COALESCE(wait_event_type,'') AS "waitEventType",
+                        COALESCE(wait_event,'') AS "waitEvent",
+                        COALESCE(floor(EXTRACT(EPOCH FROM (now()-xact_start))*1000),0)::bigint AS "xactAgeMs",
+                        COALESCE(floor(EXTRACT(EPOCH FROM (now()-query_start))*1000),0)::bigint AS "queryAgeMs",
+                        COALESCE(backend_type,'') AS "backendType"
+                   FROM pg_stat_activity
+                  WHERE pid = ANY($1::int[])
+                  ORDER BY pid`,
+                [blockerPids],
+              );
+              const locks=await observer.query(
+                `SELECT pid::int, locktype, mode, granted,
+                        COALESCE(relation::regclass::text,'') AS relation
+                   FROM pg_locks
+                  WHERE pid = ANY($1::int[])
+                  ORDER BY pid, locktype, mode, granted DESC`,
+                [blockerPids],
+              );
+              console.log(`PHASE5_LOCK_CHAIN_ACTIVITY=${JSON.stringify(activity.rows)}`);
+              console.log(`PHASE5_LOCK_CHAIN_LOCKS=${JSON.stringify(locks.rows)}`);
+            }
+
+            const outcome=await waitPromise;
+            console.log(`PHASE5_LOCK_CHAIN_WAIT_OK=${outcome.ok}`);
+            console.log(`PHASE5_LOCK_CHAIN_WAIT_CODE=${outcome.code}`);
+            console.log(`PHASE5_LOCK_CHAIN_WAIT_MS=${outcome.elapsedMs}`);
+            console.log("SECRET_VALUES_EXPOSED=false");
+            console.log("PHASE5_DURABLE_LOCK_CHAIN_DIAGNOSTIC=COMPLETE");
+          } finally {
+            await waiter.query("ROLLBACK").catch(()=>undefined);
+            waiter.release();
+            observer.release();
+            await pool.end().catch(()=>undefined);
+          }
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-lock-chain.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-lock-chain.mjs && node /app/phase5-lock-chain.mjs; rc=\$?; rm -f /app/phase5-lock-chain.mjs; exit \$rc'"
