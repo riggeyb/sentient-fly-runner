@@ -1,0 +1,50 @@
+name: Phase5 Governor Deployment Ledger Diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      objective_id:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      OBJECTIVE_ID: ${{ inputs.objective_id }}
+      SHA: ${{ inputs.sha }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect sanitized Governor ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]+$ ]]
+          cat >/tmp/deployment-ledger.mjs <<'NODE'
+          import pg from "/app/node_modules/pg/lib/index.js";
+          const {Pool}=pg;
+          const objective=String(process.env.OBJECTIVE_ID??"");
+          const sha=String(process.env.SHA??"");
+          const db=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
+          if(!db) throw new Error("GOVERNOR_LEDGER_DB_MISSING");
+          const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
+          try {
+            const r=await pool.query(`
+              select attempt_id, objective_id, requested_sha, requested_tree,
+                     started_at, completed_at, result, attempt_number
+              from sentient_deployment_governor.deployment_attempts
+              where objective_id=$1 and requested_sha=$2
+              order by started_at desc limit 5
+            `,[objective,sha]);
+            console.log("GOVERNOR_ATTEMPTS="+JSON.stringify(r.rows));
+          } finally { await pool.end(); }
+          NODE
+          B64="$(base64 -w0 /tmp/deployment-ledger.mjs)"
+          flyctl ssh console -a sentient-deployment-governor -C "sh -lc 'echo $B64 | base64 -d >/tmp/deployment-ledger.mjs && OBJECTIVE_ID=$OBJECTIVE_ID SHA=$SHA node /tmp/deployment-ledger.mjs; rc=\$?; rm -f /tmp/deployment-ledger.mjs; exit \$rc'"
+          echo "SECRET_VALUES_EXPOSED=false"
