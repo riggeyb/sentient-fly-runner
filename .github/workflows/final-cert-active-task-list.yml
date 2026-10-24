@@ -1,0 +1,41 @@
+name: Final Cert Active Task List
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: 79c023ea0ae2ec55c36c175759b72ee36413d561
+      EXPECTED_TREE: 7cbabedaf2ac5440a83c2aff38ab2e592de29419
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: List sanitized unfinished objective tasks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 120); do
+            if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then break; fi
+            sleep 2
+          done
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null
+          cat >/tmp/list.mjs <<'NODE'
+          import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!db) throw new Error("DB_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
+          try{
+            const tasks=(await repo.list("task"))
+              .filter(t=>t.kind==="task"&&t.metadata?.contract==="sentient-fly-objective-runner/v1"&&["pending","running"].includes(t.status))
+              .sort((a,b)=>Date.parse(a.updatedAt)-Date.parse(b.updatedAt));
+            console.log("FINAL_CERT_ACTIVE_TASK_COUNT="+tasks.length);
+            for(const t of tasks) console.log("FINAL_CERT_ACTIVE_TASK="+JSON.stringify({id:t.id,status:t.status,updatedAt:t.updatedAt,ageMs:Date.now()-Date.parse(t.updatedAt)}));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          }finally{await repo.close().catch(()=>undefined);}
+          NODE
+          B64="$(base64 -w0 /tmp/list.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64|base64 -d >/tmp/list.mjs && node /tmp/list.mjs; rc=\$?; rm -f /tmp/list.mjs; exit \$rc'"
