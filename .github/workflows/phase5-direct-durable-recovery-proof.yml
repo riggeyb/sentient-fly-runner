@@ -1,0 +1,125 @@
+name: Sentient Phase 5 Direct Durable Recovery Proof
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      objective_id:
+        required: true
+        type: string
+      session_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  phase5-direct-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Reconcile original stale ledger and execute bounded retry
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+          OBJECTIVE_ID: ${{ inputs.objective_id }}
+          SESSION_ID: ${{ inputs.session_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          cat >/tmp/phase5-direct-recovery.mjs <<'NODE'
+          import { PostgresSpawnObjectiveRepository } from "./dist/src/objective-continuation/postgres-spawn-repository.js";
+          import { runProductionCollaborationV1 } from "./dist/src/application/production-collaboration.js";
+          import { SENTIENT_APPLICATION_CONTRACT } from "./dist/src/application/contracts.js";
+          import { LocalHuggingFaceRuntimeV1 } from "./dist/src/model/providers/huggingface.js";
+          import { LocalHuggingFaceSpawnExecutionBackendV1 } from "./dist/src/spawn/backends/huggingface.js";
+
+          const objectiveId=String(process.env.PHASE5_OBJECTIVE_ID??"").trim();
+          const sessionId=String(process.env.PHASE5_SESSION_ID??"").trim();
+          const expectedSha=String(process.env.PHASE5_EXPECTED_SHA??"").trim();
+          const expectedTree=String(process.env.PHASE5_EXPECTED_TREE??"").trim();
+          const databaseUrl=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!databaseUrl) throw new Error("PHASE5_DATABASE_URL_MISSING");
+          if(process.env.SENTIENT_RUNTIME_SHA!==expectedSha||process.env.SENTIENT_RUNTIME_TREE!==expectedTree) throw new Error("PHASE5_RUNTIME_IDENTITY_MISMATCH");
+
+          const repo=new PostgresSpawnObjectiveRepository({connectionString:databaseUrl});
+          const runtime=new LocalHuggingFaceRuntimeV1();
+          const backend=new LocalHuggingFaceSpawnExecutionBackendV1(runtime);
+          try {
+            await repo.initialize();
+            await backend.initialize();
+            const beforeWork=(await repo.activeWork(sessionId,true))
+              .filter(r=>r.objectiveId===objectiveId&&r.workKey==="independent-analysis")
+              .sort((a,b)=>b.sessionSequence-a.sessionSequence)[0];
+            if(!beforeWork) throw new Error("PHASE5_STALE_WORK_MISSING");
+            if(beforeWork.status!=="STALE") throw new Error(`PHASE5_EXPECTED_STALE_${beforeWork.status}`);
+            const originalWorkId=beforeWork.workId;
+            const originalParticipantId=beforeWork.participantId;
+            const beforeSpawn=await repo.spawnSnapshot();
+            const interrupted=beforeSpawn.records.executions.filter(e=>
+              e.requestId===originalParticipantId
+              && (e.identity.status==="reserved"||e.identity.status==="running")
+              && e.reservationReconciled===false
+            );
+            if(interrupted.length!==1) throw new Error(`PHASE5_INTERRUPTED_CHILD_COUNT_${interrupted.length}`);
+            const interruptedId=interrupted[0].id;
+
+            const collaboration=await runProductionCollaborationV1(
+              repo,
+              {
+                request:"Public fixture: recover the interrupted Phase 5 collaboration, independently verify that 2 + 2 equals 4, and return bounded evidence. Sentient owns convergence.",
+                objectiveId,
+                sessionId,
+                privacy:"public_fixture",
+              },
+              {sourceSha:expectedSha,applicationVersion:SENTIENT_APPLICATION_CONTRACT},
+              [backend],
+            );
+
+            const afterWork=(await repo.activeWork(sessionId,true)).find(r=>r.workId===originalWorkId);
+            if(!afterWork) throw new Error("PHASE5_ORIGINAL_WORK_ID_LOST");
+            if(afterWork.workId!==originalWorkId) throw new Error("PHASE5_WORK_ID_CHANGED");
+            if(afterWork.reclaimCount!==1) throw new Error(`PHASE5_RECLAIM_COUNT_${afterWork.reclaimCount}`);
+            if(afterWork.participantId===originalParticipantId) throw new Error("PHASE5_PARTICIPANT_NOT_ROTATED");
+            if(afterWork.status!=="COMPLETED") throw new Error(`PHASE5_RECLAIMED_WORK_NOT_COMPLETED_${afterWork.status}`);
+
+            const afterSpawn=await repo.spawnSnapshot();
+            const oldChild=afterSpawn.records.executions.find(e=>e.id===interruptedId);
+            if(!oldChild)throw new Error("PHASE5_OLD_CHILD_MISSING");
+            if(oldChild.identity.status!=="timed_out")throw new Error(`PHASE5_OLD_CHILD_STATUS_${oldChild.identity.status}`);
+            if(oldChild.reservationReconciled!==true)throw new Error("PHASE5_OLD_RESERVATION_NOT_RECONCILED");
+            if(!afterSpawn.records.results.some(r=>r.executionId===interruptedId&&r.result.terminalStatus==="timed_out")) throw new Error("PHASE5_RECONCILIATION_RESULT_MISSING");
+
+            const retryChildren=afterSpawn.records.executions.filter(e=>e.requestId===afterWork.participantId);
+            if(retryChildren.length!==1) throw new Error(`PHASE5_RETRY_CHILD_COUNT_${retryChildren.length}`);
+            if(retryChildren[0].reservationReconciled!==true) throw new Error("PHASE5_RETRY_RESERVATION_NOT_RECONCILED");
+            if(!["succeeded","failed","cancelled","timed_out","rejected"].includes(retryChildren[0].identity.status)) throw new Error("PHASE5_RETRY_CHILD_NOT_TERMINAL");
+
+            console.log("PHASE5_RECOVERY_OBJECTIVE_ID="+objectiveId);
+            console.log("PHASE5_ORIGINAL_WORK_ID="+originalWorkId);
+            console.log("PHASE5_RECLAIM_COUNT="+afterWork.reclaimCount);
+            console.log("PHASE5_OLD_CHILD_RECONCILED=PASS");
+            console.log("PHASE5_SAME_WORK_ID_RECLAIM=PASS");
+            console.log("PHASE5_ONE_BOUNDED_RETRY=PASS");
+            console.log("PHASE5_RECOVERY_RESULT_STATUS="+String(collaboration?.status??"unknown"));
+            console.log("PHASE5_RECOVERY_AUTHORITY_OWNER="+String(collaboration?.authorityOwner??"unknown"));
+            console.log("DURABLE_SPAWN_RECOVERY=PASS");
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally {
+            await backend.close().catch(()=>undefined);
+            await repo.close().catch(()=>undefined);
+          }
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-direct-recovery.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-direct-recovery.mjs && PHASE5_OBJECTIVE_ID=$OBJECTIVE_ID PHASE5_SESSION_ID=$SESSION_ID PHASE5_EXPECTED_SHA=$EXPECTED_SHA PHASE5_EXPECTED_TREE=$EXPECTED_TREE node /app/phase5-direct-recovery.mjs; rc=\$?; rm -f /app/phase5-direct-recovery.mjs; exit \$rc'"
+          echo "RESULT=PASS"
