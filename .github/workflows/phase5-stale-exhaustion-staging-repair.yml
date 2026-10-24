@@ -57,7 +57,7 @@ jobs:
               r'    \}',
               re.S,
           )
-          new = """    if (current.reclaimCount >= 1) {
+          replacement = '''    if (current.reclaimCount >= 1) {
               await repository.abandonActiveWork({
                 operationId: `${current.workId}:restart-exhausted:abandon:${current.revision}`,
                 workId: current.workId,
@@ -67,56 +67,45 @@ jobs:
                 nextStep: "surface terminal collaboration failure to Sentient",
               });
               throw new Error(`phase5_restart_retry_exhausted:${role}:${current.workId}`);
-            }"""
+            }'''
           matches = pattern.findall(text)
           if len(matches) != 1:
               raise SystemExit(f"collaboration anchor count={len(matches)}")
-          collaboration.write_text(pattern.sub(new, text, count=1))
+          collaboration.write_text(pattern.sub(replacement, text, count=1))
 
           restart_test = Path("test/production-collaboration-restart-recovery.test.ts")
           text = restart_test.read_text()
-          old = '''  let settled: any = null;
-            let abandoned = false;'''
-          new = '''  let settled: any = null;
-            let abandoned = false;
-            let reclaimCalls = 0;'''
+          old = "  let settled: any = null;\n  let abandoned = false;"
+          new = "  let settled: any = null;\n  let abandoned = false;\n  let reclaimCalls = 0;"
           if text.count(old) != 1:
-              raise SystemExit(f"restart test state anchor count={text.count(old)}")
+              raise SystemExit(f"restart state anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
-          old = '''    async reclaimActiveWork(input: { participantId: string }) {
-              return {'''
-          new = '''    async reclaimActiveWork(input: { participantId: string }) {
-              reclaimCalls += 1;
-              return {'''
+          old = '    async reclaimActiveWork(input: { participantId: string }) {\n      return {'
+          new = '    async reclaimActiveWork(input: { participantId: string }) {\n      reclaimCalls += 1;\n      return {'
           if text.count(old) != 1:
-              raise SystemExit(f"restart test reclaim anchor count={text.count(old)}")
+              raise SystemExit(f"restart reclaim anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
-          old = '''  return { repo, settled: () => settled, abandoned: () => abandoned };'''
-          new = '''  return { repo, settled: () => settled, abandoned: () => abandoned, reclaimCalls: () => reclaimCalls };'''
+          old = '  return { repo, settled: () => settled, abandoned: () => abandoned };'
+          new = '  return { repo, settled: () => settled, abandoned: () => abandoned, reclaimCalls: () => reclaimCalls };'
           if text.count(old) != 1:
-              raise SystemExit(f"restart test return anchor count={text.count(old)}")
+              raise SystemExit(f"restart return anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
-          old = '''  assert.equal(f.abandoned(), false);
-          });''''
-          new = '''  assert.equal(f.abandoned(), false);
-            assert.equal(f.reclaimCalls(), 1);
-          });'''
+          old = '  assert.equal(f.abandoned(), false);\n});'
+          new = '  assert.equal(f.abandoned(), false);\n  assert.equal(f.reclaimCalls(), 1);\n});'
           if text.count(old) != 1:
               raise SystemExit(f"restart first assertion anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
-          old = '''  assert.equal(f.settled()?.terminalStatus, "timed_out");
-            assert.equal(f.abandoned(), true);
-          });'''
-          new = '''  assert.equal(f.settled()?.terminalStatus, "timed_out");
-            assert.equal(f.abandoned(), true);
-            assert.equal(f.reclaimCalls(), 0);
-          });'''
+          old = '  assert.equal(f.settled()?.terminalStatus, "timed_out");\n  assert.equal(f.abandoned(), true);\n});'
+          new = '  assert.equal(f.settled()?.terminalStatus, "timed_out");\n  assert.equal(f.abandoned(), true);\n  assert.equal(f.reclaimCalls(), 0);\n});'
           if text.count(old) != 1:
               raise SystemExit(f"restart second assertion anchor count={text.count(old)}")
           restart_test.write_text(text)
 
           core = Path("test/active-work-core.test.ts")
           text = core.read_text()
+          marker = 'test("STALE work can fail closed without a second reclaim lease"'
+          if marker in text:
+              raise SystemExit("active-work stale-abandon test already exists")
           addition = r'''
 
           test("STALE work can fail closed without a second reclaim lease", async () => {
@@ -164,8 +153,6 @@ jobs:
             }
           });
           '''
-          if "STALE work can fail closed without a second reclaim lease" in text:
-              raise SystemExit("active-work stale-abandon test already exists")
           core.write_text(text + addition)
           PY
           git diff --check
@@ -195,7 +182,7 @@ jobs:
           git diff --cached --check
           git diff --cached --quiet && { echo NO_CHANGES; exit 1; }
           git commit -m "fix: bound Phase5 stale retry exhaustion"
-          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
-          echo STAGING_SHA="$(git rev-parse HEAD)"
-          echo STAGING_TREE="$(git rev-parse 'HEAD^{tree}')"
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:Refs/heads/${TARGET_BRANCH}"
+          echo "STAGING_SHA=$(git rev-parse HEAD)"
+          echo "STAGING_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo SECRET_VALUES_EXPOSED=false
