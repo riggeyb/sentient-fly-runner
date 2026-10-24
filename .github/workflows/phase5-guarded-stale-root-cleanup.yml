@@ -24,14 +24,14 @@ jobs:
           [[ "$S" =~ ^[0-9a-f]{40}$ ]]; [[ "$T" =~ ^[0-9a-f]{40}$ ]]
           id="$(flyctl machines list -a "$APP" --json | jq -r '.[0].id')"
           test -n "$id"; flyctl machine start "$id" -a "$APP" >/dev/null || true
-          ready=""
-          for _ in $(seq 1 60); do
-            ready="$(curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/readyz 2>/dev/null || true)"
-            if grep -Fq "$S" <<<"$ready" && grep -Fq "$T" <<<"$ready" && grep -Fq '"ready":true' <<<"$ready"; then break; fi
-            sleep 2
-          done
-          grep -Fq "$S" <<<"$ready"; grep -Fq "$T" <<<"$ready"; grep -Fq '"ready":true' <<<"$ready"
-          echo PHASE1_STALE_ROOT_CLEANUP_IDENTITY=PASS
+
+          # Readiness may be blocked by the stale canonical-row transaction itself.
+          # Fence cleanup by immutable runtime identity directly from the Machine instead.
+          ident="$(flyctl ssh console -a "$APP" -C 'sh -lc '"'"'printf "%s\n%s\n" "$SENTIENT_RUNTIME_SHA" "$SENTIENT_RUNTIME_TREE"'"'"'')"
+          grep -Fxq "$S" <<<"$ident"
+          grep -Fxq "$T" <<<"$ident"
+          echo PHASE5_STALE_ROOT_CLEANUP_IDENTITY=PASS
+
           cat >/tmp/c.mjs <<'NODE'
           import {Pool} from "pg";
           const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
@@ -75,11 +75,28 @@ jobs:
             const wo=await wait; console.log(`PHASE5_STALE_ROOT_WAITER_OK=${wo.ok}`); console.log(`PHASE5_STALE_ROOT_WAITER_CODE=${wo.code}`);
             await w.query("ROLLBACK").catch(()=>{});
             const v=await p.connect();
-            try{await v.query("BEGIN"); const st=Date.now(); await v.query("SELECT generation FROM sentient_durable_state WHERE state_key=$1 FOR UPDATE NOWAIT",["canonical"]);
-              console.log(`PHASE5_STALE_ROOT_POST_LOCK_MS=${Date.now()-st}`); console.log("PHASE1_STALE_ROOT_POST_LOCK_AVAILABLE=true"); await v.query("ROLLBACK");
+            try{
+              await v.query("BEGIN"); const st=Date.now();
+              await v.query("SELECT generation FROM sentient_durable_state WHERE state_key=$1 FOR UPDATE NOWAIT",["canonical"]);
+              console.log(`PHASE5_STALE_ROOT_POST_LOCK_MS=${Date.now()-st}`);
+              console.log("PHASE5_STALE_ROOT_POST_LOCK_AVAILABLE=true");
+              await v.query("ROLLBACK");
             }finally{v.release();}
-            console.log("SECRET_VALUES_EXPOSED=false"); console.log("PHASE1_STALE_ROOT_CLEANUP=PASS");
+            console.log("SECRET_VALUES_EXPOSED=false");
+            console.log("PHASE5_STALE_ROOT_CLEANUP=PASS");
           }finally{await w.query("ROLLBACK").catch(()=>{});w.release();o.release();await p.end().catch(()=>{});}
           NODE
           B="$(base64 -w0 /tmp/c.mjs)"
           flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B | base64 -d >/app/c.mjs && node /app/c.mjs; r=\$?; rm -f /app/c.mjs; exit \$r'"
+
+          ready=""
+          for _ in $(seq 1 60); do
+            ready="$(curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/readyz 2>/dev/null || true)"
+            if grep -Fq "$S" <<<"$ready" && grep -Fq "$T" <<<"$ready" && grep -Fq '"ready":true' <<<"$ready"; then
+              echo PHASE5_STALE_ROOT_POST_CLEANUP_READY=PASS
+              exit 0
+            fi
+            sleep 2
+          done
+          echo PHASE5_STALE_ROOT_POST_CLEANUP_READY=FAIL
+          exit 1
