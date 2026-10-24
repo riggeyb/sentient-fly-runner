@@ -35,14 +35,18 @@ jobs:
           from pathlib import Path
           p=Path("src/model/providers/huggingface-worker.ts")
           s=p.read_text()
-          old='''  const apply = tokenizer.apply_chat_template;
-          if (apply === undefined) throw new Error("local_hf_chat_template_unavailable");
-          const rendered = apply(messages, { tokenize: false, add_generation_prompt: true });'''
-          new='''  if (tokenizer.apply_chat_template === undefined) throw new Error("local_hf_chat_template_unavailable");
-          const rendered = tokenizer.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });'''
-          if s.count(old) != 1:
-              raise SystemExit(f"expected exact binding defect once, got {s.count(old)}")
-          p.write_text(s.replace(old,new))
+          replacements = {
+              '  const apply = tokenizer.apply_chat_template;\n': '',
+              '  if (apply === undefined) throw new Error("local_hf_chat_template_unavailable");\n':
+                  '  if (tokenizer.apply_chat_template === undefined) throw new Error("local_hf_chat_template_unavailable");\n',
+              '  const rendered = apply(messages, { tokenize: false, add_generation_prompt: true });\n':
+                  '  const rendered = tokenizer.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });\n',
+          }
+          for old, new in replacements.items():
+              if s.count(old) != 1:
+                  raise SystemExit(f"expected exact binding line once: {old!r}; got {s.count(old)}")
+              s = s.replace(old, new)
+          p.write_text(s)
           PY
           git diff --check
           test "$(git diff --name-only)" = "src/model/providers/huggingface-worker.ts"
