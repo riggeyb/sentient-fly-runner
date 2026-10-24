@@ -1,0 +1,103 @@
+name: Phase5 Exact Restart Admission Repair
+on:
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions:
+  contents: read
+concurrency:
+  group: phase5-canonical-source-repair
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_USER: sentient, POSTGRES_PASSWORD: sentient, POSTGRES_DB: sentient}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+      TARGET_BRANCH: sentient-production-composition-20261017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - name: Check source identity and head fence
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_SHA"
+          echo PHASE5_SOURCE_FENCE=PASS
+      - name: Apply existing shared bounded restart-admission fix
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/fly/self-execution.ts")
+          s=p.read_text()
+          anchor="const PHASE5_RESTART_LEASE_MAX_WAIT_MS = 180_250;"
+          assert s.count(anchor)==1
+          s=s.replace(anchor,anchor+"\nconst PHASE5_RESTART_ADMISSION_PACING_MS = 250;",1)
+          before="""        this.#schedule(objectiveId, true);
+                  const work = this.#active.get(objectiveId);
+                  if (work !== undefined) await work;""".replace("                  ","        ")
+          after="""        this.#schedule(objectiveId, true);
+                  await new Promise<void>((resolve) => setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS));""".replace("                  ","        ")
+          assert s.count(before)==1, "OLD_RESTART_TAIL_MISSING"
+          p.write_text(s.replace(before,after,1))
+          t=Path("test/phase5-fly-restart-lease-retry.test.ts")
+          q=t.read_text()
+          assert q.count('source.includes("this.#schedule(task.id, true)")')==1
+          q=q.replace('source.includes("this.#schedule(task.id, true)")','source.includes("this.#scheduleInheritedRestart(task.id)")')
+          marker='assert.ok(source.includes("#schedule(objectiveId: string, inheritedRestart = false)"));'
+          assert q.count(marker)==1
+          q=q.replace(marker,marker+'\n  assert.ok(source.includes("PHASE5_RESTART_ADMISSION_PACING_MS = 250"));\n  assert.ok(source.includes("setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)"));\n  assert.ok(!source.includes("if (work !== undefined) await work"));')
+          t.write_text(q)
+          PY
+          git diff --check
+          echo PHASE5_MINIMAL_EDIT=PASS
+      - name: Build
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          echo BUILD=PASS
+      - name: Phase5 targeted regression suite
+        run: |
+          node --test dist/test/phase5-fly-restart-lease-retry.test.js dist/test/production-collaboration-restart-recovery.test.js dist/test/active-work-restart-edge.test.js dist/test/active-work-expiry-fencing.test.js dist/test/phase5-collaborative-convergence.test.js dist/test/job2-self-execution.test.js dist/test/local-hf-worker-isolation.test.js
+          echo PHASE5_TARGETED=PASS
+      - name: Cumulative Phase0-7 regressions
+        run: |
+          node --test dist/test/phase0-control-recovery.test.js dist/test/phase0-engineering-readiness.test.js dist/test/phase1-core-runtime.test.js dist/test/phase1-acceptance-policy.test.js dist/test/fly-phase1-acceptance-policy.test.js dist/test/phase2-skill-execution.test.js dist/test/phase3-cognitive-components.test.js dist/test/phase3-local-hf-adapter.test.js dist/test/production-phase3-cognition.test.js dist/test/phase4-multistep-autonomy.test.js dist/test/phase5-collaborative-convergence.test.js dist/test/production-collaboration-restart-recovery.test.js dist/test/phase5-fly-restart-lease-retry.test.js dist/test/phase6-capability-integration.test.js dist/test/phase7-local-hf-feature-head.test.js dist/test/phase7-model-improvement.test.js dist/test/production-model-improvement.test.js dist/test/job2-production-convergence.test.js dist/test/permanent-continuation-http.test.js dist/test/permanent-continuation-multiprocess.test.js
+          echo PHASE0_7_CUMULATIVE=PASS
+      - name: Commit and fast-forward canonical only if exact expected head remains
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_SHA"
+          git diff --check
+          git config user.name sentient-phase5-restart
+          git config user.email sentient-phase5-restart@users.noreply.github.com
+          git add src/fly/self-execution.ts test/phase5-fly-restart-lease-retry.test.ts
+          git commit -m "fix: pace Phase5 inherited restart admission"
+          echo "END_SHA=$(git rev-parse HEAD)"
+          echo "END_TREE=$(git rev-parse 'HEAD^{tree}')"
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo PHASE5_SOURCE_PUSH=PASS
+          echo SECRET_VALUES_EXPOSED=false
