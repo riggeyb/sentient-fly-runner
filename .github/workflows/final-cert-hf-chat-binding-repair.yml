@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      BASE: 522e084517179b6e237bebd263ea1426ef70f886
+      BASE: 0ae0bbe38db1ebccfb69ee853fcfbb7853eacf9f
       BRANCH: sentient-production-composition-20261017
     steps:
       - uses: actions/checkout@v4
