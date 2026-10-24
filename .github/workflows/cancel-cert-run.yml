@@ -1,0 +1,25 @@
+name: Cancel Invalid Certification Run
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        required: true
+        type: string
+permissions:
+  actions: write
+  contents: read
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel requested run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUN_ID" in (*[!0-9]*|'') exit 2;; esac
+          curl -fsS -X POST             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID/cancel"
+          echo CANCEL_REQUESTED=PASS
