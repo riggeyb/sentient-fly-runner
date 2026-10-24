@@ -38,6 +38,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           finish = Path("src/collaboration/active-work-finish.ts")
           text = finish.read_text()
@@ -49,26 +50,14 @@ jobs:
 
           collaboration = Path("src/application/production-collaboration.ts")
           text = collaboration.read_text()
-          old = '''    if (current.reclaimCount >= 1) {
-              const reclaimed = await repository.reclaimActiveWork({
-                operationId: `${current.workId}:restart-exhausted:${current.revision}`,
-                workId: current.workId,
-                participantId: current.participantId,
-                expectedRevision: current.revision,
-                currentAction: "reconcile interrupted Spawn child after bounded retry exhaustion",
-                nextStep: "fail closed without creating another child",
-              });
-              await repository.abandonActiveWork({
-                operationId: `${current.workId}:restart-exhausted:abandon:${reclaimed.record.revision}`,
-                workId: current.workId,
-                participantId: reclaimed.record.participantId,
-                expectedRevision: reclaimed.record.revision,
-                currentAction: "bounded Phase 5 restart retry exhausted",
-                nextStep: "surface terminal collaboration failure to Sentient",
-              });
-              throw new Error(`phase5_restart_retry_exhausted:${role}:${current.workId}`);
-            }'''
-          new = '''    if (current.reclaimCount >= 1) {
+          pattern = re.compile(
+              r'    if \(current\.reclaimCount >= 1\) \{\n'
+              r'.*?'
+              r'      throw new Error\(`phase5_restart_retry_exhausted:\$\{role\}:\$\{current\.workId\}`\);\n'
+              r'    \}',
+              re.S,
+          )
+          new = """    if (current.reclaimCount >= 1) {
               await repository.abandonActiveWork({
                 operationId: `${current.workId}:restart-exhausted:abandon:${current.revision}`,
                 workId: current.workId,
@@ -78,10 +67,11 @@ jobs:
                 nextStep: "surface terminal collaboration failure to Sentient",
               });
               throw new Error(`phase5_restart_retry_exhausted:${role}:${current.workId}`);
-            }'''
-          if text.count(old) != 1:
-              raise SystemExit(f"collaboration anchor count={text.count(old)}")
-          collaboration.write_text(text.replace(old, new, 1))
+            }"""
+          matches = pattern.findall(text)
+          if len(matches) != 1:
+              raise SystemExit(f"collaboration anchor count={len(matches)}")
+          collaboration.write_text(pattern.sub(new, text, count=1))
 
           restart_test = Path("test/production-collaboration-restart-recovery.test.ts")
           text = restart_test.read_text()
@@ -107,7 +97,7 @@ jobs:
               raise SystemExit(f"restart test return anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
           old = '''  assert.equal(f.abandoned(), false);
-          });'''
+          });''''
           new = '''  assert.equal(f.abandoned(), false);
             assert.equal(f.reclaimCalls(), 1);
           });'''
