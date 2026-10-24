@@ -38,148 +38,120 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+
           p=Path("src/fly/self-execution.ts")
           s=p.read_text()
-          old='''  #scheduleInheritedRestart(objectiveId: string): void {
-            this.#restartRecoveryTail = this.#restartRecoveryTail
-              .catch(() => undefined)
-              .then(async () => {
-                await new Promise<void>((resolve) => setImmediate(resolve));
-                this.#schedule(objectiveId, true);
-                await new Promise<void>((resolve) =>
-                  setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)
-                );
-              });
-          }
+          a="        this.#schedule(objectiveId, true);"
+          b="        await this.#schedule(objectiveId, true);"
+          assert s.count(a)==1, s.count(a)
+          s=s.replace(a,b,1)
 
-          #schedule(objectiveId: string, inheritedRestart = false): void {
-            if (this.#active.has(objectiveId)) return;
-            const work = this.#run(objectiveId, inheritedRestart)
-          '''
-          new='''  #scheduleInheritedRestart(objectiveId: string): void {
-            this.#restartRecoveryTail = this.#restartRecoveryTail
-              .catch(() => undefined)
-              .then(async () => {
-                await new Promise<void>((resolve) => setImmediate(resolve));
-                await this.#schedule(objectiveId, true);
-                await new Promise<void>((resolve) =>
-                  setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)
-                );
-              });
-          }
+          a="  #schedule(objectiveId: string, inheritedRestart = false): void {\n    if (this.#active.has(objectiveId)) return;"
+          b="  #schedule(objectiveId: string, inheritedRestart = false): Promise<void> {\n    const active = this.#active.get(objectiveId);\n    if (active !== undefined) return active;"
+          assert s.count(a)==1, s.count(a)
+          s=s.replace(a,b,1)
 
-          #schedule(objectiveId: string, inheritedRestart = false): Promise<void> {
-            const active = this.#active.get(objectiveId);
-            if (active !== undefined) return active;
-            const work = this.#run(objectiveId, inheritedRestart)
-          '''
-          assert s.count(old)==1, s.count(old)
-          s=s.replace(old,new,1)
-          old2='''    this.#active.set(objectiveId, work);
-          }
-
-          async #run(objectiveId: string, inheritedRestart: boolean): Promise<void> {'''
-          new2='''    this.#active.set(objectiveId, work);
-            return work;
-          }
-
-          async #run(objectiveId: string, inheritedRestart: boolean): Promise<void> {'''
-          assert s.count(old2)==1, s.count(old2)
-          p.write_text(s.replace(old2,new2,1))
+          a="    this.#active.set(objectiveId, work);\n  }\n\n  async #run(objectiveId: string, inheritedRestart: boolean): Promise<void> {"
+          b="    this.#active.set(objectiveId, work);\n    return work;\n  }\n\n  async #run(objectiveId: string, inheritedRestart: boolean): Promise<void> {"
+          assert s.count(a)==1, s.count(a)
+          s=s.replace(a,b,1)
+          p.write_text(s)
 
           t=Path("test/job2-self-execution.test.ts")
           q=t.read_text()
-          imports='''  RecoveringEngineeringControllerV1,
-            GovernorRecoveryClientV1,'''
-          imports2='''  RecoveringEngineeringControllerV1,
-            GovernorRecoveryClientV1,
-            FlyObjectiveRunnerV1,
-            FLY_OBJECTIVE_RUNNER_CONTRACT,'''
-          assert q.count(imports)==1, q.count(imports)
-          q=q.replace(imports,imports2,1)
-          test=r'''
+          a='''  RecoveringEngineeringControllerV1,
+  GovernorRecoveryClientV1,
+  JOB1_GOVERNOR_SHA,'''
+          b='''  RecoveringEngineeringControllerV1,
+  GovernorRecoveryClientV1,
+  FlyObjectiveRunnerV1,
+  FLY_OBJECTIVE_RUNNER_CONTRACT,
+  JOB1_GOVERNOR_SHA,'''
+          assert q.count(a)==1, q.count(a)
+          q=q.replace(a,b,1)
 
-          test("restart recovery executes unfinished managed objectives serially", async () => {
-            const managedTask = (id: string) => ({
-              kind: "task" as const,
-              id,
-              title: id,
-              status: "running" as const,
-              createdAt: new Date(0).toISOString(),
-              updatedAt: new Date(0).toISOString(),
-              provenance: { actor: "user" as const },
-              version: {
-                schemaVersion: "2.0.0",
-                applicationVersion: FLY_OBJECTIVE_RUNNER_CONTRACT,
-                repository: "riggeyb/sentient",
-                commitSha: SHA,
-              },
-              metadata: {
-                contract: FLY_OBJECTIVE_RUNNER_CONTRACT,
-                request: `recover ${id}`,
-                sessionId: `session-${id}`,
-                mode: "ordinary",
-                privacy: "public_fixture",
-                engineeringJob: null,
-                deployOnSuccess: false,
-                activeEngineeringJobId: null,
-                lastEngineeringReceipt: null,
-                result: null,
-                error: null,
-              },
-            });
-            const tasks = new Map<string, any>([
-              ["recover-a", managedTask("recover-a")],
-              ["recover-b", managedTask("recover-b")],
-            ]);
-            const state = {
-              async list(kind: string) {
-                assert.equal(kind, "task");
-                return [...tasks.values()];
-              },
-              async get(kind: string, id: string) {
-                assert.equal(kind, "task");
-                return tasks.get(id);
-              },
-              async replace(task: any) {
-                tasks.set(task.id, task);
-              },
-            };
-            const started: string[] = [];
-            const release = new Map<string, () => void>();
-            const application = {
-              async runObjective(input: { objectiveId: string }) {
-                started.push(input.objectiveId);
-                await new Promise<void>((resolve) => release.set(input.objectiveId, resolve));
-                return { httpStatus: 200, body: { result: { status: "COMPLETED" } } };
-              },
-            };
-            const runner = new FlyObjectiveRunnerV1({
-              state: state as any,
-              application: application as any,
-              registry: { unregister() {}, register() {} } as any,
-              identity: {} as any,
-            });
-            assert.equal(await runner.resumeUnfinished(), 2);
-            for (let i = 0; i < 100 && started.length < 1; i += 1) {
-              await new Promise((resolve) => setTimeout(resolve, 5));
-            }
-            assert.deepEqual(started, ["recover-a"]);
-            release.get("recover-a")?.();
-            for (let i = 0; i < 300 && started.length < 2; i += 1) {
-              await new Promise((resolve) => setTimeout(resolve, 5));
-            }
-            assert.deepEqual(started, ["recover-a", "recover-b"]);
-            release.get("recover-b")?.();
-            for (let i = 0; i < 100 && tasks.get("recover-b")?.status !== "succeeded"; i += 1) {
-              await new Promise((resolve) => setTimeout(resolve, 5));
-            }
-            assert.equal(tasks.get("recover-a")?.status, "succeeded");
-            assert.equal(tasks.get("recover-b")?.status, "succeeded");
-          });
-          '''
-          assert 'restart recovery executes unfinished managed objectives serially' not in q
-          t.write_text(q+test)
+          test=r'''
+test("restart recovery executes unfinished managed objectives serially", async () => {
+  const manaedTask = (id: string) => ({
+    kind: "task" as const,
+    id,
+    title: id,
+    status: "running" as const,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    provenance: { actor: "user" as const },
+    version: {
+      schemaVersion: "2.0.0",
+      applicationVersion: FLY_OBJECTIVE_RUNNER_CONTRACT,
+      repository: "riggeyb/sentient",
+      commitSha: SHA,
+    },
+    metadata: {
+      contract: FLY_OBJECTIVE_RUNNER_CONTRACT,
+      request: `recover ${id}`,
+      sessionId: `session-${id}`,
+      mode: "ordinary",
+      privacy: "public_fixture",
+      engineeringJob: null,
+      deployOnSuccess: false,
+      activeEngineeringJobId: null,
+      lastEngineeringReceipt: null,
+      result: null,
+      error: null,
+    },
+  });
+  const tasks = new Map<string, any>([
+    ["recover-a", managedTask("recover-a")],
+    ["recover-b", managedTask("recover-b")],
+  ]);
+  const state = {
+    async list(kind: string) {
+      assert.equal(kind, "task");
+      return [...tasks.values()];
+    },
+    async get(kind: string, id: string) {
+      assert.equal(kind, "task");
+      return tasks.get(id);
+    },
+    async replace(task: any) {
+      tasks.set(task.id, task);
+    },
+  };
+  const started: string[] = [];
+  const release = new Map<string, () => void>();
+  const application = {
+    async runObjective(input: { objectiveId: string }) {
+      started.push(input.objectiveId);
+      await new Promise<void>((resolve) => release.set(input.objectiveId, resolve));
+      return { httpStatus: 200, body: { result: { status: "COMPLETED" } } };
+    },
+  };
+  const runner = new FlyObjectiveRunnerV1( {
+    state: state as any,
+    application: application as any,
+    registry: { unregister() {}, register() {} } as any,
+    identity: {} as any,
+  });
+  assert.equal(await runner.resumeUnfinished(), 2);
+  for (let i = 0; i < 100 && started.length < 1; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(started, ["recover-a"]);
+  release.get("recover-a")?.();
+  for (let i = 0; i < 300 && started.length < 2; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(started, ["recover-a", "recover-b"]);
+  release.get("recover-b")?.();
+  for (let i = 0; i < 100 && tasks.get("recover-b")?.status !== "succeeded"; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(tasks.get("recover-a")?.status, "succeeded");
+  assert.equal(tasks.get("recover-b")?.status, "succeeded");
+});
+'''
+          assert "restart recovery executes unfinished managed objectives serially" not in q
+          t.write_text(q+"\n"+test)
           PY
           git diff --check
           test "$(git diff --name-only | wc -l)" -eq 2
@@ -217,7 +189,7 @@ jobs:
           git diff --cached --check
           git diff --cached --quiet && { echo "NO_REPAIR_CHANGE"; exit 1; }
           git commit -m "fix: serialize restart objective recovery"
-          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:refs/heads/$BRANCH"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:befs/heads/$BRANCH"
           echo "PRIOR_SHA=$EXPECTED_SHA"
           echo "NEW_SHA=$(git rev-parse HEAD)"
           echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
