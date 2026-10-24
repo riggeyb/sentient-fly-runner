@@ -1,0 +1,98 @@
+name: Phase5 Restart Recovery Merge
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      BRANCH: sentient-production-composition-20261017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence exact canonical head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse origin/$BRANCH)" = "$EXPECTED_SHA"
+      - name: Apply shared Phase5 repair and canonical compatibility fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/95388f05038182437348addff8255380caf535fc/scripts/phase5-restart-repair.py -o /tmp/phase5-repair.py
+          python3 /tmp/phase5-repair.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/application/production-collaboration.ts")
+          s=p.read_text()
+          a="await repository.completeSpawnChild(execution.id, result);"
+          b="await repository.completeSpawnChild({ executionId: execution.id, endedAt, result });"
+          c="spawn.lineage"
+          d="spawn.records.lineage"
+          assert s.count(a)==1, s.count(a)
+          assert s.count(c)==1, s.count(c)
+          p.write_text(s.replace(a,b,1).replace(c,d,1))
+          PY
+          git diff --check
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Phase5 restart and cumulative regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/active-work-restart-edge.test.js \
+            dist/test/active-work-expiry-fencing.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/job2-production-convergence.test.js \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/permanent-continuation-*.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/fly-phase1-acceptance-policy.test.js \
+            dist/test/production-phase3-cognition.test.js \
+            dist/test/phase0-control-recovery.test.js \
+            dist/test/phase0-engineering-readiness.test.js
+          git diff --check
+      - name: Push exact tested repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse origin/$BRANCH)" = "$EXPECTED_SHA"
+          git config user.name "sentient-phase5-convergence"
+          git config user.email "sentient-phase5-convergence@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git diff --cached --quiet && { echo "NO_PHASE5_CHANGE"; exit 1; }
+          git commit -m "fix: reconcile Phase5 restart Spawn state"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:refs/heads/$BRANCH"
+          echo "PRIOR_SHA=$EXPECTED_SHA"
+          echo "NEW_SHA=$(git rev-parse HEAD)"
+          echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
+          echo "PHASE1_IMPLEMENTATION_COMPLETE=PASS"
+          echo "PHASE5_RESTART_RECOVERY=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
