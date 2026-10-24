@@ -9,10 +9,10 @@ permissions: {contents: read}
 jobs:
   queue:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Read existing unfinished objective order only
+      - name: Warm exact runtime and inspect existing unfinished task order
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           SHA: ${{ inputs.sha }}
@@ -24,6 +24,17 @@ jobs:
           [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
           [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          ready=false
+          for _ in $(seq 1 120); do
+            if curl -fsS --max-time 5 "https://sentient-validation-runner.fly.dev/readyz" >/tmp/phase5-queue-ready.json 2>/dev/null &&
+              jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/phase5-queue-ready.json >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          echo "PHASE5_QUEUE_PRE_SSH_EXACT_READINESS=PASS"
           cat >/tmp/q.mjs <<'NODE'
           import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
           if(process.env.SENTIENT_RUNTIME_SHA!==process.env.PHASE5_EXPECTED_SHA
