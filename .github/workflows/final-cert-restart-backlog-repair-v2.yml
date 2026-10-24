@@ -35,9 +35,10 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/dce335abac96a3a686cdb1f221a320faacea0f2d/scripts/final-cert-restart-backlog-repair.py -o /tmp/repair.py
           python3 /tmp/repair.py
           git diff --check
-          test "$(git diff --name-only | wc -l)" -eq 2
-          git diff --name-only | grep -Fx 'src/fly/self-execution.ts'
-          git diff --name-only | grep -Fx 'test/final-cert-restart-backlog-serialization.test.ts'
+          changed="$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l)" -eq 2
+          printf '%s\n' "$changed" | grep -Fx 'src/fly/self-execution.ts'
+          printf '%s\n' "$changed" | grep -Fx 'test/final-cert-restart-backlog-serialization.test.ts'
       - name: Build and restart-backlog regressions
         shell: bash
         run: |
@@ -58,7 +59,7 @@ jobs:
           git diff --cached --check
           git diff --cached --quiet && { echo "NO_REPAIR_CHANGE"; exit 1; }
           git commit -m "fix: serialize restart objective recovery"
-          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:refs/heads/$BRANCH"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:befs/heads/$BRANCH"
           echo "PRIOR_SHA=$EXPECTED_SHA"
           echo "NEW_SHA=$(git rev-parse HEAD)"
           echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
