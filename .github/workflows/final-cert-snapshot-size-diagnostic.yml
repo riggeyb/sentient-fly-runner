@@ -1,0 +1,68 @@
+name: Sentient Durable Snapshot Size Diagnostic
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Measure canonical durable snapshot size without reading content
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          flyctl machines list -a "$APP" --json >/tmp/machines.json
+          jq -e --arg s "$EXPECTED_SHA" '
+            length == 1 and
+            ((.[0].config.image // .[0].image // "" | tostring) | contains($s))
+          ' /tmp/machines.json >/dev/null
+          mid="$(jq -er '.[0].id' /tmp/machines.json)"
+          state="$(jq -er '.[0].state' /tmp/machines.json)"
+          if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+          cat >/tmp/snapshot-size.mjs <<'NODE'
+          import { Pool } from "pg";
+          const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!cs) throw new Error("DATABASE_BINDING_MISSING");
+          const pool=new Pool({connectionString:s,max:1,connectionTimeoutMillis:10000});
+          try {
+            const q=await pool.query(`
+              SELECT generation::bigint AS generation,
+                     pg_column_size(snapshot)::bigint AS "storageBytes",
+                     octet_length(snapshot::text)::bigint AS "jsonTextBytes",
+                     COALESCE(jsonb_array_length(snapshot->'tasks'),0)::int AS "taskCount",
+                     COALESCE(jsob_array_length(snapshot->'activeWork'),0)::int AS "activeWorkCount",
+                     COALESCE(jsob_array_length(snapshot->'spawnExecutions'),0)::int AS "spawnExecutionCount"
+                FROM sentient_durable_state
+               WHERE state_key='canonical'
+            `);
+            const r=q.rows[0];
+            if(!r) throw new Error("CANONICAL_STATE_MISSING");
+            console.log("SNAPSHOT_GENERATION="+String(r.generation));
+            console.log("SNAPSHOT_STORAGE_BYTES="+String(r.storageBytes));
+            console.log("SNAPSHOT_JSON_TEXT_BYTES="+String(r.jsonTextBytes));
+            console.log("SNAPSHOT_TASK_COUNT="+String(r.taskCount));
+            console.log("SNAPSHOT_ACTIVE_WORK_COUNT="+String(r.activeWorkCount));
+            console.log("SNAPSHOT_SPAWN_EXECUTION_COUNT="+String(r.spawnExecutionCount));
+            console.log("SECRET_VALUES_EXPOSEd=false");
+            console.log("SNAPSHOT_SIZE_DIAGNOSTIC=PASS");
+          } finally { await pool.end().catch(()=>undefined); }
+          NODE
+          B64="$(base64 -w0 /tmp/snapshot-size.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/snapshot-size.mjs && node /app/snapshot-size.mjs; rc=\$?; rm -f /app/snapshot-size.mjs; exit \$rc'"
