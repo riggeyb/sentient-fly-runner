@@ -86,7 +86,7 @@ jobs:
               childExecutionId:armed.child.id
             })+"\n");
             fs.writeSync(1,"PHASE5_INTERRUPT_ARMED=PASS\n");
-            await rew Promise(resolve=>setTimeout(resolve,100));
+            await new Promise(resolve=>setTimeout(resolve,100));
             process.kill(1,"SIGKILL");
             await new Promise(()=>{});
           } finally {
@@ -100,7 +100,7 @@ jobs:
           RC=$?
           set -e
           printf '%s\n' "$OUT"
-          grep -Fq "PHASE1_INTERRUPT_ARMED=PASS" <<<"$OUT"
+          grep -Fq "PHASE5_INTERRUPT_ARMED=PASS" <<<"$OUT"
           ARM_JSON="$(grep -F '"event":"PHASE5_INTERRUPT_ARMED"' <<<"$OUT" | tail -n1)"
           ORIGINAL_WORK_ID="$(jq -er '.workId' <<"$ARM_JSON")"
           ORIGINAL_REQUEST_ID="$(jq -er '.requestId' <<"$ARM_JSON")"
@@ -108,7 +108,7 @@ jobs:
           test -n "$ORIGINAL_WORK_ID"
           test -n "$ORIGINAL_REQUEST_ID"
           test -n "$ORIGINAL_CHILD_ID"
-          echo "PHASE1_PROCESS_INTERRUPTED=PASS"
+          echo "PHASE5_PROCESS_INTERRUPTED=PASS"
           echo "PHASE5_INTERRUPT_COMMAND_RC=$RC"
 
           ok=false
@@ -174,57 +174,7 @@ jobs:
                 })),
                 analysisChildCount:analysisChildren.length
               };
-              if(work?.reclaimCount>1) throw new Error(`PHASE1_RECLAIM_COUNT_EXCEEDED_${work.reclaimCount}`);
+              if(work?.reclaimCount>1) throw new Error(`PHASE5_RECLAIM_COUNT_EXCEEDED_${work.reclaimCount}`);
               if(analysisChildren.length>2) throw new Error(`PHASE5_DUPLICATE_ANALYSIS_CHILDREN_${analysisChildren.length}`);
-              if(retryChildren.length>1) throw new Error(`PHASE5_DUPLICATE_RETRY_CHILDREN_${retryChildren.length}`);
-
-              const retry=retryChildren[0]??null;
-              const pass=
-                work!==null
-                && work.workId===originalWorkId
-                && work.reclaimCount===1
-                && work.participantId!==originalRequestId
-                && terminalWork.has(work.status)
-                && oldChild?.identity.status==="timed_out"
-                && oldChild?.reservationReconciled===true
-                && oldResult?.terminalStatus==="timed_out"
-                && oldResult?.failure?.class==="restart_interrupted"
-                && oldResult?.failure?.retryable===true
-                && analysisChildren.length===2
-                && retryChildren.length===1
-                && retry!==null
-                && terminalChild.has(retry.identity.status)
-                && retry.reservationReconciled===true;
-              if(pass){
-                console.log("PHASE5_RECOVERY_STATE="+JSON.stringify(last));
-                console.log("PHASE5_SAME_WORK_ID_RECLAIM=PASS");
-                console.log("PHASE5_RECLAIM_COUNT=1");
-                console.log("PHASE1_PARTICIPANT_ROTATED=PASS");
-                console.log("PHASE5_OLD_CHILD_RECONCILED=PASS");
-                console.log("PHASE1_OLD_RESERVATION_RECONCILED=PASS");
-                console.log("PHASE5_ONE_BOUNDED_RETRY=PASS");
-                console.log("PHASE5_NO_DUPLICATE_ANALYSIS_CHILD=PASS");
-                console.log("PHASE5_RETRY_RESERVATION_RECONCILED=PASS");
-                console.log("PHASE5_RETRY_TERMINAL_STATUS="+retry.identity.status);
-                console.log("PHASE5_RECOVERED_WORK_TERMINAL_STATUS="+work.status);
-                console.log("DURABLE_SPAWN_RECOVERY=PASS");
-                console.log("SECRET_VALUES_EXPOSED=false");
-                process.exit(0);
-              }
-              await new Promise(resolve=>setTimeout(resolve,500));
-            }
-            console.log("PHASE5_RECOVERY_STATE_TIMEOUT="+JSON.stringify(last));
-            throw New Error("PHASE5_AUTOMATIC_RECOVERY_NOT_TERMINAL");
-          } finally {
-            await repo.close().catch(()=>undefined);
-          }
-          NODE
-
-          OBS_B64="$(base64 -w0 /tmp/observe.mjs)"
-          flyctl ssh console -a "$APP" -C \
-            "sh -lc 'cd /app && echo $OBS_B64 | base64 -d >/tmp/observe.mjs && PHASE5_OBJECTIVE_ID=$OBJ PHASE5_SESSION_ID=$SESSION PHASE1_ORIGINAL_WORK_ID=$ORIGINAL_WORK_ID PHASE1_ORIGINAL_REQUEST_ID=$ORIGINAL_REQUEST_ID PHASE1_ORIGINAL_CHILD_ID=$ORIGINAL_CHILD_ID node /tmp/observe.mjs; rc=\$?; rm -f /tmp/observe.mjs; exit \$rc'"
-
-          echo "PHASE5_OBJECTIVE_ID=$OBJ"
-          echo "PHASE5_SESSION_ID=$SESSION"
-          echo "PHASE5_LIVE_RESTART_RECOVERY_PROOF=PASS"
-          echo "SECRET_VALUES_EXPOSED=false"
+              if(retryChildren.length>1) throw new Error(`PHASE5_DUPLICATE_RETRY_CHILDREN_${retryChildren.length=19
+I
