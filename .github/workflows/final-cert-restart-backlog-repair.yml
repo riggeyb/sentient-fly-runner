@@ -1,0 +1,225 @@
+name: Final Cert Restart Backlog Repair
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      BRANCH: sentient-production-composition-20261017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence exact canonical head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse origin/$BRANCH)" = "$EXPECTED_SHA"
+      - name: Serialize inherited restart objective recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/fly/self-execution.ts")
+          s=p.read_text()
+          old='''  #scheduleInheritedRestart(objectiveId: string): void {
+            this.#restartRecoveryTail = this.#restartRecoveryTail
+              .catch(() => undefined)
+              .then(async () => {
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                this.#schedule(objectiveId, true);
+                await new Promise<void>((resolve) =>
+                  setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)
+                );
+              });
+          }
+
+          #schedule(objectiveId: string, inheritedRestart = false): void {
+            if (this.#active.has(objectiveId)) return;
+            const work = this.#run(objectiveId, inheritedRestart)
+          '''
+          new='''  #scheduleInheritedRestart(objectiveId: string): void {
+            this.#restartRecoveryTail = this.#restartRecoveryTail
+              .catch(() => undefined)
+              .then(async () => {
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                await this.#schedule(objectiveId, true);
+                await new Promise<void>((resolve) =>
+                  setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)
+                );
+              });
+          }
+
+          #schedule(objectiveId: string, inheritedRestart = false): Promise<void> {
+            const active = this.#active.get(objectiveId);
+            if (active !== undefined) return active;
+            const work = this.#run(objectiveId, inheritedRestart)
+          '''
+          assert s.count(old)==1, s.count(old)
+          s=s.replace(old,new,1)
+          old2='''    this.#active.set(objectiveId, work);
+          }
+
+          async #run(objectiveId: string, inheritedRestart: boolean): Promise<void> {'''
+          new2='''    this.#active.set(objectiveId, work);
+            return work;
+          }
+
+          async #run(objectiveId: string, inheritedRestart: boolean): Promise<void> {'''
+          assert s.count(old2)==1, s.count(old2)
+          p.write_text(s.replace(old2,new2,1))
+
+          t=Path("test/job2-self-execution.test.ts")
+          q=t.read_text()
+          imports='''  RecoveringEngineeringControllerV1,
+            GovernorRecoveryClientV1,'''
+          imports2='''  RecoveringEngineeringControllerV1,
+            GovernorRecoveryClientV1,
+            FlyObjectiveRunnerV1,
+            FLY_OBJECTIVE_RUNNER_CONTRACT,'''
+          assert q.count(imports)==1, q.count(imports)
+          q=q.replace(imports,imports2,1)
+          test=r'''
+
+          test("restart recovery executes unfinished managed objectives serially", async () => {
+            const managedTask = (id: string) => ({
+              kind: "task" as const,
+              id,
+              title: id,
+              status: "running" as const,
+              createdAt: new Date(0).toISOString(),
+              updatedAt: new Date(0).toISOString(),
+              provenance: { actor: "user" as const },
+              version: {
+                schemaVersion: "2.0.0",
+                applicationVersion: FLY_OBJECTIVE_RUNNER_CONTRACT,
+                repository: "riggeyb/sentient",
+                commitSha: SHA,
+              },
+              metadata: {
+                contract: FLY_OBJECTIVE_RUNNER_CONTRACT,
+                request: `recover ${id}`,
+                sessionId: `session-${id}`,
+                mode: "ordinary",
+                privacy: "public_fixture",
+                engineeringJob: null,
+                deployOnSuccess: false,
+                activeEngineeringJobId: null,
+                lastEngineeringReceipt: null,
+                result: null,
+                error: null,
+              },
+            });
+            const tasks = new Map<string, any>([
+              ["recover-a", managedTask("recover-a")],
+              ["recover-b", managedTask("recover-b")],
+            ]);
+            const state = {
+              async list(kind: string) {
+                assert.equal(kind, "task");
+                return [...tasks.values()];
+              },
+              async get(kind: string, id: string) {
+                assert.equal(kind, "task");
+                return tasks.get(id);
+              },
+              async replace(task: any) {
+                tasks.set(task.id, task);
+              },
+            };
+            const started: string[] = [];
+            const release = new Map<string, () => void>();
+            const application = {
+              async runObjective(input: { objectiveId: string }) {
+                started.push(input.objectiveId);
+                await new Promise<void>((resolve) => release.set(input.objectiveId, resolve));
+                return { httpStatus: 200, body: { result: { status: "COMPLETED" } } };
+              },
+            };
+            const runner = new FlyObjectiveRunnerV1({
+              state: state as any,
+              application: application as any,
+              registry: { unregister() {}, register() {} } as any,
+              identity: {} as any,
+            });
+            assert.equal(await runner.resumeUnfinished(), 2);
+            for (let i = 0; i < 100 && started.length < 1; i += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            assert.deepEqual(started, ["recover-a"]);
+            release.get("recover-a")?.();
+            for (let i = 0; i < 300 && started.length < 2; i += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            assert.deepEqual(started, ["recover-a", "recover-b"]);
+            release.get("recover-b")?.();
+            for (let i = 0; i < 100 && tasks.get("recover-b")?.status !== "succeeded"; i += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            assert.equal(tasks.get("recover-a")?.status, "succeeded");
+            assert.equal(tasks.get("recover-b")?.status, "succeeded");
+          });
+          '''
+          assert 'restart recovery executes unfinished managed objectives serially' not in q
+          t.write_text(q+test)
+          PY
+          git diff --check
+          test "$(git diff --name-only | wc -l)" -eq 2
+          git diff --name-only | grep -Fx 'src/fly/self-execution.ts'
+          git diff --name-only | grep -Fx 'test/job2-self-execution.test.ts'
+      - name: Build and restart-backlog regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/job2-self-execution.test.js \
+            dist/test/permanent-continuation-multiprocess.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/phase6-capability-integration.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/phase0-control-recovery.test.js \
+            dist/test/phase0-engineering-readiness.test.js
+          git diff --check
+      - name: Push exact tested repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse origin/$BRANCH)" = "$EXPECTED_SHA"
+          git config user.name "sentient-final-cert-convergence"
+          git config user.email "sentient-final-cert-convergence@users.noreply.github.com"
+          git add src/fly/self-execution.ts test/job2-self-execution.test.ts
+          git diff --cached --check
+          git diff --cached --quiet && { echo "NO_REPAIR_CHANGE"; exit 1; }
+          git commit -m "fix: serialize restart objective recovery"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:refs/heads/$BRANCH"
+          echo "PRIOR_SHA=$EXPECTED_SHA"
+          echo "NEW_SHA=$(git rev-parse HEAD)"
+          echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
+          echo "RESTART_BACKLOG_LIVENESS_REPAIR=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
