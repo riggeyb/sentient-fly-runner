@@ -1,0 +1,69 @@
+name: Sentient Phase 5 Live Restart Reclaim Proof V3
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  phase5-live-restart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Materialize immutable shared Phase5 proof with corrected bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/4b26935d44268f93cdf240f4e83e9a4703af93df/.github/workflows/phase5-live-spawn-proof.yml \
+            -o /tmp/shared-proof.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("/tmp/shared-proof.yml").read_text()
+          marker = "        run: |\n"
+          if text.count(marker) != 1:
+              raise SystemExit(f"RUN_BLOCK_COUNT_INVALID:{text.count(marker)}")
+          block = text.split(marker, 1)[1]
+          lines = block.splitlines()
+          out = []
+          for line in lines:
+              if not line:
+                  out.append("")
+                  continue
+              if not line.startswith("          "):
+                  break
+              out.append(line[10:])
+          script = "\n".join(out) + "\n"
+          script = script.replace("PHASE1_", "PHASE5_")
+          checks = {
+              "no_phase1": "PHASE1_" not in script,
+              "new_promise": "await new Promise" in script,
+              "new_error": 'throw new Error("PHASE5_AUTOMATIC_RECOVERY_NOT_TERMINAL")' in script,
+              "session_binding": "PHASE1_SESSION_ID=$SESSION" in script,
+              "original_work_binding": "PHASE5_ORIGINAL_WORK_ID=$ORIGINAL_WORK_ID" in script,
+              "armed_marker": 'PHASE5_INTERRUPT_ARMED=PASS' in script,
+          }
+          bad = [k for k,v in checks.items() if not v]
+          if bad:
+              raise SystemExit("PROOF_TRANSFORM_INVALID:" + ",".join(bad))
+          Path("/tmp/phase5-proof.sh").write_text(script)
+          print("PHASE5_SHARED_PROOF_TRANSFORM=PASS")
+          PY
+          bash -n /tmp/phase5-proof.sh
+          echo "PHASE5_SHARED_PROOF_SHELL_SYNTAX=PASS"
+      - name: Execute corrected immutable shared Phase5 proof
+        shell: bash
+        run: bash /tmp/phase5-proof.sh
