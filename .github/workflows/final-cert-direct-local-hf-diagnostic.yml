@@ -58,7 +58,7 @@ jobs:
             console.log("DIRECT_HF_MODEL_REVISION="+String(row.metadata?.modelRevision ?? "none"));
             console.log("SECRET_VALUES_EXPOSED=false");
           } catch (error) {
-            console.log("DIRECT_HF_THROW="+String(error instanceof Error ? error.message : error).replace(/[\r\n]/g," ".slice(0,500));
+            console.log("DIRECT_HF_THROW="+String(error instanceof Error ? error.message : error).replace(/[\r\n]/g," ").slice(0,500));
             console.log("SECRET_VALUES_EXPOSED=false");
           } finally {
             await cognition.close().catch(()=>undefined);
