@@ -1,0 +1,99 @@
+name: Final Cert Raw HF Pipeline Shape Diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect raw Transformers.js output shape for plain and chat input
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
+          state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
+          if [ "$state" != started ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+          ready=false
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+              ready=true; break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          echo RAW_HF_EXACT_READINESS=PASS
+          cat >/tmp/raw-hf.mjs <<'NODE'
+          import { pipeline, env } from "@huggingface/transformers";
+          import {
+            LOCAL_HF_CACHE_DIR_V1,
+            LOCAL_HF_DTYPE_V1,
+            LOCAL_HF_MODEL_REVISION_V1,
+            LOCAL_HF_MODEL_V1
+          } from "/app/dist/src/model/providers/huggingface.js";
+          env.cacheDir=LOCAL_HF_CACHE_DIR_V1;
+          const p=await pipeline("text-generation",LOCAL_HF_MODEL_V1,{
+            revision:LOCAL_HF_MODEL_REVISION_V1,
+            dtype:LOCAL_HF_DTYPE_V1,
+            device:"cpu"
+          });
+          const summarize=(label,value)=>{
+            const topArray=Array.isArray(value);
+            const first=topArray?value[0]:value;
+            const keys=first && typeof first==="object" ? Object.keys(first).sort() : [];
+            const generated=first && typeof first==="object" ? first.generated_text : undefined;
+            const generatedType=Array.isArray(generated)?"array":typeof generated;
+            const generatedLength=typeof generated==="string"?generated.length:Array.isArray(generated)?generated.length:null;
+            const roles=Array.isArray(generated)?generated.map(x=>x&&typeof x==="object"?String(x.role??"none"):"nonobject"):[];
+            const contentLengths=Array.isArray(generated)?generated.map(x=>x&&typeof x==="object"&&typeof x.content==="string"?x.content.length:null):[];
+            console.log(label+"="+JSON.stringify({topArray,topLength:topArray?value.length:null,firstType:typeof first,keys,generatedType,generatedLength,roles,contentLengths}));
+          };
+          const opts={max_new_tokens:64,do_sample:false,return_full_text:false};
+          const plain=[
+            "System:",
+            "You are subordinate cognition. Return a short candidate answer only.",
+            "",
+            "User:",
+            "Why does exact source identity matter for a trustworthy runtime?",
+            "",
+            "Assistant:"
+          ].join("\n");
+          try {
+            const rawPlain=await p(plain,opts);
+            summarize("RAW_HF_PLAIN",rawPlain);
+          } catch(e) {
+            console.log("RAW_HF_PLAIN_THROW="+String(e instanceof Error?e.message:e).replace(/[\r\n]+/g," ").slice(0,500));
+          }
+          try {
+            const messages=[
+              {role:"system",content:"You are subordinate cognition. Return a short candidate answer only."},
+              {role:"user",content:"Why does exact source identity matter for a trustworthy runtime?"}
+            ];
+            const rawChat=await p(messages,opts);
+            summarize("RAW_HF_CHAT",rawChat);
+          } catch(e) {
+            console.log("RAW_HF_CHAT_THROW="+String(e instanceof Error?e.message:e).replace(/[\r\n]+/g," ").slice(0,500));
+          }
+          await p.dispose?.();
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          node --check /tmp/raw-hf.mjs
+          b="$(base64 -w0 /tmp/raw-hf.mjs)"
+          timeout 240s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/tmp/raw-hf-${GITHUB_RUN_ID}.mjs; cd /app && node /tmp/raw-hf-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/raw-hf-${GITHUB_RUN_ID}.mjs; exit \$rc'"
