@@ -65,16 +65,41 @@ jobs:
             assert.ok(self.includes("right.createdAt.localeCompare(left.createdAt)"));
             assert.ok(self.includes("left.id.localeCompare(right.id)"));
           '''
-          if x.count(anchor)!=1: raise SystemExit(f"test anchor count={x.count(anchor)}")
+          if x.count(anchor)!=1: raise SystemExit(f"job2 test anchor count={x.count(anchor)}")
           t.write_text(x.replace(anchor,add,1))
+
+          r=Path("test/phase5-fly-restart-lease-retry.test.ts")
+          y=r.read_text()
+          old='''  assert.ok(source.includes("this.#schedule(task.id, true)"));
+          '''
+          new_assert='''  assert.ok(source.includes("this.#scheduleInheritedRestart(task.id)"));
+            assert.ok(source.includes("this.#schedule(objectiveId, true)"));
+          '''
+          if y.count(old)!=1: raise SystemExit(f"phase5 wiring test anchor count={y.count(old)}")
+          r.write_text(y.replace(old,new_assert,1))
           PY
           git diff --check
-          git diff -- src/fly/self-execution.ts test/job2-self-execution.test.ts
+          git diff -- src/fly/self-execution.ts test/job2-self-execution.test.ts test/phase5-fly-restart-lease-retry.test.ts
       - name: Build and test
         run: |
           npm ci --no-audit --no-fund
           npm run build
-          node --test             dist/test/phase5-fly-restart-lease-retry.test.js             dist/test/production-collaboration-restart-recovery.test.js             dist/test/active-work-restart-edge.test.js             dist/test/active-work-expiry-fencing.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/job2-self-execution.test.js             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/fly-phase1-acceptance-policy.test.js             dist/test/phase2-skill-execution.test.js             dist/test/production-phase3-cognition.test.js             dist/test/phase4-multistep-autonomy.test.js             dist/test/phase6-capability-integration.test.js             dist/test/phase7-model-improvement.test.js             dist/test/production-model-improvement.test.js
+          node --test \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/active-work-restart-edge.test.js \
+            dist/test/active-work-expiry-fencing.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/job2-self-execution.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/fly-phase1-acceptance-policy.test.js \
+            dist/test/phase2-skill-execution.test.js \
+            dist/test/production-phase3-cognition.test.js \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/phase6-capability-integration.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/production-model-improvement.test.js
       - name: Push
         run: |
           set -euo pipefail
@@ -82,7 +107,7 @@ jobs:
           test "$(git rev-parse "origin/$BRANCH")" = "$EXPECTED_HEAD"
           git config user.name sentient-phase5-recovery-priority
           git config user.email sentient-phase5-recovery-priority@users.noreply.github.com
-          git add src/fly/self-execution.ts test/job2-self-execution.test.ts
+          git add src/fly/self-execution.ts test/job2-self-execution.test.ts test/phase5-fly-restart-lease-retry.test.ts
           git diff --cached --check
           git commit -m "fix: prioritize recent Fly restart recovery"
           git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_HEAD" origin "HEAD:refs/heads/$BRANCH"
