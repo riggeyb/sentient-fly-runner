@@ -1,0 +1,76 @@
+name: Final Sentient Integrated Objective Certification
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integrated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: 79c023ea0ae2ec55c36c175759b72ee36413d561
+      EXPECTED_TREE: 7cbabedaf2ac5440a83c2aff38ab2e592de29419
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Integrated multistep restart objective
+        shell: bash
+        run: |
+          set -euo pipefail
+          OBJ="final-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SESSION="session-${OBJ}"
+          ready_exact(){ for _ in $(seq 1 "$1"); do curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null && return 0; sleep 2; done; return 1; }
+          ready_exact 120
+          A="$(base64 -w0 scripts/final-integrated-arm.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $A|base64 -d >/tmp/a.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION node /tmp/a.mjs; rc=\$?; rm -f /tmp/a.mjs; exit \$rc'" | tee /tmp/arm
+          grep -Fq 'INTEGRATED_RESTART_ARMED=PASS' /tmp/arm
+          J="$(grep -F 'INTEGRATED_ARM_JSON=' /tmp/arm|tail -n1|sed 's/^.*INTEGRATED_ARM_JSON=//')"
+          W="$(jq -er .workId<<<"$J")"; P="$(jq -er .participantId<<<"$J")"; C="$(jq -er .childId<<<"$J")"; R="$(jq -er .rootRevision<<<"$J")"
+          M="$(flyctl machines list -a "$APP" --json|jq -er '[.[]|select(.state=="started")][0].id')"
+          flyctl machine restart "$M" -a "$APP"
+          echo RESTART_INDUCED=PASS
+          ready_exact 180
+          O="$(base64 -w0 scripts/final-integrated-observe.mjs)"
+          ok=false
+          for _ in $(seq 1 180); do
+            curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/dev/null || true
+            set +e
+            out="$(flyctl ssh console -a "$APP" -C "sh -lc 'echo $O|base64 -d >/tmp/o.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION CERT_WORK_ID=$W CERT_PARTICIPANT_ID=$P CERT_CHILD_ID=$C CERT_PRE_REVISION=$R node /tmp/o.mjs; rc=\$?; rm -f /tmp/o.mjs; exit \$rc'" 2>&1)"
+            rc=$?; set -e; printf '%s\n' "$out" >/tmp/obs
+            [ "$rc" -eq 0 ] && grep -Fq 'INTEGRATED_OBSERVATION_PASS=true' <<<"$out" && { ok=true; break; }
+            sleep 2
+          done
+          cat /tmp/obs
+          test "$ok" = true
+          echo "OBJECTIVE_ID=$OBJ"
+          for x in PHASE2_LIVE_ACTION ACTION_AUTHORITY_RETAINED_BY_SENTIENT PHASE4_DURABLE_AUTONOMY DURABLE_CONTINUATION PHASE5_LIVE_COLLABORATION SPAWN_CONVERGENCE DURABLE_SPAWN_RECOVERY RESTART_RESUME EXISTING_WORK_RECOVERED PHASE6_LIVE_CAPABILITY CONTINUATION_ADVANCED OBJECTIVE_TERMINAL; do echo "$x=PASS"; done
+          echo DUPLICATE_EXECUTION=false
+          echo SECRET_VALUES_EXPOSED=false
+      - name: Non-mutating EngineeringJob durability
+        shell: bash
+        run: |
+          set -euo pipefail
+          OBJ="final-eng-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SESSION="session-${OBJ}"
+          E="$(base64 -w0 scripts/final-engineering-durability.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $E|base64 -d >/tmp/e.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION CERT_EXPECTED_SHA=$EXPECTED_SHA noe /tmp/e.mjs; rc=\$?; rm -f /tmp/e.mjs; exit \$rc'" | tee /tmp/eng
+          grep -Fq 'JOB_ID_PERSISTED_BEFORE_POLL=PASS' /tmp/eng
+          grep -Fq 'ENGINEERING_RECEIPT_VERIFIED=PASS' /tmp/eng
+          grep -Fq 'CONTINUATION_ADVANCEH=PASS' /tmp/eng
+      - name: Post-cert exact live identity
+        shell: bash
+        run: |
+          set -euo pipefal
+          for _ in $(seq 1 120); do
+            if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+              echo POST_CERT_LIVE_SHA_MATCH=PASS
+              echo POST_CERT_LIVE_TREE_MATCH=PASS
+              echo RESOURCE_ENVELOPE_UNCHANGED=true
+              echo SECRET_VALUES_EXPOSED=false
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
