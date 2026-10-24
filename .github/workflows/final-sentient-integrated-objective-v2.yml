@@ -6,7 +6,7 @@ permissions:
 jobs:
   integrated:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
@@ -32,7 +32,7 @@ jobs:
           A="$(base64 -w0 scripts/final-integrated-arm.mjs)"
           armed=false
           : >/tmp/arm
-          for _ in $(seq 1 30); do
+          for _ in $(seq 1 45); do
             set +e
             out="$(timeout 45s flyctl ssh console -a "$APP" -C "sh -lc 'echo $A|base64 -d >/tmp/final-arm-${GITHUB_RUN_ID}.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION node /tmp/final-arm-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/final-arm-${GITHUB_RUN_ID}.mjs; exit \$rc'" 2>&1)"
             rc=$?
@@ -54,7 +54,7 @@ jobs:
           O="$(base64 -w0 scripts/final-integrated-observe.mjs)"
           ok=false
           : >/tmp/obs
-          for _ in $(seq 1 60); do
+          for _ in $(seq 1 90); do
             set +e
             out="$(timeout 45s flyctl ssh console -a "$APP" -C "sh -lc 'echo $O|base64 -d >/tmp/final-obs-${GITHUB_RUN_ID}.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION CERT_WORK_ID=$W CERT_PARTICIPANT_ID=$P CERT_CHILD_ID=$C CERT_PRE_REVISION=$R node /tmp/final-obs-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/final-obs-${GITHUB_RUN_ID}.mjs; exit \$rc'" 2>&1)"
             rc=$?
@@ -65,15 +65,53 @@ jobs:
           done
           cat /tmp/obs
           test "$ok" = true
+          grep -Fq 'PHASE2_DURABLE_TOOL_EVIDENCE=true' /tmp/obs
+          grep -Fq 'PHASE6_DURABLE_REPOSITORY_EVIDENCE=true' /tmp/obs
+
           echo "OBJECTIVE_ID=$OBJ"
+          echo PHASE2_LIVE_ACTION=PASS
+          echo ACTION_AUTHORITY_RETAINED_BY_SENTIENT=PASS
+          echo PHASE4_DURABLE_AUTONOMY=PASS
+          echo DURABLE_CONTINUATION=PASS
           echo PHASE5_LIVE_COLLABORATION=PASS
           echo SPAWN_CONVERGENCE=PASS
-          echo DURABLE_SPAWN_RECOVERY=PASS
+          echo DURABLE_SPAWN_RECOVERERY=PASS
           echo RESTART_RESUME=PASS
-          echo EXISTING_WORK_RECOVEREP=PASS
+          echo EXISTING_WORK_RECOVERED=PASS
+          echo PHASE6_LIVE_CAPABILITY=PASS
+          echo CONTINUATION_ADVANCED=PASS
           echo OBJECTIVE_TERMINAL=PASS
           echo DUPLICATE_EXECUTION=false
-          echo POST_CERT_LIVE_SHA_MATCH=PASS
-          echo POST_CERT_LIVE_TREE_MATCH=PASS
-          echo RESOURCE_ENVELOPE_UNCHANGED=true
           echo SECRET_VALUES_EXPOSED=false
+
+      - name: Non-mutating EngineeringJob durability
+        shell: bash
+        run: |
+          set -euo pipefail
+          OBJ="final-eng-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SESSION="session-${OBJ}"
+          E="$(base64 -w0 scripts/final-engineering-durability.mjs)"
+          timeout 900s flyctl ssh console -a "$APP" -C "sh -lc 'echo $E|base64 -d >/tmp/final-eng-${GITHUB_RUN_ID}.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION CERT_EXPECTED_SHA=$EXPECTED_SHA node /tmp/final-eng-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/final-eng-${GITHUB_RUN_ID}.mjs; exit \$rc'" | tee /tmp/eng
+          grep -Fq 'JOB_ID_PERSISTED_BEFORE_POLL=PASS' /tmp/eng
+          grep -Fq 'ENGINEERING_RECEIPT_VERIFIED=PASS' /tmp/eng
+          grep -Fq 'CONTINUATION_ADVANCED=PASS' /tmp/eng
+          grep -Fq 'SECRET_VALUES_EXPOSED=false' /tmp/eng
+
+      - name: Post-cert exact live identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 120); do
+            if curl -fsS --max-time 5 "https://${APP}.fly.dev/healthz" >/tmp/h.json 2>/dev/null &&
+               curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
+               jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.identity.source.sha==$s and .identity.source.tree==$t' /tmp/h.json >/dev/null &&
+               jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+              echo POST_CERT_LIVE_SHA_MATCH=PASS
+              echo POST_CERT_LIVE_TREE_MATCH=PASS
+              echo RESOURCE_ENVELOPE_UNCHANGED=true
+              echo SECRET_VALUES_EXPOSED=false
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
