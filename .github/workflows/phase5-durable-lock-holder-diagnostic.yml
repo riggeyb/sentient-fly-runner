@@ -23,24 +23,24 @@ jobs:
       EXPECTED_TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Identify canonical durable-state lock holder without mutation
+      - name: Identify canonical durable-state lock holder without readiness dependency
         shell: bash
         run: |
           set -euo pipefail
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
-          ready="$(curl -fsS --max-time 20 https://sentient-validation-runner.fly.dev/readyz)"
-          grep -Fq "$EXPECTED_SHA" <<<"$ready"
-          grep -Fq "$EXPECTED_TREE" <<<"$ready"
-          grep -Fq '"ready":true' <<<"$ready"
-          echo "PHASE5_LOCK_HOLDER_IDENTITY=PASS"
+          flyctl machines list -a "$APP" --json >/tmp/machines.json
+          jq -e --arg s "$EXPECTED_SHA" '
+            length == 1 and
+            .[0].state == "started" and
+            ((.[0].config.image // .[0].image // "" | tostring) | contains($s))
+          ' /tmp/machines.json >/dev/null
+          echo "PHASE5_LOCK_HOLDER_IMAGE_IDENTITY=PASS"
 
           cat >/tmp/phase5-lock-holder.mjs <<'NODE'
           import { Pool } from "pg";
-
           const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
-
           const pool=new Pool({connectionString,max:3,connectionTimeoutMillis:10000});
           const waiter=await pool.connect();
           const observer=await pool.connect();
@@ -51,21 +51,15 @@ jobs:
             const pidResult=await waiter.query("SELECT pg_backend_pid()::int AS pid");
             const waiterPid=Number(pidResult.rows[0]?.pid??0);
             if(!Number.isInteger(waiterPid) || waiterPid<=0) throw new Error("PHASE5_WAITER_PID_INVALID");
-
             const started=Date.now();
             const waitPromise=waiter.query(
-              `SELECT generation
-                 FROM sentient_durable_state
-                WHERE state_key = $1
-                FOR UPDATE`,
+              `SELECT generation FROM sentient_durable_state WHERE state_key=$1 FOR UPDATE`,
               ["canonical"],
             ).then(
               ()=>({ok:true,code:"none",elapsedMs:Date.now()-started}),
-              (error)=>({ok:false,code:String(error?.code??"unknown"),elapsedMs:Date.now()-started}),
+              error=>({ok:false,code:String(error?.code??"unknown"),elapsedMs:Date.now()-started}),
             );
-
             await sleep(250);
-
             const blockersResult=await observer.query(
               "SELECT unnest(pg_blocking_pids($1::int))::int AS pid",
               [waiterPid],
@@ -73,11 +67,9 @@ jobs:
             const blockerPids=blockersResult.rows
               .map(row=>Number(row.pid))
               .filter(pid=>Number.isInteger(pid) && pid>0);
-
             console.log(`PHASE5_LOCK_HOLDER_WAITER_PID=${waiterPid}`);
             console.log(`PHASE5_LOCK_HOLDER_BLOCKER_COUNT=${blockerPids.length}`);
             console.log(`PHASE5_LOCK_HOLDER_BLOCKER_PIDS=${JSON.stringify(blockerPids)}`);
-
             if(blockerPids.length>0) {
               const activity=await observer.query(
                 `SELECT pid::int,
@@ -94,10 +86,7 @@ jobs:
                 [blockerPids],
               );
               const locks=await observer.query(
-                `SELECT pid::int,
-                        locktype,
-                        mode,
-                        granted,
+                `SELECT pid::int, locktype, mode, granted,
                         COALESCE(relation::regclass::text,'') AS relation
                    FROM pg_locks
                   WHERE pid = ANY($1::int[])
@@ -107,7 +96,6 @@ jobs:
               console.log(`PHASE5_LOCK_HOLDER_ACTIVITY=${JSON.stringify(activity.rows)}`);
               console.log(`PHASE5_LOCK_HOLDER_LOCKS=${JSON.stringify(locks.rows)}`);
             }
-
             const waitOutcome=await waitPromise;
             console.log(`PHASE5_LOCK_HOLDER_WAIT_OK=${waitOutcome.ok}`);
             console.log(`PHASE5_LOCK_HOLDER_WAIT_CODE=${waitOutcome.code}`);
@@ -121,7 +109,6 @@ jobs:
             await pool.end().catch(()=>undefined);
           }
           NODE
-
           B64="$(base64 -w0 /tmp/phase5-lock-holder.mjs)"
           flyctl ssh console -a "$APP" -C \
             "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-lock-holder.mjs && node /app/phase5-lock-holder.mjs; rc=\$?; rm -f /app/phase5-lock-holder.mjs; exit \$rc'"
