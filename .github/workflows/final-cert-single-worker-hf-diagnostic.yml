@@ -1,0 +1,77 @@
+name: Final Cert Single Worker HF Diagnostic
+'on':
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      APP: sentient-validation-runner
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe one worker without runtime retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          for _ in $(seq 1 60); do
+            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null
+          cat >/tmp/one-worker.mjs <<'NODE'
+          import { Worker } from "node:worker_threads";
+          const worker = new Worker(new URL("file:///app/dist/src/model/providers/huggingface-worker.js"));
+          const pending = new Map();
+          worker.on("message", value => {
+            const p = pending.get(value?.id);
+            if (p) { pending.delete(value.id); p(value); }
+          });
+          const ask = (msg) => new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("worker_response_timeout")), 120000);
+            pending.set(msg.id, value => { clearTimeout(timer); resolve(value); });
+            worker.postMessage(msg);
+          });
+          const sanitize = (v) => JSON.stringify(v, (k, x) => {
+            if (k === "text" && typeof x === "string") return `[text:${x.length}]`;
+            return x;
+          });
+          try {
+            const init = await ask({id:1,kind:"initialize"});
+            console.log("SINGLE_WORKER_INIT="+sanitize(init));
+            if (init?.ok !== true) process.exitCode = 2;
+            const prompt = [
+              "System:",
+              "You are subordinate cognition. Return a short candidate answer only.",
+              "",
+              "User:",
+              "Why does exact source identity matter for a trustworthy runtime?",
+              "",
+              "Assistant:",
+            ].join("\n");
+            const gen = await ask({id:2,kind:"generate",prompt,maxInputTokens:512,maxOutputTokens:64});
+            console.log("SINGLE_WORKER_GENERATE="+sanitize(gen));
+            if (gen?.ok !== true) process.exitCode = 3;
+          } finally {
+            await worker.terminate().catch(()=>undefined);
+          }
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          b="$(base64 -w0 /tmp/one-worker.mjs)"
+          timeout 160s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/tmp/one-worker-${GITHUB_RUN_ID}.mjs; node /tmp/one-worker-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/one-worker-${GITHUB_RUN_ID}.mjs; exit \$rc'"
