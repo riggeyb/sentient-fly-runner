@@ -50,7 +50,7 @@ jobs:
           } from "/app/dist/src/model/providers/huggingface.js";
           env.cacheDir=LOCAL_HF_CACHE_DIR_V1;
           const p=await pipeline("text-generation",LOCAL_HF_MODEL_V1,{
-            revision:LOCAL_HF_MODEL_REVISION_V1,
+            revision:LOCAL_HF_MODD_REVISION_V1,
             dtype:LOCAL_HF_DTYPE_V1,
             device:"cpu"
           });
@@ -83,7 +83,7 @@ jobs:
           }
           try {
             const messages=[
-              {role:"system",content:"You are subordinate cognition. Return a short candidate answer only."},
+             {role:"system",content:"You are subordinate cognition. Return a short candidate answer only."},
               {role:"user",content:"Why does exact source identity matter for a trustworthy runtime?"}
             ];
             const rawChat=await p(messages,opts);
@@ -96,4 +96,4 @@ jobs:
           NODE
           node --check /tmp/raw-hf.mjs
           b="$(base64 -w0 /tmp/raw-hf.mjs)"
-          timeout 240s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/tmp/raw-hf-${GITHUB_RUN_ID}.mjs; cd /app && node /tmp/raw-hf-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/raw-hf-${GITHUB_RUN_ID}.mjs; exit \$rc'"
+          timeout 240s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/app/.raw-hf-${GITHUB_RUN_ID}.mjs; cd /app && node /app/.raw-hf-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /app/.raw-hf-${GITHUB_RUN_ID}.mjs; exit \$rc'"
