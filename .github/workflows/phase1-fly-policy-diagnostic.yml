@@ -24,12 +24,49 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Patch Fly policy wiring ephemerally
+      - name: Apply exact Phase1 production and Fly wiring ephemerally
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+
+          p=Path("src/application/production-composition.ts")
+          s=p.read_text()
+          old='import {executeSentientPhase1TurnV1,type SentientTurnResultV1} from "../phase1/core-runtime.js";'
+          new='import {executeSentientPhase1TurnV1,type Phase1AcceptancePolicyV1,type Phase1CognitionPort,type SentientTurnResultV1} from "../phase1/core-runtime.js";'
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
+          old=''' async function ordinary(i:SentientObjectiveInput){
+            if(!o.cognition)throw new Error("production_cognition_binding_unavailable");
+            const phase1=await executeSentientPhase1TurnV1({requestId:`request:${i.objectiveId}`,sessionId:i.sessionId,taskId:i.objectiveId,userRequest:i.request},{cognition:o.cognition});
+            const phase3Assessment=await assessPhase1ResultWithPhase3V1(phase1,o.phase3);
+            return Object.freeze({...phase1,phase3Assessment});
+           }'''
+          new=''' async function ordinary(i:SentientObjectiveInput){
+            if(!o.cognition)throw new Error("production_cognition_binding_unavailable");
+            const phase1=await runProductionPhase1TurnV1(i,o.cognition,o.phase1AcceptancePolicy);
+            const phase3Assessment=await assessPhase1ResultWithPhase3V1(phase1,o.phase3);
+            return Object.freeze({...phase1,phase3Assessment});
+           }'''
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
+          marker='export const PHASE3_PRODUCTION_ASSESSMENT_CONTRACT="sentient-phase3-production-assessment/v1" as const;'
+          assert s.count(marker)==1
+          helper='''export function runProductionPhase1TurnV1(i:SentientObjectiveInput,cognition:Phase1CognitionPort,acceptancePolicy?:Phase1AcceptancePolicyV1|null):Promise<SentientTurnResultV1>{
+           return executeSentientPhase1TurnV1(
+            {requestId:`request:${i.objectiveId}`,sessionId:i.sessionId,taskId:i.objectiveId,userRequest:i.request},
+            {cognition,...(acceptancePolicy?{acceptancePolicy}:{})},
+           );
+          }
+          '''
+          s=s.replace(marker,helper+marker,1)
+          old='s==="WAITING_AUTHORITY"||s==="FAILED"||s==="NOT_CONVERGED"||s==="SUBORDINATE_RESULT_INVALID"'
+          new='s==="WAITING_AUTHORITY"||s==="FAILED"||s==="NOT_CONVERGED"||s==="SUBORDINATE_RESULT_INVALID"||s==="SUBORDINATE_RESULT_REJECTED"'
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
           p=Path("src/fly/production-runtime.ts")
           s=p.read_text()
           anchor='import { LocalHuggingFacePhase3CognitionV1 } from "../phase3/local-hf-adapter.js";'
@@ -39,6 +76,24 @@ jobs:
           assert s.count(marker)==1
           constants='export const SENTIENT_FLY_PHASE1_ACCEPTANCE_POLICY_ID=\n  "sentient-fly-phase1-acceptance-policy/v1" as const;\nexport const SENTIENT_FLY_PHASE1_MAX_PROPOSAL_CHARS = 8_000 as const;\n\n'
           s=s.replace(marker,constants+marker,1)
+          old='''  const cognition = new LocalHuggingFacePhase1CognitionV1(localHfRuntime);
+            const phase3 = new LocalHuggingFacePhase3CognitionV1(localHfRuntime);'''
+          new='''  const cognition = new LocalHuggingFacePhase1CognitionV1(localHfRuntime);
+            const phase1AcceptancePolicy = new BoundedSentientPhase1AcceptancePolicyV1({
+              policyId: SENTIENT_FLY_PHASE1_ACCEPTANCE_POLICY_ID,
+              maxProposalChars: SENTIENT_FLY_PHASE1_MAX_PROPOSAL_CHARS,
+            });
+            const phase3 = new LocalHuggingFacePhase3CognitionV1(localHfRuntime);'''
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
+          old='''    state,
+            cognition,
+            phase3,'''; new='''    state,
+            cognition,
+            phase1AcceptancePolicy,
+            phase3,'''
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
           p.write_text(s)
           PY
       - name: Install and build
