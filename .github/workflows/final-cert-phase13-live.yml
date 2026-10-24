@@ -1,0 +1,65 @@
+name: Final Cert Phase1 Phase3 Live
+
+"on":
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      certification_id: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+      CERTIFICATION_ID: ${{ inputs.certification_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 120); do
+            r="$(curl -fsS --max-time 5 https://${APP}.fly.dev/readyz || true)"
+            jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null 2>&1 <<<"$r" && break
+            sleep 2
+          done
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null <<<"$r"
+          cat >/tmp/cert13.mjs <<'NODE'
+          import {BoundedSentientPhase1AcceptancePolicyV1} from "/app/dist/src/phase1/bounded-acceptance-policy.js";
+          import {deriveTaskRequirementsV1} from "/app/dist/src/phase1/core-runtime.js";
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim(), cert=String(process.env.CERT_ID??"").trim();
+          if(!token||!cert) throw new Error("CERT13_BINDING_MISSING");
+          const h={authorization:`Bearer ${token}`,"content-type":"application/json"}, base="http://127.0.0.1:8080";
+          const id=`${cert}:ordinary`, session=`session:${id}`, sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          let r=await fetch(base+"/v1/objectives",{method:"POST",headers:h,body:JSON.stringify({objectiveId:id,sessionId:session,request:"Explain in one concise sentence why exact source identity matters for a trustworthy runtime.",mode:"ordinary",privacy:"public_fixture"}),signal:AbortSignal.timeout(120000)});
+          let b=await r.json(); if(r.status!==202||b.objectiveId!==id) throw new Error("CERT13_INGRESS_FAILED");
+          r=await fetch(base+`/v1/objectives/${encodeURIComponent(id)}`,{headers:h,signal:AbortSignal.timeout(30000)}); b=await r.json();
+          if(r.status!==200||b.objectiveId!==id) throw new Error("CERT13_PERSISTENCE_FAILED");
+          console.log("OBJECTIVE_ASYNC_INGRESS=PASS"); console.log("OBJECTIVE_PERSISTENCE=PASS");
+          const end=Date.now()+600000;
+          while(Date.now()<end){
+            r=await fetch(base+`/v1/objectives/${encodeURIComponent(id)}`,{headers:h,signal:AbortSignal.timeout(30000)}); b=await r.json();
+            if(["succeeded","failed","cancelled"].includes(String(b.status))) break;
+            await sleep(1000);
+          }
+          if(b.status!=="succeeded") throw new Error("CERT13_OBJECTIVE_NOT_SUCCEEDED");
+          const turn=b?.result?.body?.result??{}, sub=turn.subordinate??{}, p3=turn.phase3Assessment??{};
+          if(turn.status!=="RESPONDED"||turn?.state?.authoritativeOwner!=="SENTIENT"||turn?.authority?.owner!=="SENTIENT"||sub.accepted!==true) throw new Error("CERT13_AUTHORITY_FAILED");
+          if(sub.provider!=="huggingface-local"||sub.model!=="onnx-community/SmolLM2-135M-Instruct-ONNX"||sub.revision!=="b8a5c0f183b78c55955a5364f610c36668b5e681"||sub.acceptancePolicyId!=="sentient-fly-phase1-acceptance-policy/v1") throw new Error("CERT13_MODEL_IDENTITY_FAILED");
+          if(p3.status!=="ASSESSED"||p3.transport!=="LOCAL"||p3.authoritative!==false||p3.authorityOwner!=="SENTIENT_RUNTIME"||!p3.modelId) throw new Error("CERT13_PHASE3_FAILED");
+          const req=deriveTaskRequirementsV1({requestId:`policy:${cert}`,sessionId:`policy-session:${cert}`,taskId:`policy-task:${cert}`,userRequest:"Evaluate a syntactically valid subordinate proposal."});
+          const policy=new BoundedSentientPhase1AcceptancePolicyV1({policyId:"sentient-fly-phase1-acceptance-policy/v1",maxProposalChars:8000});
+          const dec=await policy.evaluate(req,{text:"x".repeat(8001),provider:sub.provider,model:sub.model,revision:sub.revision});
+          if(dec.accepted!==false||!String(dec.reason).includes("8000")) throw new Error("CERT13_POLICY_REJECTION_FAILED");
+          console.log("PHASE1_LIVE_AUTHORITY=PASS"); console.log("MODEL_REMAINS_SUBORDINATE=PASS");
+          console.log("PHASE1_VALID_PROPOSAL_CONSTRAINED=PASS"); console.log("LOCAL_HF_COGNITION_LIVE=PASS"); console.log("PHASE3_LIVE_COGNITION=PASS");
+          console.log("FINAL_CERT_ORDINARY_OBJECTIVE_ID="+id); console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B64="$(base64 -w0 /tmp/cert13.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/tmp/cert13.mjs && CERT_ID=${CERTIFICATION_ID}:run:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT} node /tmp/cert13.mjs; rc=\$?; rm -f /tmp/cert13.mjs; exit \$rc'" | tee /tmp/out
+          for x in PHASE1_LIVE_AUTHORITY=PASS MODEL_REMAINS_SUBORDINATE=PASS PHASE1_VALID_PROPOSAL_CONSTRAINED=PASS LOCAL_HF_COGNITION_LIVE=PASS PHASE3_LIVE_COGNITION=PASS OBJECTIVE_ASYNC_INGRESS=PASS OBJECTIVE_PERSISTENCE=PASS SECRET_VALUES_EXPOSED=false; do grep -Fq "$x" /tmp/out; done
