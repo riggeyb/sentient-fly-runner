@@ -1,0 +1,48 @@
+name: Phase5 Restart Repair Compile Diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply exact shared Phase5 repair ephemerally
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/95388f05038182437348addff8255380caf535fc/scripts/phase5-restart-repair.py -o /tmp/phase5-repair.py
+          python3 /tmp/phase5-repair.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/application/production-collaboration.ts")
+          s=p.read_text()
+          old="await repository.completeSpawnChild(execution.id, result);"
+          new="await repository.completeSpawnChild({ executionId: execution.id, endedAt, result });"
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Build with compiler diagnostics
+        run: npm run build
+      - name: Report
+        if: always()
+        run: |
+          echo "PHASE5_COMPILE_DIAGNOSTIC_COMPLETE=true"
+          echo "SECRET_VALUES_EXPOSED=false"
