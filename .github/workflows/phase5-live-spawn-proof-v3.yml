@@ -41,10 +41,10 @@ jobs:
           out = []
           for line in lines:
               if not line:
-                  out.append("")
-                  continue
+                out.append("")
+                continue
               if not line.startswith("          "):
-                  break
+                break
               out.append(line[10:])
           script = "\n".join(out) + "\n"
           script = script.replace("PHASE1_", "PHASE5_")
@@ -52,7 +52,7 @@ jobs:
               "no_phase1": "PHASE1_" not in script,
               "new_promise": "await new Promise" in script,
               "new_error": 'throw new Error("PHASE5_AUTOMATIC_RECOVERY_NOT_TERMINAL")' in script,
-              "session_binding": "PHASE1_SESSION_ID=$SESSION" in script,
+              "session_binding": "PHASE5_SESSION_ID=$SESSION" in script,
               "original_work_binding": "PHASE5_ORIGINAL_WORK_ID=$ORIGINAL_WORK_ID" in script,
               "armed_marker": 'PHASE5_INTERRUPT_ARMED=PASS' in script,
           }
