@@ -8,7 +8,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   fix:
@@ -19,8 +19,8 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          persist-credentials: true
-      - name: Patch and syntax-check V4 arm script
+          persist-credentials: false
+      - name: Patch, syntax-check, and emit validated V4
         env:
           EXPECTED_HEAD: ${{ inputs.expected_head }}
         shell: bash
@@ -51,19 +51,4 @@ jobs:
           Path("/tmp/arm.mjs").write_text(s[start:end] + "\n")
           PY
           node --check /tmp/arm.mjs
-      - name: Commit exact harness fix
-        env:
-          EXPECTED_HEAD: ${{ inputs.expected_head }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          test "$(git rev-parse origin/main)" = "$EXPECTED_HEAD"
-          git config user.name "sentient-phase5-convergence"
-          git config user.email "sentient-phase5-convergence@users.noreply.github.com"
-          git add .github/workflows/phase5-live-spawn-proof-v4.yml
-          git diff --cached --check
-          git diff --cached --quiet && { echo NO_CHANGE; exit 1; }
-          git commit -m "ops: fix Phase5 V4 arm module control flow"
-          git push --force-with-lease="refs/heads/main:$EXPECTED_HEAD" origin HEAD:refs/heads/main
-          echo "RUNNER_NEW_SHA=$(git rev-parse HEAD)"
+          echo "PATCHED_V4_BASE64=$(base64 -w0 .github/workflows/phase5-live-spawn-proof-v4.yml)"
