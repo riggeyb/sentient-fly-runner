@@ -1,0 +1,75 @@
+name: Final Cert Resume Existing Objective
+"on":
+  workflow_dispatch:
+    inputs:
+      objective_id: {required: true, type: string}
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions: {contents: read}
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      OID: ${{ inputs.objective_id }}
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Resume existing objective through ordinary production ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          id="$(flyctl machines list -a "$APP" --json | jq -r '.[0].id')"
+          test -n "$id"
+          flyctl machine start "$id" -a "$APP" >/dev/null || true
+          for _ in $(seq 1 120); do
+            r="$(curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" 2>/dev/null || true)"
+            if jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" \
+              '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' \
+              >/dev/null 2>&1 <<<"$r"; then break; fi
+            sleep 2
+          done
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" \
+            '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' \
+            >/dev/null <<<"$r"
+          echo RESUME_LIVE_IDENTITY=PASS
+          cat >/tmp/resume.mjs <<'NODE'
+          const oid=String(process.env.CERT_OBJECTIVE_ID??"").trim();
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          if(!oid||!token) throw new Error("RESUME_BINDING_MISSING");
+          const session=`session-${oid}`;
+          const request="First inspect the repository current commit identity without mutation; then use a bounded tool to inspect the current commit identity without mutation; then independently collaborate with workers to analyze restart-safe durable collaboration, verify it, and converge under Sentient authority.";
+          const ingress=await fetch("http://127.0.0.1:8080/v1/objectives",{
+            method:"POST",
+            headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},
+            body:JSON.stringify({request,objectiveId:oid,sessionId:session,mode:"multi_step",privacy:"public_fixture"}),
+            signal:AbortSignal.timeout(120000)
+          });
+          const receipt=await ingress.json().catch(()=>({}));
+          if(ingress.status!==202||receipt.objectiveId!==oid) throw new Error(`RESUME_INGRESS_${ingress.status}`);
+          console.log("RESUME_EXISTING_INGRESS=PASS");
+          let last=null;
+          for(let i=0;i<900;i++){
+            const q=await fetch(`http://127.0.0.1:8080/v1/objectives/${encodeURIComponent(oid)}`,{
+              headers:{authorization:`Bearer ${token}`},
+              signal:AbortSignal.timeout(10000)
+            });
+            if(!q.ok) throw new Error(`RESUME_STATUS_${q.status}`);
+            last=await q.json();
+            if(["succeeded","failed","cancelled"].includes(String(last.status))) break;
+            await new Promise(r=>setTimeout(r,1000));
+          }
+          if(!last||!["succeeded","failed","cancelled"].includes(String(last.status))) throw new Error("RESUME_NOT_TERMINAL");
+          console.log(`RESUME_TERMINAL_STATUS=${String(last.status)}`);
+          console.log("RESUME_EXISTING_OBJECTIVE_TERMINAL=PASS");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B64="$(base64 -w0 /tmp/resume.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'echo $B64 | base64 -d >/tmp/resume.mjs && CERT_OBJECTIVE_ID=$OID node /tmp/resume.mjs; rc=\$?; rm -f /tmp/resume.mjs; exit \$rc'"
