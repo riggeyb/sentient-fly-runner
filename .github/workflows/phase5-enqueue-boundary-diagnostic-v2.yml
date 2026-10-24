@@ -44,7 +44,7 @@ jobs:
           const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!objectiveId||!token||!connectionString) throw new Error("PHASE5_DIAG_BINDING_MISSING");
           const repo=new PostgresSpawnObjectiveRepository({connectionString});
-          const clean=(value)=>typeof value==="string"?value.replace(/[\p\n]/g," ").slice(0,500):"none";
+          const clean=(value)=>typeof value==="string"?value.replace(/[\r\n]/g," ").slice(0,500):"none";
           try {
             const beforeStarted=Date.now();
             const before=await repo.snapshot();
@@ -94,11 +94,11 @@ jobs:
             console.log(`PHASE5_DIAG_AFTER_LOGICAL_BYTES=${Buffer.byteLength(JSON.stringify(after),"utf8")}`);
             console.log(`PHASE5_DIAG_TASK_PRESENT=${after.records.tasks.some((task)=>task.id===objectiveId)}`);
             console.log("SECRET_VALUES_EXPOSED=false");
-            console.log("PHASE5_ENQUEUE_BOUNDARY_DIAGNOSTIC_V2=COMPLETE");
+          console.log("PHASE5_ENQUEE_BOUNDARY_DIAGNOSTIC_V2=COMPLETE");
           } finally {
             await repo.close().catch(()=>undefined);
           }
           NODE
           B64="$(base64 -w0 /tmp/enqueue-v2.mjs)"
           flyctl ssh console -a "$APP" -C \
-            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/enqueue-v2.mjs && PHASE1_DIAG_OBJECTIVE_ID=$OBJ node /app/enqueue-v2.mjs; rc=\$?; rm -f /app/enqueue-v2.mjs; exit \$rc'
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/enqueue-v2.mjs && PHASE5_DIAG_OBJECTIVE_ID=$OBJ node /app/enqueue-v2.mjs; rc=\$?; rm -f /app/enqueue-v2.mjs; exit \$rc'"
