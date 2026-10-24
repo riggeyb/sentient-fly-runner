@@ -34,17 +34,9 @@ jobs:
           from pathlib import Path
           p=Path("src/fly/self-execution.ts")
           s=p.read_text()
-          old='''  public async resumeUnfinished(): Promise<number> {
-            const tasks = await this.#state.list("task");
-            let count = 0;
-            for (const task of tasks) {
-              if (task.kind !== "task" || !ACTIVE.has(task.status)) continue;
-              if (parseRunnerMetadata(task) === null) continue;
-              count += 1;
-              this.#scheduleInheritedRestart(task.id);
-            }
-            return count;
-          }'''
+          start=s.find("  public async resumeUnfinished(): Promise<number> {")
+          end=s.find("\n\n  #scheduleInheritedRestart(", start)
+          if start < 0 or end < 0: raise SystemExit(f"resume structural anchors start={start} end={end}")
           new='''  public async resumeUnfinished(): Promise<number> {
             const tasks = (await this.#state.list("task"))
               .filter((task) =>
@@ -62,8 +54,7 @@ jobs:
             for (const task of tasks) this.#scheduleInheritedRestart(task.id);
             return tasks.length;
           }'''
-          if s.count(old)!=1: raise SystemExit(f"resume anchor count={s.count(old)}")
-          p.write_text(s.replace(old,new,1))
+          p.write_text(s[:start]+new+s[end:])
 
           t=Path("test/job2-self-execution.test.ts")
           x=t.read_text()
