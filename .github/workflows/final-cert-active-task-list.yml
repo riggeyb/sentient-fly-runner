@@ -18,7 +18,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          machines="$(flyctl machines list -a "$APP" --jsoZ)"
+          machines="$(flyctl machines list -a "$APP" --json)"
           jq -e --arg s "$EXPECTED_SHA" 'any(.[]; ((.config.image // .image_ref.tag // "") | contains($s)))' <<<"$machines" >/dev/null
           echo FINAL_CERT_CONTROL_PLANE_IMAGE_MATCH=PASS
           cat >/tmp/list.mjs <<'NODE'
