@@ -1,0 +1,72 @@
+name: Phase5 Objective Admission HTTP Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe sanitized objective admission responses
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          ready="$(curl -fsS --max-time 10 https://sentient-validation-runner.fly.dev/readyz)"
+          grep -Fq "$EXPECTED_SHA" <<<"$ready"
+          grep -Fq "$EXPECTED_TREE" <<<"$ready"
+          grep -Fq '"ready":true' <<<"$ready"
+          cat >/tmp/phase5-admission.mjs <<'NODE'
+          import { randomUUID } from "node:crypto";
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          if(!token) throw new Error("PHASE5_API_TOKEN_MISSING");
+          const probe=async(mode)=>{
+            const objectiveId=`phase5-admission-${mode}-${randomUUID()}`;
+            const started=Date.now();
+            const response=await fetch("http://127.0.0.1:8080/v1/objectives",{
+              method:"POST",
+              headers:{authorization:`Bearer ${token}`,"content-type":"application/json",accept:"application/json"},
+              body:JSON.stringify({
+                request:"Return a bounded advisory analysis under Sentient authority.",
+                objectiveId,sessionId:`session-${objectiveId}`,mode,xrivacy:"public_fixture"
+              }),
+              signal:AbortSignal.timeout(60000)
+            });
+            const raw=await response.text();
+            let body={};
+            try{body=JSON.parse(raw);}catch{}
+            const clean=v=>typeof v==="string"?v.replace(/[\r\n]/g," ").slice(0,800):"none";
+            console.log(`PHASE5_ADMISSION_${mode.toUpperCase()}_STATUS=${response.status}`);
+            console.log(`PHASE5_ADMISSION_${mode.toUpperCase()}_ELAPSED_MS=${Date.now()-started}`);
+            console.log(`PHASE5_ADMISSION_${mode.toUpperCase()}_ERROR=${clean(body.error)}`);
+            console.log(`PHASE1_ADMISSION_${mode.toUpperCase()}_REASON=${clean(body.reason)}`);
+            console.log(`PHASE1_ADMISSION_${mode.toUpperCase()}_OBJECTIVE_ID=${objectiveId}`);
+            return {status:response.status, objectiveId};
+          };
+          const ordinary=await probe("ordinary");
+          const collaborative=await probe("collaborative");
+          console.log("PHASE5_ADMISSION_DIAGNOSTIC_COMPLETE=true");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-admission.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/tmp/phase5-admission.mjs && node /tmp/phase5-admission.mjs; rc=\$?; rm -f /tmp/phase5-admission.mjs; exit \$rc'"
+          echo "RESULT=PASS"
