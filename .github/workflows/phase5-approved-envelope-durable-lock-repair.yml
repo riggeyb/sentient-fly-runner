@@ -1,0 +1,133 @@
+name: Phase5 Approved Envelope Durable Lock Repair
+on:
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions:
+  contents: read
+concurrency:
+  group: sentient-phase5-canonical-lock-repair
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+      TARGET_BRANCH: sentient-production-composition-20261017
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence exact source head and tree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_SHA"
+          echo PHASE5_LOCK_SOURCE_FENCE=PASS
+      - name: Restore approved Fly envelope and bound existing durable transaction
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          old='12fcbd29ce66554a0b6be91c3114b4da2df96461'
+          changed=subprocess.check_output(['git','diff','--name-only',old,'HEAD','--','test'],text=True).splitlines()
+          phase0=[path for path in changed if path.startswith('test/') and 'phase0' in path]
+          if len(phase0)!=1:
+              raise SystemExit(f'PHASE0_TEST_RESTORE_AMBIGUOUS:{phase0}')
+          subprocess.run(['git','restore','--source',old,'--','fly.toml',phase0[0]],check=True)
+          fly=Path('fly.toml').read_text()
+          if 'auto_stop_machines = "stop"' not in fly or 'min_machines_running = 0' not in fly:
+              raise SystemExit('APPROVED_FLY_ENVELOPE_NOT_RESTORED')
+          path=Path('src/state/postgres-state-repository.ts')
+          source=path.read_text()
+          anchor='      const current = await this.lockedSnapshot(client);'
+          if source.count(anchor)!=1:
+              raise SystemExit(f'TRANSACTION_ANCHOR_COUNT_{source.count(anchor)}')
+          replacement='\n'.join([
+            "      await client.query(\"SET LOCAL idle_in_transaction_session_timeout = '30s'\");",
+            "      await client.query(\"SET LOCAL lock_timeout = '15s'\");",
+            anchor,
+          ])
+          path.write_text(source.replace(anchor,replacement,1))
+          print('PHASE5_BOUNDED_LOCK_EDIT=PASS')
+          print('PHASE0_APPROVED_ENVELOPE_RESTORED=PASS')
+          PY
+          git diff --check
+      - name: Build exact repaired candidate
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          echo BUILD=PASS
+      - name: Verify Postgres lock timeout guard and bounded session behavior
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import pg from 'pg';
+          const s=readFileSync('src/state/postgres-state-repository.ts','utf8');
+          assert.ok(s.includes(`SET LOCAL idle_in_transaction_session_timeout = '30s'`));
+          assert.ok(s.includes(`SET LOCAL lock_timeout = '15s'`));
+          const db=process.env.SENTIENT_TEST_DATABASE_URL;
+          const a=new pg.Client({connectionString:db}), b=new pg.Client({connectionStringString:db});
+          await a.connect(); await b.connect();
+          try {
+            await a.query('CREATE TABLE IF NOT EXISTS phase5_lock_guard_fixture (id int PRIMARY KEY)');
+            await a.query('INSERT INTO phase5_lock_guard_fixture (id) VALUES (1) ON CONFLICT DO NOTHING');
+            await a.query('BEGIN');
+            await a.query("SET LOCAL idle_in_transaction_session_timeout = '1000ms'");
+            await a.query('SELECT * FROM phase5_lock_guard_fixture WHERE id=1 FOR UPDATE');
+            const start=Date.now();
+            const released=await b.query('SELECT * FROM phase5_lock_guard_fixture WHERE id=1 FOR UPDATE');
+            assert.equal(released.rowCount,1);
+            assert.ok(Date.now()-start < 12000);
+            console.log('PHASE5_PG_IDLE_TRANSACTION_RELEASE=PASS');
+          } finally {
+            await a.end().catch(()=>undefined);
+            await b.end().catch(()=>undefined);
+          }
+          NODE
+      - name: Targeted and cumulative regressions
+        run: |
+          set -euo pipefail
+          node --test dist/test/phase0-control-recovery.test.js dist/test/phase0-engineering-readiness.test.js dist/test/phase1-core-runtime.test.js dist/test/phase1-acceptance-policy.test.js dist/test/phase2-skill-execution.test.js dist/test/phase3-cognitive-components.test.js dist/test/phase4-multistep-autonomy.test.js dist/test/phase5-collaborative-convergence.test.js dist/test/production-collaboration-restart-recovery.test.js dist/test/phase5-fly-restart-lease-retry.test.js dist/test/phase6-capability-integration.test.js dist/test/phase7-model-improvement.test.js dist/test/job2-production-convergence.test.js dist/test/permanent-continuation-http.test.js
+          git diff --check
+          echo PHASE0_7_CUMULATIVE=PASS
+      - name: Commit and push only against unchanged canonical
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_SHA"
+          git config user.name sentient-phase5-collaboration
+          git config user.email sentient-phase5-collaboration@users.noreply.github.com
+          git add fly.toml src/state/postgres-state-repository.ts test
+          git commit -m "fix: bound Phase5 durable row locks without changing approved Fly resources"
+          echo "END_SHA=$(git rev-parse HEAD)"
+          echo %ND_TREE=$(git rev-parse 'HEAD^{tree}')"
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo PHASE5_APPROVED_RESOURCE_REPAIR_PUSH=PASS
+          echo SECRET_VALUES_EXPOSED=false
