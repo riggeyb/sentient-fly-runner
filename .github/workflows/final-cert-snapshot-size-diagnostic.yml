@@ -39,15 +39,15 @@ jobs:
           import { Pool } from "pg";
           const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!cs) throw new Error("DATABASE_BINDING_MISSING");
-          const pool=new Pool({connectionString:s,max:1,connectionTimeoutMillis:10000});
+          const pool=new Pool({connectionString:cs,max:1,connectionTimeoutMillis:10000});
           try {
             const q=await pool.query(`
               SELECT generation::bigint AS generation,
                      pg_column_size(snapshot)::bigint AS "storageBytes",
                      octet_length(snapshot::text)::bigint AS "jsonTextBytes",
                      COALESCE(jsonb_array_length(snapshot->'tasks'),0)::int AS "taskCount",
-                     COALESCE(jsob_array_length(snapshot->'activeWork'),0)::int AS "activeWorkCount",
-                     COALESCE(jsob_array_length(snapshot->'spawnExecutions'),0)::int AS "spawnExecutionCount"
+                     COALESCE(jsonb_array_length(snapshot->'activeWork'),0)::int AS "activeWorkCount",
+                     COALESCE(jsonb_array_length(snapshot->'spawnExecutions'),0)::int AS "spawnExecutionCount"
                 FROM sentient_durable_state
                WHERE state_key='canonical'
             `);
