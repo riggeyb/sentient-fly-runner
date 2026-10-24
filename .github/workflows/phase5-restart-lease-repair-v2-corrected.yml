@@ -1,0 +1,104 @@
+name: Sentient Phase 5 Restart Lease Repair V2 Corrected
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Fence exact canonical and apply shared V2 repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "545b2555a978af14c5525a88d37c458264044e31"
+          test "$(git rev-parse 'HEAD^{tree}')" = "d8dc7ca07c5d92370c0d57d2d384556ea00bb51a"
+          curl -fsSL \
+            https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/45051c75aa2e552d60ca14edabf5dc389c08fe0e/.github/workflows/phase5-restart-lease-repair-v2.yml \
+            -o /tmp/shared-v2.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          lines = Path("/tmp/shared-v2.yml").read_text().splitlines()
+          start = next(i for i, line in enumerate(lines) if "python3 - <<'PY'" in line) + 1
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == "PY")
+          body = []
+          for line in lines[start:end]:
+              if line.startswith("          "):
+                  line = line[10:]
+              body.append(line)
+          Path("/tmp/shared-v2-repair.py").write_text("\n".join(body) + "\n")
+          PY
+          python3 /tmp/shared-v2-repair.py
+          git add -N test/phase5-fly-restart-lease-retry.test.ts
+          mapfile -t changed < <(git diff --name-only | sort)
+          printf 'CHANGED_FILE=%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 3
+          test "${changed[0]}" = "src/application/production-collaboration.ts"
+          test "${changed[1]}" = "src/fly/self-execution.ts"
+          test "${changed[2]}" = "test/phase5-fly-restart-lease-retry.test.ts"
+          git diff --check
+          echo "SHARED_V2_REPAIR_APPLIED=PASS"
+
+      - name: Build and Phase 5 restart regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/spawn-immutable-identity.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/active-work-restart-edge.test.js \
+            dist/test/active-work-expiry-fencing.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/job2-production-convergence.test.js \
+            dist/test/job2-self-execution.test.js
+          echo "PHASE5_RESTART_LEASE_REGRESSION=PASS"
+          echo "PHASE5_IDENTITY_REGRESSION=PASS"
+
+      - name: Critical cross-phase regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/permanent-continuation-http.test.js \
+            dist/test/permanent-continuation-multiprocess.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/fly-phase1-acceptance-policy.test.js \
+            dist/test/production-phase3-cognition.test.js \
+            dist/test/phase0-control-recovery.test.js \
+            dist/test/phase0-engineering-readiness.test.js
+          echo "CRITICAL_CROSS_PHASE_REGRESSIONS=PASS"
+
+      - name: Commit tested restart lease repair to shared canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "545b2555a978af14c5525a88d37c458264044e31"
+          git fetch origin sentient-production-composition-20261017
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "545b2555a978af14c5525a88d37c458264044e31"
+          git config user.name "sentient-phase5-convergence"
+          git config user.email "sentient-phase5-convergence@users.noreply.github.com"
+          git add src/application/production-collaboration.ts src/fly/self-execution.ts test/phase5-fly-restart-lease-retry.test.ts
+          git commit -m "fix: resume Phase5 recovery after inherited lease"
+          git push origin HEAD:sentient-production-composition-20261017
+          echo "NEW_SHA=$(git rev-parse HEAD)"
+          echo "NEW_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "PUBLIC_RUNNER_USED=true"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "NETLIFY_USAGE=0"
+          echo "SECRET_VALUES_EXPOSED=false"
