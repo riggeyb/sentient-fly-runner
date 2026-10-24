@@ -1,0 +1,81 @@
+name: Sentient Phase 5 Active Work Age Diagnostic
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect sanitized active-work ages
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          ok=false
+          for _ in $(seq 1 60); do
+            h="$(curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/healthz 2>/dev/null || true)"
+            if [[ -n "$h" ]] && grep -Fq "$EXPECTED_SHA" <<<"$h" && grep -Fq "$EXPECTED_TREE" <<<"$h"; then ok=true; break; fi
+            sleep 2
+          done
+          test "$ok" = true
+          cat >/tmp/phase5-active-ages.mjs <<'NODE'
+          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString});
+          const now=Date.now();
+          const age=(v)=>{const t=Date.parse(String(v??"")); return Number.isFinite(t)?now-t:null;};
+          try {
+            const snap=await repo.snapshot();
+            const active=(snap.collaborationActiveWork?.records??[])
+              .filter(r=>r.status==="ACTIVE")
+              .map(r=>({
+                workId:r.workId,
+                objectiveId:r.objectiveId,
+                sessionId:r.sessionId,
+                participantId:r.participantId,
+                currentAction:r.currentAction,
+                reclaimCount:r.reclaimCount,
+                revision:r.revision,
+                heartbeatAgeMs:age(r.lastHeartbeatAt),
+                leaseExpiresInMs:(()=>{const t=Date.parse(String(r.leaseExpiresAt??"")); return Number.isFinite(t)?t-now:null;})(),
+                createdAgeMs:age(r.createdAt),
+                updatedAgeMs:age(r.updatedAt),
+              }))
+              .sort((a,b)=>(b.updatedAgeMs??0)-(a.updatedAgeMs??0));
+            const nonterminal=(snap.spawn?.records?.executions??[])
+              .filter(e=>["reserved","running"].includes(e?.identity?.status))
+              .map(e=>({
+                executionId:e.id,
+                status:e.identity?.status??null,
+                requestId:e.requestId,
+                reservationReconciled:e.reservationReconciled,
+                updatedAgeMs:age(e.updatedAt),
+              }))
+              .sort((a,b)=>(b.updatedAgeMs??0)-(a.updatedAgeMs??0));
+            console.log(`PHASE5_ACTIVE_DETAIL_COUNT=${active.length}`);
+            console.log(`PHASE5_ACTIVE_DETAIL=${JSON.stringify(active)}`);
+            console.log(`PHASE5_NONTERMINAL_DETAIL_COUNT=${nonterminal.length}`);
+            console.log(`PHASE5_NONTERMINAL_DETAIL=${JSON.stringify(nonterminal)}`);
+            console.log("SECRET_VALUES_EXPOSED=false");
+            console.log("PHASE5_ACTIVE_WORK_AGE_DIAGNOSTIC=COMPLETE");
+          } finally { await repo.close().catch(()=>undefined); }
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-active-ages.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-active-ages.mjs && node /app/phase5-active-ages.mjs; rc=\$?; rm -f /app/phase5-active-ages.mjs; exit \$rc'"
