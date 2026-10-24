@@ -18,28 +18,246 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
-      - name: Fence exact canonical and apply shared V2 repair
+      - name: Fence exact canonical and apply shared V2 semantics
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "545b2555a978af14c5525a88d37c458264044e31"
           test "$(git rev-parse 'HEAD^{tree}')" = "d8dc7ca07c5d92370c0d57d2d384556ea00bb51a"
-          curl -fsSL \
-            https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/45051c75aa2e552d60ca14edabf5dc389c08fe0e/.github/workflows/phase5-restart-lease-repair-v2.yml \
-            -o /tmp/shared-v2.yml
           python3 - <<'PY'
           from pathlib import Path
-          lines = Path("/tmp/shared-v2.yml").read_text().splitlines()
-          start = next(i for i, line in enumerate(lines) if "python3 - <<'PY'" in line) + 1
-          end = next(i for i in range(start, len(lines)) if lines[i].strip() == "PY")
-          body = []
-          for line in lines[start:end]:
-              if line.startswith("          "):
-                  line = line[10:]
-              body.append(line)
-          Path("/tmp/shared-v2-repair.py").write_text("\n".join(body) + "\n")
+          import re
+
+          collaboration = Path("src/application/production-collaboration.ts")
+          text = collaboration.read_text()
+          identity_anchor = '''export interface ProductionCollaborationIdentityV1 {
+            sourceSha: string;
+            applicationVersion: string;
+          }
+          '''
+          error_class = identity_anchor + '''
+          export class ProductionCollaborationLeaseLiveErrorV1 extends Error {
+            public constructor(
+              public readonly role: "independent-analysis" | "independent-verification",
+              public readonly workId: string,
+              public readonly leaseExpiresAt: string,
+            ) {
+              super(`phase5_active_work_already_live:${role}:${workId}`);
+              this.name = "ProductionCollaborationLeaseLiveErrorV1";
+            }
+          }
+          '''
+          if text.count(identity_anchor) != 1:
+              raise SystemExit("IDENTITY_ANCHOR_COUNT_INVALID")
+          text = text.replace(identity_anchor, error_class, 1)
+
+          collision = re.compile(
+              r'''  if \(current && current\.status !== "STALE"\) \{\n'''
+              r'''    throw new Error\(`phase5_active_work_already_live:\$\{role\}:\$\{current\.workId\}`\);\n'''
+              r'''  \}'''
+          )
+          replacement = '''  if (current && current.status !== "STALE") {
+            if (current.status === "ACTIVE" && current.leaseExpiresAt !== null) {
+              throw new ProductionCollaborationLeaseLiveErrorV1(
+                role,
+                current.workId,
+                current.leaseExpiresAt,
+              );
+            }
+            throw new Error(`phase5_active_work_already_live:${role}:${current.workId}`);
+          }'''
+          text, n = collision.subn(replacement, text, count=1)
+          if n != 1:
+              raise SystemExit(f"COLLISION_ANCHOR_COUNT_INVALID:{n}")
+          collaboration.write_text(text)
+
+          self_exec = Path("src/fly/self-execution.ts")
+          text = self_exec.read_text()
+          import_anchor = '} from "../application/contracts.js";\n'
+          if text.count(import_anchor) != 1:
+              raise SystemExit("CONTRACT_IMPORT_ANCHOR_COUNT_INVALID")
+          text = text.replace(
+              import_anchor,
+              import_anchor + 'import { ProductionCollaborationLeaseLiveErrorV1 } from "../application/production-collaboration.js";\n',
+              1,
+          )
+
+          class_anchor = "export class FlyObjectiveRunnerV1 {"
+          helper = '''export interface Phase5RestartLeaseTimingV1 {
+            now(): number;
+            sleep(ms: number): Promise<void>;
+          }
+
+          const SYSTEM_PHASE5_RESTART_LEASE_TIMING: Phase5RestartLeaseTimingV1 = {
+            now: () => Date.now(),
+            sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+          };
+
+          const PHASE5_RESTART_LEASE_SAFETY_MS = 250;
+          const PHASE5_RESTART_LEASE_MAX_WAIT_MS = 180_250;
+
+          export async function runObjectiveWithInheritedPhase5LeaseRetryV1(
+            application: Pick<SentientApplication, "runObjective">,
+            input: SentientObjectiveInput,
+            timing: Phase5RestartLeaseTimingV1 = SYSTEM_PHASE5_RESTART_LEASE_TIMING,
+          ): Promise<SentientApplicationResult> {
+            try {
+              return await application.runObjective(input);
+            } catch (error) {
+              if (!(error instanceof ProductionCollaborationLeaseLiveErrorV1)) throw error;
+              const expiresAtMs = Date.parse(error.leaseExpiresAt);
+              if (!Number.isFinite(expiresAtMs)) throw error;
+              const waitMs = Math.max(0, expiresAtMs - timing.now() + PHASE5_RESTART_LEASE_SAFETY_MS);
+              if (waitMs > PHASE5_RESTART_LEASE_MAX_WAIT_MS) throw error;
+              await timing.sleep(waitMs);
+              return application.runObjective(input);
+            }
+          }
+
+          '''
+          if text.count(class_anchor) != 1:
+              raise SystemExit("RUNNER_CLASS_ANCHOR_COUNT_INVALID")
+          text = text.replace(class_anchor, helper + class_anchor, 1)
+
+          replacements = [
+              (
+                  "      count += 1;\n      this.#schedule(task.id);",
+                  "      count += 1;\n      this.#schedule(task.id, true);",
+                  "RESUME",
+              ),
+              (
+                  "  #schedule(objectiveId: string): void {\n    if (this.#active.has(objectiveId)) return;\n    const work = this.#run(objectiveId)",
+                  "  #schedule(objectiveId: string, inheritedRestart = false): void {\n    if (this.#active.has(objectiveId)) return;\n    const work = this.#run(objectiveId, inheritedRestart)",
+                  "SCHEDULE",
+              ),
+              (
+                  "  async #run(objectiveId: string): Promise<void> {",
+                  "  async #run(objectiveId: string, inheritedRestart: boolean): Promise<void> {",
+                  "RUN_SIGNATURE",
+              ),
+              (
+                  "    const result = await this.#application.runObjective(applicationInput);",
+                  '''    const result = inheritedRestart
+              ? await runObjectiveWithInheritedPhase5LeaseRetryV1(this.#application, applicationInput)
+              : await this.#application.runObjective(applicationInput);''',
+                  "RUN_OBJECTIVE",
+              ),
+          ]
+          for old, new, label in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f"{label}_ANCHOR_COUNT_INVALID:{text.count(old)}")
+              text = text.replace(old, new, 1)
+          self_exec.write_text(text)
+
+          test = Path("test/phase5-fly-restart-lease-retry.test.ts")
+          test.write_text('''import assert from "node:assert/strict";
+          import test from "node:test";
+          import { readFile } from "node:fs/promises";
+
+          import type {
+            SentientApplication,
+            SentientObjectiveInput,
+          } from "../src/application/contracts.js";
+          import { ProductionCollaborationLeaseLiveErrorV1 } from "../src/application/production-collaboration.js";
+          import { runObjectiveWithInheritedPhase5LeaseRetryV1 } from "../src/fly/self-execution.js";
+
+          const input: SentientObjectiveInput = {
+            request: "recover inherited Phase 5 lease",
+            objectiveId: "phase5-restart-objective",
+            sessionId: "phase5-restart-session",
+            mode: "collaborative",
+            privacy: "public_fixture",
+          };
+
+          test("inherited ACTIVE Phase 5 lease waits through expiry then retries exactly once", async () => {
+            let calls = 0;
+            const sleeps: number[] = [];
+            const application = {
+              async runObjective() {
+                calls += 1;
+                if (calls === 1) {
+                  throw new ProductionCollaborationLeaseLiveErrorV1(
+                    "independent-analysis",
+                    "work-1",
+                    new Date(10_000).toISOString(),
+                  );
+                }
+                return { httpStatus: 200, body: { result: { status: "COMPLETED" } } };
+              },
+            } as Pick<SentientApplication, "runObjective">;
+
+            const result = await runObjectiveWithInheritedPhase5LeaseRetryV1(
+              application,
+              input,
+              { now: () => 0, async sleep(ms) { sleeps.push(ms); } },
+            );
+
+            assert.equal(calls, 2);
+            assert.deepEqual(sleeps, [10_250]);
+            assert.equal(result.httpStatus, 200);
+          });
+
+          test("inherited Phase 5 lease retry remains bounded to one retry", async () => {
+            let calls = 0;
+            const application = {
+              async runObjective() {
+                calls += 1;
+                throw new ProductionCollaborationLeaseLiveErrorV1(
+                  "independent-analysis",
+                  "work-2",
+                  new Date(10_000).toISOString(),
+                );
+              },
+            } as Pick<SentientApplication, "runObjective">;
+
+            await assert.rejects(
+              runObjectiveWithInheritedPhase5LeaseRetryV1(
+                application,
+                input,
+                { now: () => 0, async sleep() {} },
+              ),
+              /phase5_active_work_already_live/,
+            );
+            assert.equal(calls, 2);
+          });
+
+          test("non-Phase5 errors and implausibly distant leases fail closed without waiting", async () => {
+            const sleeps: number[] = [];
+            await assert.rejects(
+              runObjectiveWithInheritedPhase5LeaseRetryV1(
+                { async runObjective() { throw new Error("other_failure"); } },
+                input,
+                { now: () => 0, async sleep(ms) { sleeps.push(ms); } },
+              ),
+              /other_failure/,
+            );
+            await assert.rejects(
+              runObjectiveWithInheritedPhase5LeaseRetryV1(
+                {
+                  async runObjective() {
+                    throw new ProductionCollaborationLeaseLiveErrorV1(
+                      "independent-analysis",
+                      "work-far",
+                      new Date(300_000).toISOString(),
+                    );
+                  },
+                },
+                input,
+                { now: () => 0, async sleep(ms) { sleeps.push(ms); } },
+              ),
+              /phase5_active_work_already_live/,
+            );
+            assert.deepEqual(sleeps, []);
+          });
+
+          test("restart lease retry is wired only from resumeUnfinished", async () => {
+            const source = await readFile("src/fly/self-execution.ts", "utf8");
+            assert.ok(source.includes("this.#schedule(task.id, true)"));
+            assert.ok(source.includes("#schedule(objectiveId: string, inheritedRestart = false)"));
+            assert.ok(source.includes("inheritedRestart\\n      ? await runObjectiveWithInheritedPhase5LeaseRetryV1"));
+          });
+          ''')
           PY
-          python3 /tmp/shared-v2-repair.py
           git add -N test/phase5-fly-restart-lease-retry.test.ts
           mapfile -t changed < <(git diff --name-only | sort)
           printf 'CHANGED_FILE=%s\n' "${changed[@]}"
@@ -48,7 +266,7 @@ jobs:
           test "${changed[1]}" = "src/fly/self-execution.ts"
           test "${changed[2]}" = "test/phase5-fly-restart-lease-retry.test.ts"
           git diff --check
-          echo "SHARED_V2_REPAIR_APPLIED=PASS"
+          echo "SHARED_V2_SEMANTICS_APPLIED=PASS"
 
       - name: Build and Phase 5 restart regressions
         shell: bash
