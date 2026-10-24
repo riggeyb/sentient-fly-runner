@@ -55,14 +55,14 @@ jobs:
           OBJ="final-eng-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           SESSION="session-${OBJ}"
           E="$(base64 -w0 scripts/final-engineering-durability.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $E|base64 -d >/tmp/e.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION CERT_EXPECTED_SHA=$EXPECTED_SHA noe /tmp/e.mjs; rc=\$?; rm -f /tmp/e.mjs; exit \$rc'" | tee /tmp/eng
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $E|base64 -d >/tmp/e.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION CERT_EXPECTED_SHA=$EXPECTED_SHA node /tmp/e.mjs; rc=\$?; rm -f /tmp/e.mjs; exit \$rc'" | tee /tmp/eng
           grep -Fq 'JOB_ID_PERSISTED_BEFORE_POLL=PASS' /tmp/eng
           grep -Fq 'ENGINEERING_RECEIPT_VERIFIED=PASS' /tmp/eng
-          grep -Fq 'CONTINUATION_ADVANCEH=PASS' /tmp/eng
+          grep -Fq 'CONTINUATION_ADVANCED=PASS' /tmp/eng
       - name: Post-cert exact live identity
         shell: bash
         run: |
-          set -euo pipefal
+          set -euo pipefail
           for _ in $(seq 1 120); do
             if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
               echo POST_CERT_LIVE_SHA_MATCH=PASS
