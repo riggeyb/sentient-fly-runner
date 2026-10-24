@@ -1,6 +1,13 @@
 name: Phase0 Deploy Sentient Exact
 on:
   workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,8 +18,8 @@ jobs:
     timeout-minutes: 25
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      S: a6eb540a33fcb509d7aa3e833096d5d6a88d7167
-      T: 07f1d6a0c7990706e06fedd9005b72d925b82d71
+      S: ${{ inputs.sha }}
+      T: ${{ inputs.tree }}
       K: d85eb820f18ad6d944ab93b03150d606273891a5
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
