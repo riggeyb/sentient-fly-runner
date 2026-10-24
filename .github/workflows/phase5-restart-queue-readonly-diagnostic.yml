@@ -24,11 +24,11 @@ jobs:
           [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
           [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
-          health="$(curl -fsS --max-time 10 https://sentient-validation-runner.fly.dev/healthz)"
-          [[ "$health" == *"$SHA"* && "$health" == *"$TREE"* ]]
-          echo "PHASE5_EXACT_IDENTITY=PASS"
           cat >/tmp/q.mjs <<'NODE'
           import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          if(process.env.SENTIENT_RUNTIME_SHA!==process.env.PHASE5_EXPECTED_SHA
+            ||process.env.SENTIENT_RUNTIME_TREE!==process.env.PHASE5_EXPECTED_TREE) throw Error("PHASE5_SOURCE_IDENTITY_MISMATCH");
+          console.log("PHASE5_EXACT_IDENTITY=PASS");
           const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!db) throw Error("DB_BINDING_MISSING");
           const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
@@ -43,4 +43,4 @@ jobs:
           } finally { await repo.close(); }
           NODE
           b64="$(base64 -w0 /tmp/q.mjs)"
-          flyctl ssh console -a sentient-validation-runner -C "sh -lc 'cd /app && echo $b64 | base64 -d >/app/q.mjs && PHASE5_OBJECTIVE_ID=$OBJECTIVE_ID node /app/q.mjs; rc=\$?; rm -f /app/q.mjs; exit \$rc'"
+          flyctl ssh console -a sentient-validation-runner -C "sh -lc 'cd /app && echo $b64 | base64 -d >/app/q.mjs && PHASE5_OBJECTIVE_ID=$OBJECTIVE_ID PHASE5_EXPECTED_SHA=$SHA PHASE5_EXPECTED_TREE=$TREE node /app/q.mjs; rc=\$?; rm -f /app/q.mjs; exit \$rc'"
