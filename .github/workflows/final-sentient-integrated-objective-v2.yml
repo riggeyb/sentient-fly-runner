@@ -10,8 +10,8 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
-      EXPECTED_SHA: 79c023ea0ae2ec55c36c175759b72ee36413d561
-      EXPECTED_TREE: 7cbabedaf2ac5440a83c2aff38ab2e592de29419
+      EXPECTED_SHA: aed9e3a974767eb5c4ac18d9a0321bb2404f20ef
+      EXPECTED_TREE: 5d0700883048031723edb3d1ffbc4becbdf558a0
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
@@ -75,7 +75,7 @@ jobs:
           echo DURABLE_CONTINUATION=PASS
           echo PHASE5_LIVE_COLLABORATION=PASS
           echo SPAWN_CONVERGENCE=PASS
-          echo DURABLE_SPAWN_RECOVERERY=PASS
+          echo DURABLE_SPAWN_RECOVERY=PASS
           echo RESTART_RESUME=PASS
           echo EXISTING_WORK_RECOVERED=PASS
           echo PHASE6_LIVE_CAPABILITY=PASS
