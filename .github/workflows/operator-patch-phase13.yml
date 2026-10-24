@@ -1,0 +1,50 @@
+name: Operator Patch Phase13 Harness
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch exact certification harness typo and syntax-check embedded JS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path(".github/workflows/final-cert-phase13-live.yml")
+          s=p.read_text()
+          old='turn?.authority?.owner!=="SENTIENT || sub.accepted!==true'
+          new='turn?.authority?.owner!=="SENTIENT" || sub.accepted!==true'
+          if s.count(old)!=1:
+              raise SystemExit(f"exact phase13 typo count={s.count(old)}")
+          p.write_text(s.replace(old,new))
+          PY
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path(".github/workflows/final-cert-phase13-live.yml").read_text()
+          start=s.index("cat >/tmp/cert13.mjs <<'NODE'")+len("cat >/tmp/cert13.mjs <<'NODE'")
+          end=s.index("\n          NODE", start)
+          js=s[start:end].strip("\n")
+          Path("/tmp/cert13.mjs").write_text("\n".join(line[10:] if line.startswith("          ") else line for line in js.splitlines()))
+          PY
+          node --check /tmp/cert13.mjs
+          git diff --check
+          test "$(git diff --name-only)" = ".github/workflows/final-cert-phase13-live.yml"
+      - name: Commit only if shared head unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          git config user.name sentient-cert-harness
+          git config user.email sentient-cert-harness@users.noreply.github.com
+          git add .github/workflows/final-cert-phase13-live.yml
+          git commit -m "cert: fix Phase1/3 authority assertion syntax"
+          git push origin HEAD:main
+          echo PHASE13_HARNESS_REPAIR=PASS
