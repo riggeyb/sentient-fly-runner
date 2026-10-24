@@ -13,7 +13,7 @@ permissions:
 jobs:
   reconcile:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
@@ -21,57 +21,89 @@ jobs:
       EXPECTED_TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Fail closed only legacy stale runner tasks
+      - name: Atomically fail closed only legacy stale runner tasks
         shell: bash
         run: |
           set -euo pipefail
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
           mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
+          image="$(flyctl machines list -a "$APP" --json | jq -er '.[0].config.image // .[0].image_ref.tag // ""')"
+          grep -Fq "$EXPECTED_SHA" <<<"$image"
           state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
-          if [ "$state" != started ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
-          ident="$(flyctl ssh console -a "$APP" -C 'sh -lc '"'"' printf "%s\n%s\n" "$SENTIENT_RUNTIME_SHA" "$SENTIENT_RUNTIME_TREE"'"'"'')"
+          if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+
+          ident="$(timeout 45s flyctl ssh console -a "$APP" -C 'sh -lc '"'"'printf "%s\n%s\n" "$SENTIENT_RUNTIME_SHA" "$SENTIENT_RUNTIME_TREE"'"'"'')"
           grep -Fxq "$EXPECTED_SHA" <<<"$ident"
           grep -Fxq "$EXPECTED_TREE" <<<"$ident"
           echo LEGACY_RECONCILE_IDENTITY=PASS
 
           cat >/tmp/reconcile.mjs <<'NODE'
-          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          import { Pool } from "pg";
+          import { assertStateSnapshot } from "/app/dist/src/state/state-integrity.js";
           const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!db) throw new Error("DB_BINDING_MISSING");
-          const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
+          const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
           const nowMs=Date.now(), cutoffMs=30*60*1000, now=new Date(nowMs).toISOString();
+          const client=await pool.connect();
           try {
-            const ids=await repo.withSnapshotTransaction((snapshot)=>{
-              const stale=[];
-              for(const task of snapshot.records.tasks){
-                const m=task?.metadata;
-                const created=Date.parse(String(task?.createdAt??""));
-                const age=Number.isFinite(created)?nowMs-created:-1;
-                const managed=m?.contract==="sentient-fly-objective-runner/v1";
-                const active=task?.status==="pending"||task?.status==="running";
-                const engineering=m?.engineeringJob!=null || m?.activeEngineeringJobId!=null;
-                if(managed && active && !engineering && age>=cutoffMs){
-                  task.status="failed";
-                  task.updatedAt=now;
-                  task.metadata={...m,error:"legacy_stale_inherited_fail_closed"};
-                  stale.push(task.id);
-                }
+            await client.query("BEGIN");
+            await client.query("SET LOCAL lock_timeout = '15s'");
+            await client.query("SET LOCAL statement_timeout = '60s'");
+            const row=(await client.query(
+              "SELECT generation, snapshot FROM sentient_durable_state WHERE state_key=$1 FOR UPDATE",
+              ["canonical"],
+            )).rows[0];
+            if(!row) throw new Error("CANONICAL_STATE_MISSING");
+            const generation=Number(row.generation);
+            const snapshot=row.snapshot;
+            if(!Number.isSafeInteger(generation)||generation<0||snapshot?.generation!==generation) throw new Error("CANONICAL_GENERATION_INVALID");
+            const stale=[];
+            for(const task of snapshot.records?.tasks??[]) {
+              const m=task?.metadata;
+              const created=Date.parse(String(task?.createdAt??""));
+              const age=Number.isFinite(created)?nowMs-created:-1;
+              const managed=m?.contract==="sentient-fly-objective-runner/v1";
+              const active=task?.status==="pending"||task?.status==="running";
+              const engineering=m?.engineeringJob!=null||m?.activeEngineeringJobId!=null;
+              if(managed&&active&&!engineering&&age>=cutoffMs) {
+                task.status="failed";
+                task.updatedAt=now;
+                task.metadata={...m,error:"legacy_stale_inherited_fail_closed"};
+                stale.push(task.id);
               }
-              return {result:stale,changed:stale.length>0};
-            });
-            console.log("LEGACY_STALE_TASKS_FAILED_CLOSED_COUNT="+ids.length);
-            for(const id of ids) console.log("LEGACY_STALE_TASK_FAILED_CLOSED="+id);
+            }
+            if(stale.length>0) {
+              snapshot.generation=generation+1;
+              assertStateSnapshot(snapshot);
+              const result=await client.query(
+                `UPDATE sentient_durable_state
+                    SET generation=$2, snapshot=$3::jsonb, updated_at=now()
+                  WHERE state_key=$1 AND generation=$4`,
+                ["canonical",snapshot.generation,JSON.stringify(snapshot),generation],
+              );
+              if(result.rowCount!==1) throw new Error("CANONICAL_ROW_UPDATE_LOST");
+            }
+            await client.query("COMMIT");
+            console.log("LEGACY_STALE_TASKS_FAILED_CLOSED_COUNT="+stale.length);
+            for(const id of stale) console.log("LEGACY_STALE_TASK_FAILED_CLOSED="+id);
             console.log("SECRET_VALUES_EXPOSED=false");
-          } finally { await repo.close().catch(()=>undefined); }
+          } catch(error) {
+            await client.query("ROLLBACK").catch(()=>undefined);
+            throw error;
+          } finally {
+            client.release();
+            await pool.end().catch(()=>undefined);
+          }
           NODE
           b64="$(base64 -w0 /tmp/reconcile.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $b64|base64 -d >/app/reconcile.mjs && node /app/reconcile.mjs; rc=\$?; rm -f /app/reconcile.mjs; exit \$rc'"
+          timeout 120s flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $b64|base64 -d >/app/reconcile.mjs && node /app/reconcile.mjs; rc=\$?; rm -f /app/reconcile.mjs; exit \$rc'"
+
           flyctl machine restart "$mid" -a "$APP" >/dev/null
           ready=false
           for _ in $(seq 1 180); do
             if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
-              jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+               jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
               ready=true; break
             fi
             sleep 2
