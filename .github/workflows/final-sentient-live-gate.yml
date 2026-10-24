@@ -20,6 +20,7 @@ jobs:
           const read=async p=>{const r=await fetch("http://127.0.0.1:8080/"+p,{signal:AbortSignal.timeout(20000)});return {code:r.status,body:await r.json()};};
           const h=await read("healthz"),r=await read("readyz");
           const hi=h.body.application?.identity?.source,ri=r.body.identity?.source;
+          console.log("SANITIZED_LIVE_GATE="+JSON.stringify({healthCode:h.code,readyCode:r.code,healthSha:hi?.sha??null,healthTree:hi?.tree??null,readySha:ri?.sha??null,readyTree:ri?.tree??null,ready:r.body.ready??null,missingRequired:(r.body.bindings??[]).filter(x=>x.requiredForReadiness&&x.availability!=="AVAILABLE").map(x=>x.name),readinessScope:r.body.readinessScope??null}));
           if(h.code!==200||r.code!==200||hi?.sha!==sha||hi?.tree!==tree||ri?.sha!==sha||ri?.tree!==tree||r.body.ready!==true)throw Error("FROZEN_LIVE_GATE_FAILED");
           if(r.body.authorityOwner!=="SENTIENT_RUNTIME"||r.body.modelOutputIsNeverAuthority!==true)throw Error("AUTHORITY_GATE_FAILED");
           const names=(r.body.bindings??[]).filter(x=>x.requiredForReadiness&&x.availability==="AVAILABLE").map(x=>x.name);
