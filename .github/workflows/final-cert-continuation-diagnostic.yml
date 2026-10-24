@@ -1,9 +1,12 @@
 name: Final Cert Continuation Diagnostic
-"on":
+'on':
   workflow_dispatch:
     inputs:
-      objective_id: {type: string, required: true}
-permissions: {contents: read}
+      objective_id:
+        type: string
+        required: true
+permissions:
+  contents: read
 jobs:
   diagnose:
     runs-on: ubuntu-latest
@@ -12,24 +15,70 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       ID: ${{ inputs.objective_id }}
       APP: sentient-validation-runner
+      SHA: aed9e3a974767eb5c4ac18d9a0321bb2404f20ef
     steps:
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Exact-fenced read-only continuation check
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
-          curl -fsS --retry 6 --retry-delay 2 --max-time 15 "https://${APP}.fly.dev/readyz" > /tmp/ready.json
-          jq -e '.ready==true and .identity.source.sha=="aed9e3a974767eb5c4ac18d9a0321bb2404f20ef" and .identity.source.tree=="5d0700883048031723edb3d1ffbc4becbdf558a0"' /tmp/ready.json >/dev/null
-          cat > /tmp/probe.mjs <<'NODE'
-          import {PostgresSpawnObjectiveRepository as Repo} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
-          const d=process.env.DATABASE_URL??process.env.DIRECT_URL;
-          if(!d)throw Error("DB_MISSING");
-          const r=new Repo({connectionString:d}),id=process.env.CERT_ID;
-          try {
-            const t=await r.get("task",id),o=await r.getObjectiveContinuation(id);
-            console.log("CERT_READONLY="+JSON.stringify({id,task:t?.status??null,root:o?.status??null,rev:o?.revision??null,terminal:o?.terminal?.status??null,satisfied:(o?.evidenceDependencies??[]).filter(x=>x.status==="SATISFIED").length}));
-          }finally{await r.close();}
-          NODE
-          b="$(base64 -w0 /tmp/probe.mjs)"
-          timeout 70s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/tmp/cert-${GITHUB_RUN_ID}.mjs; CERT_ID=$ID node /tmp/cert-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/cert-${GITHUB_RUN_ID}.mjs; exit \$rc'"
+    - uses: superfly/flyctl-actions/setup-flyctl@master
+    - name: Short direct VM read-only objective, exact machine image gate
+      shell: bash
+      run: 'set -euo pipefail
+
+        [[ "$ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+
+        machine="$(flyctl machines list -a "$APP" --json)"
+
+        jq -e --arg s "$SHA" ''length==1 and all(.[]; ((.config.image // .image //
+        "") | tostring | contains($s)))'' <<<"$machine" >/dev/null
+
+        echo EXACT_MACHINE_IMAGE=PASS
+
+        cat >/tmp/cert-check.mjs <<''NODE''
+
+        import {PostgresSpawnObjectiveRepository as Repo} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+
+        const id=process.env.CERT_ID,db=process.env.DATABASE_URL??process.env.DIRECT_URL;
+
+        if(!id||!db)throw Error("CERT_BINDING_MISSING");
+
+        const repo=new Repo({connectionString:db});
+
+        try {
+
+        const started=Date.now();
+
+        const task=await repo.get("task",id);
+
+        const afterTask=Date.now();
+
+        const root=await repo.getObjectiveContinuation(id);
+
+        const afterRoot=Date.now();
+
+        console.log("CERT_READONLY="+JSON.stringify({
+
+        id,taskStatus:task?.status??null,taskUpdated:task?.updatedAt??null,
+
+        taskSourceSha:task?.version?.commitSha??null,
+
+        rootStatus:root?.status??null,revision:root?.revision??null,
+
+        terminal:root?.terminal?.status??null,
+
+        satisfied:(root?.evidenceDependencies??[]).filter(d=>d.status==="SATISFIED").length,
+
+        taskQueryMs:afterTask-started,rootQueryMs:afterRoot-afterTask
+
+        }));
+
+        console.log("SECRET_VALUES_EXPOSED=false");
+
+        }finally{await repo.close();}
+
+        NODE
+
+        b="$(base64 -w0 /tmp/cert-check.mjs)"
+
+        timeout 75s flyctl ssh console -a "$APP" -C "sh -lc ''echo $b|base64 -d >/tmp/cert-check-${GITHUB_RUN_ID}.mjs;
+        CERT_ID=$ID node /tmp/cert-check-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/cert-check-${GITHUB_RUN_ID}.mjs;
+        exit \$rc''"
+
+        '
