@@ -45,7 +45,7 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$TREE"
           test "$(git rev-parse HEAD^)" = "$PARENT"
           git bundle create sentient-source.bundle HEAD
-          flyctl deploy -a sentient-validation-runner -c fly.toml --remote-only --build-only --push --image-label "phase0-$SHA" --build-arg "SENTIENT_RUNTIME_SHA=$SHA" --build-arg "SENTIENT_RUNTIME_TREE=TREE" --build-arg "SENTIENT_SKILLS_SHA=$SKILLS" --build-arg "SENTIENT_PHASE0_ACCEPTENCE_BASE_SHA=$PARENT"
+          flyctl deploy -a sentient-validation-runner -c fly.toml --remote-only --build-only --push --image-label "phase0-$SHA" --build-arg "SENTIENT_RUNTIME_SHA=$SHA" --build-arg "SENTIENT_RUNTIME_TREE=$TREE" --build-arg "SENTIENT_SKILLS_SHA=$SKILLS" --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=$PARENT"
           rm -f sentient-source.bundle
           echo "EXACT_IMAGE_BUILD_PUSH=PASS"
           echo "GOVERNOR_EXPECTED_IMAGE_TAG=phase0-$SHA"
