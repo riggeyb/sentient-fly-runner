@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Apply exact shared Phase5 repair ephemerally
+      - name: Apply shared Phase5 repair ephemerally
         shell: bash
         run: |
           set -euo pipefail
@@ -31,16 +31,52 @@ jobs:
           from pathlib import Path
           p=Path("src/application/production-collaboration.ts")
           s=p.read_text()
-          old="await repository.completeSpawnChild(execution.id, result);"
-          new="await repository.completeSpawnChild({ executionId: execution.id, endedAt, result });"
-          assert s.count(old)==1
-          p.write_text(s.replace(old,new,1))
+          a="await repository.completeSpawnChild(execution.id, result);"
+          b="await repository.completeSpawnChild({ executionId: execution.id, endedAt, result });"
+          assert s.count(a)==1
+          assert s.count("snapshot.lineage")==1
+          p.write_text(s.replace(a,b,1).replace("snapshot.lineage","snapshot.records.lineage",1))
+          t=Path("test/production-collaboration-restart-recovery.test.ts")
+          q=t.read_text()
+          a='return { records: { executions: [runningExecution()] }, lineage: [] };'
+          b='return { records: { executions: [runningExecution()], lineage: [] } };'
+          assert q.count(a)==1
+          q=q.replace(a,b,1)
+          a='''async completeSpawnChild(_id: string, result: unknown) {
+      settled = result;
+      return { execution: runningExecution(), result };
+    },'''
+          b='''async completeSpawnChild(input: { result: unknown }) {
+      settled = input.result;
+      return { execution: runningExecution(), result: input.result };
+    },'''
+          assert q.count(a)==1
+          q=q.replace(a,b,1)
+          a='async spawnSnapshot() { return { records: { executions: [] }, lineage: [] }; },'
+          b='async spawnSnapshot() { return { records: { executions: [], lineage: [] } }; },'
+          assert q.count(a)==1
+          t.write_text(q.replace(a,b,1))
           PY
           git diff --check
       - name: Install
         run: npm ci --no-audit --no-fund
-      - name: Build with compiler diagnostics
+      - name: Build
         run: npm run build
+      - name: Isolate regressions
+        shell: bash
+        run: |
+          set +e
+          failures=0
+          for t in             dist/test/production-collaboration-restart-recovery.test.js             dist/test/active-work-restart-edge.test.js             dist/test/active-work-expiry-fencing.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/job2-production-convergence.test.js             dist/test/phase4-multistep-autonomy.test.js             dist/test/permanent-continuation-http.test.js             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/production-phase3-cognition.test.js             dist/test/phase0-control-recovery.test.js             dist/test/phase0-engineering-readiness.test.js
+          do
+            echo "=== PHASE5_DIAGNOSTIC_TEST=$t ==="
+            node --test "$t"
+            rc=$?
+            echo "PHASE5_DIAGNOSTIC_RESULT=$t:$rc"
+            [ "$rc" -eq 0 ] || failures=$((failures+1))
+          done
+          echo "PHASE5_DIAGNOSTIC_FAILURE_COUNT=$failures"
+          test "$failures" -eq 0
       - name: Report
         if: always()
         run: |
