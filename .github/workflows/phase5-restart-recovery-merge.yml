@@ -68,7 +68,7 @@ jobs:
       return { execution: runningExecution(), result: input.result };
     },'''
           assert q.count(old2)==1, q.count(old2)
-          q=q.replace(old2,rew2,1)
+          q=q.replace(old2,new2,1)
           old3='async spawnSnapshot() { return { records: { executions: [] }, lineage: [] }; },'
           new3='async spawnSnapshot() { return { records: { executions: [], lineage: [] } }; },'
           assert q.count(old3)==1, q.count(old3)
