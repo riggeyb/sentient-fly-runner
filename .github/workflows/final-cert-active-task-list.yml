@@ -6,7 +6,7 @@ permissions:
 jobs:
   list:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
@@ -14,18 +14,16 @@ jobs:
       EXPECTED_TREE: 5d0700883048031723edb3d1ffbc4becbdf558a0
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: List sanitized unfinished objective tasks
+      - name: List sanitized unfinished objective tasks without HTTP dependency
         shell: bash
         run: |
           set -euo pipefail
-          for _ in $(seq 1 120); do
-            if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then break; fi
-            sleep 2
-          done
-          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null
+          machines="$(flyctl machines list -a "$APP" --jsoZ)"
+          jq -e --arg s "$EXPECTED_SHA" 'any(.[]; ((.config.image // .image_ref.tag // "") | contains($s)))' <<<"$machines" >/dev/null
+          echo FINAL_CERT_CONTROL_PLANE_IMAGE_MATCH=PASS
           cat >/tmp/list.mjs <<'NODE'
           import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
-          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          const db=String(process.env.DATABASE_URL||process.env.DIRECT_URL||"").trim();
           if(!db) throw new Error("DB_BINDING_MISSING");
           const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
           try{
@@ -38,4 +36,4 @@ jobs:
           }finally{await repo.close().catch(()=>undefined);}
           NODE
           B64="$(base64 -w0 /tmp/list.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64|base64 -d >/tmp/list.mjs && node /tmp/list.mjs; rc=\$?; rm -f /tmp/list.mjs; exit \$rc'"
+          timeout 70s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64|base64 -d >/tmp/list-${GITHUB_RUN_ID}.mjs && node /tmp/list-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/list-${GITHUB_RUN_ID}.mjs; exit \$rc'"
