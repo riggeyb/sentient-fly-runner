@@ -32,7 +32,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-      - name: Apply bounded stale exhaustion repair
+          grep -Fq '!(kind === "ABANDON" && record.status === "STALE")' src/collaboration/active-work-finish.ts
+      - name: Apply remaining bounded exhaustion repair
         shell: bash
         run: |
           set -euo pipefail
@@ -40,16 +41,8 @@ jobs:
           from pathlib import Path
           import re
 
-          finish = Path("src/collaboration/active-work-finish.ts")
-          text = finish.read_text()
-          old = '  if (!LIVE_ACTIVE_WORK.has(record.status)) {'
-          new = '  if (!LIVE_ACTIVE_WORK.has(record.status) && !(kind === "ABANDON" && record.status === "STALE")) {'
-          if text.count(old) != 1:
-              raise SystemExit(f"finish anchor count={text.count(old)}")
-          finish.write_text(text.replace(old, new, 1))
-
-          collaboration = Path("src/application/production-collaboration.ts")
-          text = collaboration.read_text()
+          p = Path("src/application/production-collaboration.ts")
+          s = p.read_text()
           pattern = re.compile(
               r'    if \(current\.reclaimCount >= 1\) \{\n'
               r'.*?'
@@ -68,51 +61,51 @@ jobs:
               });
               throw new Error(`phase5_restart_retry_exhausted:${role}:${current.workId}`);
             }'''
-          matches = pattern.findall(text)
-          if len(matches) != 1:
-              raise SystemExit(f"collaboration anchor count={len(matches)}")
-          collaboration.write_text(pattern.sub(replacement, text, count=1))
+          if len(pattern.findall(s)) != 1:
+              raise SystemExit("production exhaustion anchor mismatch")
+          p.write_text(pattern.sub(replacement, s, count=1))
 
-          restart_test = Path("test/production-collaboration-restart-recovery.test.ts")
-          text = restart_test.read_text()
-          old = "  let settled: any = null;\n  let abandoned = false;"
-          new = "  let settled: any = null;\n  let abandoned = false;\n  let reclaimCalls = 0;"
-          if text.count(old) != 1:
-              raise SystemExit(f"restart state anchor count={text.count(old)}")
-          text = text.replace(old, new, 1)
-          old = '    async reclaimActiveWork(input: { participantId: string }) {\n      return {'
-          new = '    async reclaimActiveWork(input: { participantId: string }) {\n      reclaimCalls += 1;\n      return {'
-          if text.count(old) != 1:
-              raise SystemExit(f"restart reclaim anchor count={text.count(old)}")
-          text = text.replace(old, new, 1)
-          old = '  return { repo, settled: () => settled, abandoned: () => abandoned };'
-          new = '  return { repo, settled: () => settled, abandoned: () => abandoned, reclaimCalls: () => reclaimCalls };'
-          if text.count(old) != 1:
-              raise SystemExit(f"restart return anchor count={text.count(old)}")
-          text = text.replace(old, new, 1)
-          old = '  assert.equal(f.abandoned(), false);\n});'
-          new = '  assert.equal(f.abandoned(), false);\n  assert.equal(f.reclaimCalls(), 1);\n});'
-          if text.count(old) != 1:
-              raise SystemExit(f"restart first assertion anchor count={text.count(old)}")
-          text = text.replace(old, new, 1)
-          old = '  assert.equal(f.settled()?.terminalStatus, "timed_out");\n  assert.equal(f.abandoned(), true);\n});'
-          new = '  assert.equal(f.settled()?.terminalStatus, "timed_out");\n  assert.equal(f.abandoned(), true);\n  assert.equal(f.reclaimCalls(), 0);\n});'
-          if text.count(old) != 1:
-              raise SystemExit(f"restart second assertion anchor count={text.count(old)}")
-          restart_test.write_text(text)
+          t = Path("test/production-collaboration-restart-recovery.test.ts")
+          s = t.read_text()
+          edits = [
+              (
+                  "  let settled: any = null;\n  let abandoned = false;",
+                  "  let settled: any = null;\n  let abandoned = false;\n  let reclaimCalls = 0;",
+              ),
+              (
+                  "    async reclaimActiveWork(input: { participantId: string }) {\n      return {",
+                  "    async reclaimActiveWork(input: { participantId: string }) {\n      reclaimCalls += 1;\n      return {",
+              ),
+              (
+                  "  return { repo, settled: () => settled, abandoned: () => abandoned };",
+                  "  return { repo, settled: () => settled, abandoned: () => abandoned, reclaimCalls: () => reclaimCalls };",
+              ),
+              (
+                  "  assert.equal(f.abandoned(), false);\n});",
+                  "  assert.equal(f.abandoned(), false);\n  assert.equal(f.reclaimCalls(), 1);\n});",
+              ),
+              (
+                  '  assert.equal(f.settled()?.terminalStatus, "timed_out");\n  assert.equal(f.abandoned(), true);\n});',
+                  '  assert.equal(f.settled()?.terminalStatus, "timed_out");\n  assert.equal(f.abandoned(), true);\n  assert.equal(f.reclaimCalls(), 0);\n});',
+              ),
+          ]
+          for old, new in edits:
+              if s.count(old) != 1:
+                  raise SystemExit(f"restart test anchor mismatch: {old[:48]!r} count={s.count(old)}")
+              s = s.replace(old, new, 1)
+          t.write_text(s)
 
           core = Path("test/active-work-core.test.ts")
-          text = core.read_text()
+          s = core.read_text()
           marker = 'test("STALE work can fail closed without a second reclaim lease"'
-          if marker in text:
-              raise SystemExit("active-work stale-abandon test already exists")
-          addition = r'''
+          if marker in s:
+              raise SystemExit("stale abandon regression already exists")
+          s += r'''
 
           test("STALE work can fail closed without a second reclaim lease", async () => {
             const h = await harness();
             try {
               await h.repo.claimActiveWork(claimInput());
-
               h.setNow("2026-10-07T17:00:16.000Z");
               let view = await h.repo.activeWork(SESSION);
               assert.equal(view[0]?.status, "STALE");
@@ -153,7 +146,7 @@ jobs:
             }
           });
           '''
-          core.write_text(text + addition)
+          core.write_text(s)
           PY
           git diff --check
       - name: Build and targeted Phase5 regressions
@@ -167,7 +160,9 @@ jobs:
             dist/test/active-work-core.test.js \
             dist/test/active-work-expiry-fencing.test.js \
             dist/test/active-work-restart-edge.test.js \
-            dist/test/phase5-fly-restart-lease-retry.test.js
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/job2-production-convergence.test.js
           echo PHASE5_STALE_EXHAUSTION_TARGETED_TESTS=PASS
       - name: Commit tested staging repair
         env:
@@ -178,11 +173,11 @@ jobs:
           set -euo pipefail
           git config user.name "sentient-phase5-convergence"
           git config user.email "sentient-phase5-convergence@users.noreply.github.com"
-          git add src/collaboration/active-work-finish.ts src/application/production-collaboration.ts test/production-collaboration-restart-recovery.test.ts test/active-work-core.test.ts
+          git add src/application/production-collaboration.ts test/production-collaboration-restart-recovery.test.ts test/active-work-core.test.ts
           git diff --cached --check
           git diff --cached --quiet && { echo NO_CHANGES; exit 1; }
           git commit -m "fix: bound Phase5 stale retry exhaustion"
-          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:Refs/heads/${TARGET_BRANCH}"
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:befs/heads/${TARGET_BRANCH}"
           echo "STAGING_SHA=$(git rev-parse HEAD)"
           echo "STAGING_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo SECRET_VALUES_EXPOSED=false
