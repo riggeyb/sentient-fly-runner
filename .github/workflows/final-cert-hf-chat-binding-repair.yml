@@ -1,0 +1,77 @@
+name: Final Cert HF Chat Method Binding Repair
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: final-cert-hf-chat-binding-repair
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE: 522e084517179b6e237bebd263ea1426ef70f886
+      BRANCH: sentient-production-composition-20261017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fence and repair bound tokenizer method call
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE"
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse origin/$BRANCH)" = "$BASE"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/model/providers/huggingface-worker.ts")
+          s=p.read_text()
+          old='''  const apply = tokenizer.apply_chat_template;
+          if (apply === undefined) throw new Error("local_hf_chat_template_unavailable");
+          const rendered = apply(messages, { tokenize: false, add_generation_prompt: true });'''
+          new='''  if (tokenizer.apply_chat_template === undefined) throw new Error("local_hf_chat_template_unavailable");
+          const rendered = tokenizer.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });'''
+          if s.count(old) != 1:
+              raise SystemExit(f"expected exact binding defect once, got {s.count(old)}")
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "src/model/providers/huggingface-worker.ts"
+          grep -F 'tokenizer.apply_chat_template(messages' src/model/providers/huggingface-worker.ts >/dev/null
+          ! grep -F 'const apply = tokenizer.apply_chat_template' src/model/providers/huggingface-worker.ts >/dev/null
+      - name: Build and focused cross-phase regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/local-hf-worker-isolation.test.js \
+            dist/test/phase3-local-hf-adapter.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/production-phase3-cognition.test.js
+          echo HF_CHAT_BINDING_REPAIR_TESTS=PASS
+      - name: Commit exact tested repair if shared head unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse origin/$BRANCH)" = "$BASE"
+          git config user.name sentient-final-cert
+          git config user.email sentient-final-cert@users.noreply.github.com
+          git add src/model/providers/huggingface-worker.ts
+          git diff --cached --check
+          git commit -m "fix: preserve tokenizer context for local HF chat template"
+          git push --force-with-lease="refs/heads/$BRANCH:$BASE" origin "HEAD:refs/heads/$BRANCH"
+          echo NEW_SHA="$(git rev-parse HEAD)"
+          echo NEW_TREE="$(git rev-parse 'HEAD^{tree}')"
+          echo SENTIENT_SOURCE_REPAIR=PASS
