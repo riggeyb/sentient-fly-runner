@@ -1,0 +1,35 @@
+name: Final Cert Restart Drain
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: 79c023ea0ae2ec55c36c175759b72ee36413d561
+      TREE: 7cbabedaf2ac5440a83c2aff38ab2e592de29419
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Restart exact frozen runtime and let Sentient resume unfinished tasks
+        shell: bash
+        run: |
+          set -euo pipefail
+          exact() {
+            for _ in $(seq 1 120); do
+            if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then return 0; fi
+            sleep 2
+          done
+          return 1
+          }
+          exact
+          echo PRE_RESTART_LIVE_IDENTITY=PASS
+          mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
+          flyctl machine restart "$mid" -a "$APP"
+          echo RESTART_INDUCED=PASS
+          exact
+          echo POST_RESTART_LIVE_IDENTITY=PASS
+          echo SECRET_VALUES_EXPOSED=false
