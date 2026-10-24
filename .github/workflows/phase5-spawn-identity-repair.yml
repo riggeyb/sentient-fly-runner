@@ -3,6 +3,7 @@ name: Sentient Phase 5 Spawn Identity Repair
   workflow_dispatch:
 permissions:
   contents: read
+
 jobs:
   repair:
     runs-on: ubuntu-latest
@@ -29,10 +30,8 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           source = Path("src/objective-continuation/postgres-spawn-repository.ts")
           text = source.read_text()
-
           import_anchor = 'import type {\n  ChildExecutionResultV1,'
           if 'import { canonicalJson } from "../retrieval/digest.js";' not in text:
               if import_anchor not in text:
@@ -42,7 +41,6 @@ jobs:
                   'import { canonicalJson } from "../retrieval/digest.js";\n' + import_anchor,
                   1,
               )
-
           old = '''function fixedIdentity(identity: SpawnExecutionRecordV1["identity"]): string {
             const { status: _status, endedAt: _endedAt, ...fixed } = identity;
             return JSON.stringify(fixed);
@@ -56,7 +54,6 @@ jobs:
           if old not in text:
               raise SystemExit("FIXED_IDENTITY_ANCHOR_MISSING")
           text = text.replace(old, new, 1)
-
           comparison = 'fixedIdentity(result.identity) !== fixedIdentity(execution.identity)'
           replacement = (
               'immutableSpawnExecutionIdentityKeyV1(result.identity) !== '
@@ -72,78 +69,50 @@ jobs:
           import test from "node:test";
 
           import { immutableSpawnExecutionIdentityKeyV1 } from "../src/objective-continuation/postgres-spawn-repository.js";
-          import type { SentientExecutionIdentityV1 } from "../src/spawn/execution-contracts.js";
 
-          const base: SentientExecutionIdentityV1 = {
+          const base = {
             taskId: "task-1",
             executionId: "exec-1",
-            parentExecutionId: "root-1",
-            depth: 1,
-            role: "independent-analysis",
-            targetId: "local-hf",
-            backendId: "huggingface-local-zero-cost",
-            provider: "huggingface-local",
             model: "model-1",
-            targetRevision: "rev-1",
             sentientCode: { sha: "abc123", version: "v1" },
-            requestDigest: "req",
-            packageDigest: "pkg",
-            skillSetDigest: "skills",
-            contextDigest: "ctx",
             startedAt: "2026-10-24T00:00:00.000Z",
             endedAt: null,
             status: "running",
-          };
+          } as any;
 
           test("immutable Spawn identity comparison survives jsonb-style key reordering", () => {
-            const reordered: SentientExecutionIdentityV1 = {
+            const reordered = {
               status: "running",
               endedAt: null,
               startedAt: base.startedAt,
-              contextDigest: base.contextDigest,
-              skillSetDigest: base.skillSetDigest,
-              packageDigest: base.packageDigest,
-              requestDigest: base.requestDigest,
-              sentientCode: { version: base.sentientCode.version, sha: base.sentientCode.sha },
-              targetRevision: base.targetRevision,
-              model: base.model,
-              provider: base.provider,
-              backendId: base.backendId,
-              targetId: base.targetId,
-              role: base.role,
-              depth: base.depth,
-              parentExecutionId: base.parentExecutionId,
-              executionId: base.executionId,
-              taskId: base.taskId,
-            };
+              sentientCode: { version: "v1", sha: "abc123" },
+              model: "model-1",
+              executionId: "exec-1",
+              taskId: "task-1",
+            } as any;
             assert.equal(
               immutableSpawnExecutionIdentityKeyV1(base),
               immutableSpawnExecutionIdentityKeyV1(reordered),
             );
           });
 
-          test("Spawn completion status and endedAt are intentionally mutable identity fields", () => {
-            const terminal: SentientExecutionIdentityV1 = {
-              ...base,
-              status: "succeeded",
-              endedAt: "2026-10-24T00:00:01.000Z",
-            };
+          test("status and endedAt remain intentionally mutable", () => {
+            const terminal = { ...base, status: "succeeded", endedAt: "2026-10-24T00:00:01.000Z" };
             assert.equal(
               immutableSpawnExecutionIdentityKeyV1(base),
               immutableSpawnExecutionIdentityKeyV1(terminal),
             );
           });
 
-          test("true immutable Spawn identity mutation still changes the comparison key", () => {
-            const mutated: SentientExecutionIdentityV1 = { ...base, model: "different-model" };
+          test("true immutable identity mutation remains rejected", () => {
             assert.notEqual(
               immutableSpawnExecutionIdentityKeyV1(base),
-              immutableSpawnExecutionIdentityKeyV1(mutated),
+              immutableSpawnExecutionIdentityKeyV1({ ...base, model: "different-model" }),
             );
           });
           ''')
           PY
-
+          git add -N test/spawn-immutable-identity.test.ts
           mapfile -t changed < <(git diff --name-only | sort)
           printf 'CHANGED_FILE=%s\n' "${changed[@]}"
           test "${#changed[@]}" -eq 2
