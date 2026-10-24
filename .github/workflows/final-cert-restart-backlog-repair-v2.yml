@@ -11,9 +11,24 @@ jobs:
   repair:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       BRANCH: sentient-production-composition-20261017
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,7 +60,20 @@ jobs:
           set -euo pipefail
           npm ci --no-audit --no-fund
           npm run build
-          node --test             dist/test/final-cert-restart-backlog-serialization.test.js             dist/test/job2-self-execution.test.js             dist/test/permanent-continuation-multiprocess.test.js             dist/test/production-collaboration-restart-recovery.test.js             dist/test/phase5-fly-restart-lease-retry.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/phase4-multistep-autonomy.test.js             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/phase6-capability-integration.test.js             dist/test/phase7-model-improvement.test.js             dist/test/phase0-control-recovery.test.js             dist/test/phase0-engineering-readiness.test.js
+          node --test \
+            dist/test/final-cert-restart-backlog-serialization.test.js \
+            dist/test/job2-self-execution.test.js \
+            dist/test/permanent-continuation-multiprocess.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/phase6-capability-integration.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/phase0-control-recovery.test.js \
+            dist/test/phase0-engineering-readiness.test.js
           git diff --check
       - name: Push exact tested repair
         shell: bash
@@ -59,7 +87,7 @@ jobs:
           git diff --cached --check
           git diff --cached --quiet && { echo "NO_REPAIR_CHANGE"; exit 1; }
           git commit -m "fix: serialize restart objective recovery"
-          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:befs/heads/$BRANCH"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:refs/heads/$BRANCH"
           echo "PRIOR_SHA=$EXPECTED_SHA"
           echo "NEW_SHA=$(git rev-parse HEAD)"
           echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
