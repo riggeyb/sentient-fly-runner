@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Fence exact shared source and apply minimal repair
+      - name: Patch exact source and add focused regression
         shell: bash
         run: |
           set -euo pipefail
@@ -32,23 +32,62 @@ jobs:
           git fetch origin "$BRANCH"
           test "$(git rev-parse "origin/$BRANCH")" = "$BASE_SHA"
           python3 - <<'PY'
-          import base64
           from pathlib import Path
           p=Path("src/phase4/multistep-autonomy.ts")
           s=p.read_text()
-          old=base64.b64decode("ICAgICAgY29uc3QgZXhlY3V0aW9uPWF3YWl0IGlucHV0LmV4ZWN1dG9yLmV4ZWN1dGUoZWZmZWN0aXZlU3RlcCk7CiAgICAgIGxhdGVzdFJlZj1leGVjdXRpb24uYXV0aG9yaXRhdGl2ZVJlc3VsdFJlZjsK").decode()
-          new=base64.b64decode("ICAgICAgbGV0IGV4ZWN1dGlvbjpTdGVwRXhlY3V0aW9uVjE7CiAgICAgIHRyeXsKICAgICAgICBleGVjdXRpb249YXdhaXQgaW5wdXQuZXhlY3V0b3IuZXhlY3V0ZShlZmZlY3RpdmVTdGVwKTsKICAgICAgfWNhdGNoKGVycm9yKXsKICAgICAgICBjb25zdCBwcmV2aW91c1JldmlzaW9uPWNvbnRpbnVhdGlvbi5yZXZpc2lvbjsKICAgICAgICBjb250aW51YXRpb249bWFya09iamVjdGl2ZVRlcm1pbmFsKGNvbnRpbnVhdGlvbix7CiAgICAgICAgICBleHBlY3RlZFJldmlzaW9uOnByZXZpb3VzUmV2aXNpb24sCiAgICAgICAgICBzdGF0dXM6IkZBSUxFRCIsCiAgICAgICAgICByZWFzb25SZWY6YHBoYXNlNDoke3BsYW4ucGxhbklkfToke3N0ZXAuc3RlcElkfTpleGVjdXRvci1lcnJvcmAsCiAgICAgICAgfSkucmVjb3JkOwogICAgICAgIGF3YWl0IHBlcnNpc3QoaW5wdXQuY29udGludWF0aW9uV3JpdGVyLGNvbnRpbnVhdGlvbixwcmV2aW91c1JldmlzaW9uKTsKICAgICAgICB0aHJvdyBlcnJvcjsKICAgICAgfQogICAgICBsYXRlc3RSZWY9ZXhlY3V0aW9uLmF1dGhvcml0YXRpdmVSZXN1bHRSZWY7Cg==").decode()
+          old="""      const execution=await input.executor.execute(effectiveStep);
+      latestRef=execution.authoritativeResultRef;
+"""
+          new="""      let execution:StepExecutionV1;
+      try{
+        execution=await input.executor.execute(effectiveStep);
+      }catch(error){
+        const previousRevision=continuation.revision;
+        continuation=markObjectiveTerminal(continuation,{
+          expectedRevision:previousRevision,
+          status:"FAILED",
+          reasonRef:`phase4:${plan.planId}:${step.stepId}:executor-error`,
+        }).record;
+        await persist(input.continuationWriter,continuation,previousRevision);
+        throw error;
+      }
+      latestRef=execution.authoritativeResultRef;
+"""
           if s.count(old)!=1:
               raise SystemExit(f"phase4 execution anchor count={s.count(old)}")
           p.write_text(s.replace(old,new))
-          t=Path("test/phase4-multistep-autonomy.test.ts")
-          x=t.read_text()
-          marker='test("Phase 4 terminalizes durable continuation before rethrowing an executor exception"'
-          if marker in x:
-              raise SystemExit("focused regression already present")
-          addition=base64.b64decode("Cgp0ZXN0KCJQaGFzZSA0IHRlcm1pbmFsaXplcyBkdXJhYmxlIGNvbnRpbnVhdGlvbiBiZWZvcmUgcmV0aHJvd2luZyBhbiBleGVjdXRvciBleGNlcHRpb24iLCBhc3luYyAoKSA9PiB7CiAgY29uc3QgcGVyc2lzdGVkOkFycmF5PHtzdGF0dXM6c3RyaW5nfG51bGw7cmVhc29uUmVmOnN0cmluZ3xudWxsO3JldmlzaW9uOm51bWJlcn0+PVtdOwogIGF3YWl0IGFzc2VydC5yZWplY3RzKAogICAgZXhlY3V0ZU9iamVjdGl2ZVBsYW5WMSh7CiAgICAgIG9iamVjdGl2ZToiSW5zcGVjdCB0aGUgcmVwb3NpdG9yeSIsCiAgICAgIGlkZW50aXR5OnsuLi5pZGVudGl0eSxvYmplY3RpdmVJZDoiZXhlY3V0b3ItZXhjZXB0aW9uLW9iamVjdGl2ZSJ9LAogICAgICBjb250aW51YXRpb25Xcml0ZXI6ewogICAgICAgIGFzeW5jIHVwc2VydE9iamVjdGl2ZUNvbnRpbnVhdGlvbihyZWNvcmQpewogICAgICAgICAgICBzdGF0dXM6cmVjb3JkLnRlcm1pbmFsPy5zdGF0dXM/P251bGwsCiAgICAgICAgICAgIHJlYXNvblJlZjpyZWNvcmQudGVybWluYWw/LnJlYXNvblJlZj8/bnVsbCwKICAgICAgICAgICAgcmV2aXNpb246cmVjb3JkLnJldmlzaW9uLAogICAgICAgICAgfSk7CiAgICAgICAgfSwKICAgICAgfSwKICAgICAgZXhlY3V0b3I6ewogICAgICAgIGFzeW5jIGV4ZWN1dGUoKXsKICAgICAgICAgIHRocm93IG5ldyBFcnJvcigicGhhc2U1X3Jlc3RhcnRfcmV0cnlfZXhoYXVzdGVkOnRlc3QiKTsKICAgICAgICB9LAogICAgICB9LAogICAgfSksCiAgICAvcGhhc2U1X3Jlc3RhcnRfcmV0cnlfZXhoYXVzdGVkOnRlc3QvLAogICk7CiAgY29uc3QgdGVybWluYWw9cGVyc2lzdGVkLmF0KC0xKTsKICBhc3NlcnQuZXF1YWwodGVybWluYWw/LnN0YXR1cywiRkFJTEVEIik7CiAgYXNzZXJ0Lm1hdGNoKHRlcm1pbmFsPy5yZWFzb25SZWY/PyIiLC9ecGhhc2U0OnBsYW4tWzAtOWEtZl17OH06c3RlcC0xOmV4ZWN1dG9yLWVycm9yJC8pOwogIGFzc2VydC5vaygodGVybWluYWw/LnJldmlzaW9uPz8wKT4wKTsKfSk7Cg==").decode()
-          t.write_text(x+addition)
           PY
+          cat >> test/phase4-multistep-autonomy.test.ts <<'EOF'
+
+          test("Phase 4 terminalizes durable continuation before rethrowing an executor exception", async () => {
+            const persisted:Array<{status:string|null;reasonRef:string|null;revision:number}>=[];
+            await assert.rejects(
+              executeObjectivePlanV1({
+                objective:"Inspect the repository",
+                identity:{...identity,objectiveId:"executor-exception-objective"},
+                continuationWriter:{
+                  async upsertObjectiveContinuation(record){
+                    persisted.push({
+                      status:record.terminal?.status??null,
+                      reasonRef:record.terminal?.reasonRef??null,
+                      revision:record.revision,
+                    });
+                  },
+                },
+                executor:{
+                  async execute(){
+                    throw new Error("phase5_restart_retry_exhausted:test");
+                  },
+                },
+              }),
+              /phase5_restart_retry_exhausted:test/,
+            );
+            const terminal=persisted.at(-1);
+            assert.equal(terminal?.status,"FAILED");
+            assert.match(terminal?.reasonRef??"",/^phase4:plan-[0-9a-f]{8}:step-1:executor-error$/);
+            assert.ok((terminal?.revision??0)>0);
+          });
+          EOF
           git diff --check
           test "$(git diff --name-only | sort)" = "$(printf '%s\n' src/phase4/multistep-autonomy.ts test/phase4-multistep-autonomy.test.ts | sort)"
       - name: Build and focused/cross-phase regressions
@@ -80,6 +119,5 @@ jobs:
           git push --force-with-lease="refs/heads/$BRANCH:$BASE_SHA" origin "HEAD:refs/heads/$BRANCH"
           echo NEW_SHA="$(git rev-parse HEAD)"
           echo NEW_TREE="$(git rev-parse 'HEAD^{tree}')"
-          echo SENTIENT_SOURCE_MUTATION=MINIMAL_PROVEN_CERT_DEFECT_REPAIR
           echo RESOURCE_ENVELOPE_UNCHANGED=true
           echo SECRET_VALUES_EXPOSED=false
