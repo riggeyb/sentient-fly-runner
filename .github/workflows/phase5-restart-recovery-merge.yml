@@ -1,15 +1,12 @@
 name: Phase5 Restart Recovery Merge
-
 on:
   workflow_dispatch:
     inputs:
       expected_sha:
         required: true
         type: string
-
 permissions:
   contents: read
-
 jobs:
   merge:
     runs-on: ubuntu-latest
@@ -49,55 +46,37 @@ jobs:
           b="await repository.completeSpawnChild({ executionId: execution.id, endedAt, result });"
           c="snapshot.lineage"
           d="snapshot.records.lineage"
-          assert s.count(a)==1, s.count(a)
-          assert s.count(c)==1, s.count(c)
+          assert s.count(a)==1 and s.count(c)==1
           p.write_text(s.replace(a,b,1).replace(c,d,1))
-
           t=Path("test/production-collaboration-restart-recovery.test.ts")
           q=t.read_text()
-          old1='return { records: { executions: [runningExecution()] }, lineage: [] };'
-          new1='return { records: { executions: [runningExecution()], lineage: [] } };'
-          assert q.count(old1)==1, q.count(old1)
-          q=q.replace(old1,new1,1)
-          old2='''async completeSpawnChild(_id: string, result: unknown) {
+          fixes=[
+            ('return { records: { executions: [runningExecution()] }, lineage: [] };',
+             'return { records: { executions: [runningExecution()], lineage: [] } };'),
+            ('''async completeSpawnChild(_id: string, result: unknown) {
       settled = result;
       return { execution: runningExecution(), result };
-    },'''
-          new2='''async completeSpawnChild(input: { result: unknown }) {
+    },''',
+             '''async completeSpawnChild(input: { result: unknown }) {
       settled = input.result;
       return { execution: runningExecution(), result: input.result };
-    },'''
-          assert q.count(old2)==1, q.count(old2)
-          q=q.replace(old2,new2,1)
-          old3='async spawnSnapshot() { return { records: { executions: [] }, lineage: [] }; },'
-          new3='async spawnSnapshot() { return { records: { executions: [], lineage: [] } }; },'
-          assert q.count(old3)==1, q.count(old3)
-          q=q.replace(old3,new3,1)
+    },'''),
+            ('async spawnSnapshot() { return { records: { executions: [] }, lineage: [] }; },',
+             'async spawnSnapshot() { return { records: { executions: [], lineage: [] } }; },'),
+          ]
+          for old,new in fixes:
+              assert q.count(old)==1
+              q=q.replace(old,new,1)
           t.write_text(q)
           PY
           git diff --check
-      - name: Install
-        run: npm ci --no-audit --no-fund
-      - name: Build
-        run: npm run build
-      - name: Phase5 restart and cumulative regressions
+      - name: Build and targeted cumulative regressions
         shell: bash
         run: |
           set -euo pipefail
-          node --test \
-            dist/test/production-collaboration-restart-recovery.test.js \
-            dist/test/active-work-restart-edge.test.js \
-            dist/test/active-work-expiry-fencing.test.js \
-            dist/test/phase5-collaborative-convergence.test.js \
-            dist/test/job2-production-convergence.test.js \
-            dist/test/phase4-multistep-autonomy.test.js \
-            dist/test/permanent-continuation-*.test.js \
-            dist/test/phase1-core-runtime.test.js \
-            dist/test/phase1-acceptance-policy.test.js \
-            dist/test/fly-phase1-acceptance-policy.test.js \
-            dist/test/production-phase3-cognition.test.js \
-            dist/test/phase0-control-recovery.test.js \
-            dist/test/phase0-engineering-readiness.test.js
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test             dist/test/production-collaboration-restart-recovery.test.js             dist/test/active-work-restart-edge.test.js             dist/test/active-work-expiry-fencing.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/job2-production-convergence.test.js             dist/test/phase4-multistep-autonomy.test.js             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/fly-phase1-acceptance-policy.test.js             dist/test/production-phase3-cognition.test.js             dist/test/phase0-control-recovery.test.js             dist/test/phase0-engineering-readiness.test.js
           git diff --check
       - name: Push exact tested repair
         shell: bash
@@ -109,9 +88,9 @@ jobs:
           git config user.email "sentient-phase5-convergence@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git diff --cached --quiet && { echo "NO_PHASE5_CHANGE"; exit 1; }
+          git diff --cached --quiet && { echo "NO_PHASE1_CHANGE"; exit 1; }
           git commit -m "fix: reconcile Phase5 restart Spawn state"
-          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:refs/heads/$BRANCH"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:Refs/heads/$BRANCH"
           echo "PRIOR_SHA=$EXPECTED_SHA"
           echo "NEW_SHA=$(git rev-parse HEAD)"
           echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
