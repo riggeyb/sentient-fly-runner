@@ -72,19 +72,61 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test             dist/test/phase5-fly-restart-lease-retry.test.js             dist/test/production-collaboration-restart-recovery.test.js             dist/test/active-work-core.test.js             dist/test/active-work-persistence.test.js             dist/test/active-work-restart-edge.test.js             dist/test/active-work-expiry-fencing.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/job2-self-execution.test.js             dist/test/local-hf-worker-isolation.test.js
+          node --test \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/active-work-core.test.js \
+            dist/test/active-work-persistence.test.js \
+            dist/test/active-work-restart-edge.test.js \
+            dist/test/active-work-expiry-fencing.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/job2-self-execution.test.js \
+            dist/test/local-hf-worker-isolation.test.js
 
       - name: Phase0 Postgres critical
         shell: bash
         run: |
           set -euo pipefail
-          node --test             dist/test/active-work-core.test.js             dist/test/active-work-expiry-fencing.test.js             dist/test/active-work-persistence.test.js             dist/test/active-work-restart-edge.test.js             dist/test/engineering-jobs.test.js             dist/test/objective-continuation.test.js             dist/test/objective-continuation-readiness.test.js             dist/test/permanent-continuation-http.test.js             dist/test/permanent-continuation-multiprocess.test.js             dist/test/phase0-control-recovery.test.js             dist/test/phase0-engineering-readiness.test.js             dist/test/deployment-governor.test.js             dist/test/deployment-governor-boundaries.test.js             dist/test/deployment-governor-skills-fence.test.js
+          node --test \
+            dist/test/active-work-core.test.js \
+            dist/test/active-work-expiry-fencing.test.js \
+            dist/test/active-work-persistence.test.js \
+            dist/test/active-work-restart-edge.test.js \
+            dist/test/engineering-jobs.test.js \
+            dist/test/objective-continuation.test.js \
+            dist/test/objective-continuation-readiness.test.js \
+            dist/test/permanent-continuation-http.test.js \
+            dist/test/permanent-continuation-multiprocess.test.js \
+            dist/test/phase0-control-recovery.test.js \
+            dist/test/phase0-engineering-readiness.test.js \
+            dist/test/deployment-governor.test.js \
+            dist/test/deployment-governor-boundaries.test.js \
+            dist/test/deployment-governor-skills-fence.test.js
 
       - name: Phase1-7 cumulative
         shell: bash
         run: |
           set -euo pipefail
-          node --test             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/fly-phase1-acceptance-policy.test.js             dist/test/phase2-skill-execution.test.js             dist/test/phase2-dependency-boundary.test.js             dist/test/action-fabric-authority-reuse.test.js             dist/test/phase3-cognitive-components.test.js             dist/test/phase3-local-hf-adapter.test.js             dist/test/test/production-phase3-cognition.test.js             dist/test/phase4-multistep-autonomy.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/production-collaboration-restart-recovery.test.js             dist/test/phase5-fly-restart-lease-retry.test.js             dist/test/test/phase6-capability-integration.test.js             dist/test/production-repository-capability.test.js             dist/test/production-director-capability.test.js             dist/test/phase7-model-improvement.test.js             dist/test/phase7-local-hf-feature-head.test.js             dist/test/production-model-improvement.test.js
+          node --test \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/fly-phase1-acceptance-policy.test.js \
+            dist/test/phase2-skill-execution.test.js \
+            dist/test/phase2-dependency-boundary.test.js \
+            dist/test/action-fabric-authority-reuse.test.js \
+            dist/test/phase3-cognitive-components.test.js \
+            dist/test/phase3-local-hf-adapter.test.js \
+            dist/test/production-phase3-cognition.test.js \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/phase6-capability-integration.test.js \
+            dist/test/production-repository-capability.test.js \
+            dist/test/production-director-capability.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/phase7-local-hf-feature-head.test.js \
+            dist/test/production-model-improvement.test.js
 
       - name: Push exact tested repair
         shell: bash
@@ -98,8 +140,8 @@ jobs:
           git diff --cached --check
           git diff --cached --quiet && { echo NO_PHASE5_CHANGE; exit 1; }
           git commit -m "fix: bound durable state generation contention"
-          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:befs/heads/$BRANCH"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_SHA" origin "HEAD:refs/heads/$BRANCH"
           echo "NEW_SHA=$(git rev-parse HEAD)"
           echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
           echo "PHASE5_DURABLE_STATE_CAS_REPAIR=PASS"
-          echo "SECRET_VALUES_EXPOSED=false"
+          echo "SECRET_VALUES_EXPOSED=false
