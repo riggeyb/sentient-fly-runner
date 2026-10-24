@@ -1,99 +1,46 @@
-name: Final Cert Raw HF Pipeline Shape Diagnostic
+name: HF Shape
 on:
   workflow_dispatch:
     inputs:
-      sha:
-        required: true
-        type: string
-      tree:
-        required: true
-        type: string
-permissions:
-  contents: read
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions: {contents: read}
 jobs:
-  diagnose:
+  x:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      APP: sentient-validation-runner
-      SHA: ${{ inputs.sha }}
-      TREE: ${{ inputs.tree }}
+      A: sentient-validation-runner
+      S: ${{ inputs.sha }}
+      T: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Inspect raw Transformers.js output shape for plain and chat input
-        shell: bash
+      - shell: bash
         run: |
           set -euo pipefail
-          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
-          mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
-          state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
-          if [ "$state" != started ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
-          ready=false
+          m=$(flyctl machines list -a "$A" --json|jq -er '.[0].id')
+          st=$(flyctl machines list -a "$A" --json|jq -er '.[0].state')
+          [ "$st" = started ] || flyctl machine start "$m" -a "$A" >/dev/null
           for _ in $(seq 1 90); do
-            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
-               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
-              ready=true; break
-            fi
+            curl -fsS --max-time 8 "https://${A}.fly.dev/readyz" >/tmp/r 2>/dev/null || true
+            jq -e --arg s "$S" --arg t "$T" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r >/dev/null 2>&1 && break
             sleep 2
           done
-          test "$ready" = true
-          echo RAW_HF_EXACT_READINESS=PASS
-          cat >/tmp/raw-hf.mjs <<'NODE'
-          import { pipeline, env } from "@huggingface/transformers";
-          import {
-            LOCAL_HF_CACHE_DIR_V1,
-            LOCAL_HF_DTYPE_V1,
-            LOCAL_HF_MODEL_REVISION_V1,
-            LOCAL_HF_MODEL_V1
-          } from "/app/dist/src/model/providers/huggingface.js";
-          env.cacheDir=LOCAL_HF_CACHE_DIR_V1;
-          const p=await pipeline("text-generation",LOCAL_HF_MODEL_V1,{
-            revision:LOCAL_HF_MODD_REVISION_V1,
-            dtype:LOCAL_HF_DTYPE_V1,
-            device:"cpu"
-          });
-          const summarize=(label,value)=>{
-            const topArray=Array.isArray(value);
-            const first=topArray?value[0]:value;
-            const keys=first && typeof first==="object" ? Object.keys(first).sort() : [];
-            const generated=first && typeof first==="object" ? first.generated_text : undefined;
-            const generatedType=Array.isArray(generated)?"array":typeof generated;
-            const generatedLength=typeof generated==="string"?generated.length:Array.isArray(generated)?generated.length:null;
-            const roles=Array.isArray(generated)?generated.map(x=>x&&typeof x==="object"?String(x.role??"none"):"nonobject"):[];
-            const contentLengths=Array.isArray(generated)?generated.map(x=>x&&typeof x==="object"&&typeof x.content==="string"?x.content.length:null):[];
-            console.log(label+"="+JSON.stringify({topArray,topLength:topArray?value.length:null,firstType:typeof first,keys,generatedType,generatedLength,roles,contentLengths}));
-          };
+          jq -e --arg s "$S" --arg t "$T" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r >/dev/null
+          cat >/tmp/x.mjs <<'NODE'
+          import{pipeline,env}from"@huggingface/transformers";
+          import{LOCAL_HF_CACHE_DIR_V1 as C,LOCAL_HF_DTYPE_V1 as D,LOCAL_HF_MODEL_REVISION_V1 as R,LOCAL_HF_MODEL_V1 as M}from"/app/dist/src/model/providers/huggingface.js";
+          env.cacheDir=C;
+          const p=await pipeline("text-generation",M,{revision:R,dtype:D,device:"cpu"});
           const opts={max_new_tokens:64,do_sample:false,return_full_text:false};
-          const plain=[
-            "System:",
-            "You are subordinate cognition. Return a short candidate answer only.",
-            "",
-            "User:",
-            "Why does exact source identity matter for a trustworthy runtime?",
-            "",
-            "Assistant:"
-          ].join("\n");
-          try {
-            const rawPlain=await p(plain,opts);
-            summarize("RAW_HF_PLAIN",rawPlain);
-          } catch(e) {
-            console.log("RAW_HF_PLAIN_THROW="+String(e instanceof Error?e.message:e).replace(/[\r\n]+/g," ").slice(0,500));
-          }
-          try {
-            const messages=[
-             {role:"system",content:"You are subordinate cognition. Return a short candidate answer only."},
-              {role:"user",content:"Why does exact source identity matter for a trustworthy runtime?"}
-            ];
-            const rawChat=await p(messages,opts);
-            summarize("RAW_HF_CHAT",rawChat);
-          } catch(e) {
-            console.log("RAW_HF_CHAT_THROW="+String(e instanceof Error?e.message:e).replace(/[\r\n]+/g," ").slice(0,500));
-          }
+          const f=(n,v)=>{const g=(Array.isArray(v)?v[0]:v)?.generated_text;console.log(n+"="+JSON.stringify({type:Array.isArray(g)?"array":typeof g,len:typeof g==="string"?g.length:Array.isArray(g)?g.length:null,roles:Array.isArray(g)?g.map(x=>x?.role??null):[],lens:Array.isArray(g)?g.map(x=>typeof x?.content==="string"?x.content.length:null):[]}));};
+          const q="System:\nYou are subordinate cognition. Return a short candidate answer only.\n\nUser:\nWhy does exact source identity matter?\n\nAssistant:";
+          try{f("PLAIN",await p(q,o))}catch(e){console.log("PLAIN_THROW="+String(e?.message??e))}
+          const c=[{role:"system",content:"You are subordinate cognition. Return a short candidate answer only."},{role:"user",content:"Why does exact source identity matter?"}];
+          try{f("CHAT",await p(c,o))}catch(e){console.log("CHAT_THROW="+String(e?.message??e))}
           await p.dispose?.();
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
-          node --check /tmp/raw-hf.mjs
-          b="$(base64 -w0 /tmp/raw-hf.mjs)"
-          timeout 240s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/app/.raw-hf-${GITHUB_RUN_ID}.mjs; cd /app && node /app/.raw-hf-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /app/.raw-hf-${GITHUB_RUN_ID}.mjs; exit \$rc'"
+          b=$(base64 -w0 /tmp/x.mjs)
+          timeout 240s flyctl ssh console -a "$A" -C "sh -lc 'echo $b|base64 -d >/app/.x.mjs;cd /app;node /app/.x.mjs;rc=\$?;rm -f /app/.x.mjs;exit \$rc'"
