@@ -22,8 +22,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$S" =~ ^[0-9a-f]{40}$ ]]; [[ "$T" =~ ^[0-9a-f]{40}$ ]]
-          ident="$(flyctl ssh console -a "$APP" -C 'sh -lc '"'''printf "%s\n%s\n" "$SENTIENT_RUNTIME_SHA" "$SENTIENT_RUNTIME_TREE"''"''')"
-          grep -Fxq "$S" <<<"$ident"; grep -Fxq "$T" <<<"$ident"
+          ident="$(flyctl ssh console -a "$APP" -C printenv)"
+          grep -Fxq "SENTIENT_RUNTIME_SHA=$S" <<<"$ident"
+          grep -Fxq "SENTIENT_RUNTIME_TREE=$T" <<<"$ident"
           echo PHASE5_FIXTURE_DIAGNOSTIC_IDENTITY=PASS
           cat >/tmp/d.mjs <<'NODE'
           import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
@@ -38,26 +39,16 @@ jobs:
             const tasks=(snap.records?.tasks??[])
               .filter(t=>t?.metadata?.contract==="sentient-fly-objective-runner/v1")
               .filter(t=>["pending","running"].includes(String(t.status)))
-              .map(t=>({
-                taskId:t.taskId??t.id??null,objectiveId:t.objectiveId??t.metadata?.objectiveId??t.metadata?.taskId??null,
-                sessionId:t.sessionId??t.metadata?.sessionId??null,status:t.status??null,
-                createdAt:t.createdAt??null,updatedAt:t.updatedAt??null,ageMs:age(t.updatedAt??t.createdAt),
-                phase5:phase5(t.taskId??t.id)||phase5(t.objectiveId)||phase5(t.metadata?.objectiveId)
-              }));
+              .map(t=>({taskId:t.taskId??t.id??null,objectiveId:t.objectiveId??t.metadata?.objectiveId??t.metadata?.taskId??null,sessionId:t.sessionId??t.metadata?.sessionId??null,status:t.status??null,createdAt:t.createdAt??null,updatedAt:t.updatedAt??null,ageMs:age(t.updatedAt??t.createdAt),phase5:phase5(t.taskId??t.id)||phase5(t.objectiveId)||phase5(t.metadata?.objectiveId)}));
             const works=(snap.collaborationActiveWork?.records??[])
               .filter(w=>w.status==="ACTIVE")
-              .map(w=>({workId:w.workId??null,objectiveId:w.objectiveId??null,sessionId:w.sessionId??null,
-                workKey:w.workKey??null,participantId:w.participantId??null,status:w.status??null,
-                reclaimCount:w.reclaimCount??null,leaseExpiresAt:w.leaseExpiresAt??null,createdAt:w.createdAt??null,
-                updatedAt:w.updatedAt??null,ageMs:age(w.updatedAt??w.createdAt),phase5:phase5(w.objectiveId)||phase5(w.sessionId)}));
+              .map(w=>({workId:w.workId??null,objectiveId:w.objectiveId??null,sessionId:w.sessionId??null,workKey:w.workKey??null,participantId:w.participantId??null,status:w.status??null,reclaimCount:w.reclaimCount??null,leaseExpiresAt:w.leaseExpiresAt??null,createdAt:w.createdAt??null,updatedAt:w.updatedAt??null,ageMs:age(w.updatedAt??w.createdAt),phase5:phase5(w.objectiveId)||phase5(w.sessionId)}));
             const execs=(snap.spawn?.records?.executions??[])
               .filter(e=>["reserved","running"].includes(String(e?.identity?.status)))
               .map(e=>({executionId:e.id??null,taskId:e.identity?.taskId??null,role:e.identity?.role??null,
                 parentExecutionId:e.identity?.parentExecutionId??null,requestId:e.requestId??null,status:e.identity?.status??null,
                 reservationReconciled:e.reservationReconciled??null,createdAt:e.identity?.createdAt??e.createdAt??null,
-                updatedAt:e.identity?.updatedAt??e.updatedAt??null,ageMs:age(e.identity?.updatedAt??e.updatedAt??e.identity?.createdAt??e.createdAt),
-                phase5:phase5(e.identity?.taskId)||phase5(e.requestId)
-              }));
+                updatedAt:e.identity?.updatedAt??e.updatedAt??null,ageMs:age(e.identity?.updatedAt??e.updatedAt??e.identity?.createdAt??e.createdAt),phase5:phase5(e.identity?.taskId)||phase5(e.requestId)}));
             console.log("PHASE5_FIXTURE_ACTIVE_TASKS="+JSON.stringify(tasks));
             console.log("PHASE5_FIXTURE_ACTIVE_WORK="+JSON.stringify(works));
             console.log("PHASE5_FIXTURE_NONTERMINAL_EXECUTIONS="+JSON.stringify(execs));
@@ -65,7 +56,7 @@ jobs:
             console.log(`PHASE5_FIXTURE_ACTIVE_WORK_COUNT=${works.length}`);
             console.log(`PHASE5_FIXTURE_NONTERMINAL_EXECUTION_COUNT=${execs.length}`);
             console.log(`PHASE5_FIXTURE_PHASE5_TASK_COUNT=${tasks.filter(x=>x.phase5).length}`);
-            console.log(`PHASE5_FIXTURE_PHASE5_WORK_COUNT=${works.filter(x=>x.phase5).length}`);
+            console.log(`PHASE5_FIXTURE_PHASE1_WORK_COUNT=${works.filter(x=>x.phase5).length}`);
             console.log(`PHASE5_FIXTURE_PHASE1_EXECUTION_COUNT=${execs.filter(x=>x.phase5).length}`);
             console.log("SECRET_VALUES_EXPOSED=false");
             console.log("PHASE5_PROOF_FIXTURE_DIAGNOSTIC=COMPLETE");
