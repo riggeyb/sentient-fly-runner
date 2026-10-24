@@ -2,50 +2,34 @@ name: Final Cert Continuation Diagnostic
 "on":
   workflow_dispatch:
     inputs:
-      objective_id:
-        required: true
-        type: string
-permissions:
-  contents: read
+      objective_id: {type: string, required: true}
+permissions: {contents: read}
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
-      FLS_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      ID: ${{ inputs.objective_id }}
       APP: sentient-validation-runner
-      OBJECTIVE_ID: ${{ inputs.objective_id }}
-      EXPECTED_SHA: 79c023ea0ae2ec55c36c175759b72ee36413d561
-      EXPECTED_TREE: 7cbabedaf2ac5440a83c2aff38ab2e592de29419
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Inspect sanitized continuation state
+      - name: Exact-fenced read-only continuation check
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
-          for _ in $(seq 1 120); do
-            if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then break; fi
-            sleep 2
-          done
-          cat >/tmp/diagnose.mjs <<'NODE'
-          import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
-          const oid=String(process.env.CERT_OBJECTIVE_ID??"").trim();
-          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
-          if(!oid||!db) throw new Error("BINDING_MISSING");
-          const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
-          try{
-            const task=await repo.get("task",oid);
-            const root=await repo.getObjectiveContinuation(oid);
-            const sanitized={
-              task:task?.kind==="task"?{status:task.status,updatedAt:task.updatedAt,error:task.error?null,activeEngineeringJobId:task.activeEngineeringJobId??null}:null,
-              root:root?{status:root.status,revision:root.revision,terminal:root.terminal?null,currentStepId:root.currentStepId??null,activeEngineeringJobId:root.activeEngineeringJobId??null,continuationState:root.continuationState??null,updatedAt:root.updatedAt}:null,
-              steps:(root?.steps??[]).map(s=>({id:s.id,status:s.status,actionType:s.actionType??null,evidenceId:s.evidenceId??null,verificationId:s.verificationId??null})),
-              dependencies:(root?.evidenceDependencies??[]).map(d=>({id:d.id,status:d.status,evidenceId:d.evidenceId??null,verificationId:d.verificationId??null,subjectIdentity:d.subjectIdentity??null}))
-            };
-            console.log("FINAL_CERT_CONTINUATION="+JSON.stringify(sanitized));
-            console.log("SECRET_VALUES_EXPOSED=false");
-          }finally{await repo.close().catch(()=>undefined);}
+          [[ "$ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          curl -fsS --retry 6 --retry-delay 2 --max-time 15 "https://${APP}.fly.dev/readyz" > /tmp/ready.json
+          jq -e '.ready==true and .identity.source.sha=="aed9e3a974767eb5c4ac18d9a0321bb2404f20ef" and .identity.source.tree=="5d0700883048031723edb3d1ffbc4becbdf558a0"' /tmp/ready.json >/dev/null
+          cat > /tmp/probe.mjs <<'NODE'
+          import {PostgresSpawnObjectiveRepository as Repo} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const d=process.env.DATABASE_URL??process.env.DIRECT_URL;
+          if(!d)throw Error("DB_MISSING");
+          const r=new Repo({connectionString:d}),id=process.env.CERT_ID;
+          try {
+            const t=await r.get("task",id),o=await r.getObjectiveContinuation(id);
+            console.log("CERT_READONLY="+JSON.stringify({id,task:t?.status??null,root:o?.status??null,rev:o?.revision??null,terminal:o?.terminal?.status??null,satisfied:(o?.evidenceDependencies??[]).filter(x=>x.status==="SATISFIED").length}));
+          }finally{await r.close();}
           NODE
-          B64="$(base64 -w0 /tmp/diagnose.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64|base64 -d >/tmp/diagnose.mjs && CERT_OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/diagnose.mjs; rc=\$?; rm -f /tmp/diagnose.mjs; exit \$rc'"
+          b="$(base64 -w0 /tmp/probe.mjs)"
+          timeout 70s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/tmp/cert-${GITHUB_RUN_ID}.mjs; CERT_ID=$ID node /tmp/cert-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/cert-${GITHUB_RUN_ID}.mjs; exit \$rc'"
