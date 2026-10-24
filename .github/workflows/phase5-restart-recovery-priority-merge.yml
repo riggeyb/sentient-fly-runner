@@ -1,0 +1,101 @@
+name: Phase5 Restart Priority Merge
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BRANCH: sentient-production-composition-20261017
+      EXPECTED_HEAD: 96854a116a480c814b2c7e44dcea8dcc8b2b723b
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - name: Fence
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse "origin/$BRANCH")" = "$EXPECTED_HEAD"
+      - name: Patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/fly/self-execution.ts")
+          s=p.read_text()
+          old='''  public async resumeUnfinished(): Promise<number> {
+            const tasks = await this.#state.list("task");
+            let count = 0;
+            for (const task of tasks) {
+              if (task.kind !== "task" || !ACTIVE.has(task.status)) continue;
+              if (parseRunnerMetadata(task) === null) continue;
+              count += 1;
+              this.#scheduleInheritedRestart(task.id);
+            }
+            return count;
+          }'''
+          new='''  public async resumeUnfinished(): Promise<number> {
+            const tasks = (await this.#state.list("task"))
+              .filter((task) =>
+                task.kind === "task"
+                && ACTIVE.has(task.status)
+                && parseRunnerMetadata(task) !== null
+              )
+              .sort((left, right) => {
+                const updated = right.updatedAt.localeCompare(left.updatedAt);
+                if (updated !== 0) return updated;
+                const created = right.createdAt.localeCompare(left.createdAt);
+                if (created !== 0) return created;
+                return left.id.localeCompare(right.id);
+              });
+            for (const task of tasks) this.#scheduleInheritedRestart(task.id);
+            return tasks.length;
+          }'''
+          if s.count(old)!=1: raise SystemExit(f"resume anchor count={s.count(old)}")
+          p.write_text(s.replace(old,new,1))
+
+          t=Path("test/job2-self-execution.test.ts")
+          x=t.read_text()
+          anchor='''  assert.ok(server.includes("objectiveRunner.resumeUnfinished"));
+          '''
+          add='''  assert.ok(server.includes("objectiveRunner.resumeUnfinished"));
+            assert.ok(self.includes("right.updatedAt.localeCompare(left.updatedAt)"));
+            assert.ok(self.includes("right.createdAt.localeCompare(left.createdAt)"));
+            assert.ok(self.includes("left.id.localeCompare(right.id)"));
+          '''
+          if x.count(anchor)!=1: raise SystemExit(f"test anchor count={x.count(anchor)}")
+          t.write_text(x.replace(anchor,add,1))
+          PY
+          git diff --check
+          git diff -- src/fly/self-execution.ts test/job2-self-execution.test.ts
+      - name: Build and test
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test             dist/test/phase5-fly-restart-lease-retry.test.js             dist/test/production-collaboration-restart-recovery.test.js             dist/test/active-work-restart-edge.test.js             dist/test/active-work-expiry-fencing.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/job2-self-execution.test.js             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/fly-phase1-acceptance-policy.test.js             dist/test/phase2-skill-execution.test.js             dist/test/production-phase3-cognition.test.js             dist/test/phase4-multistep-autonomy.test.js             dist/test/phase6-capability-integration.test.js             dist/test/phase7-model-improvement.test.js             dist/test/production-model-improvement.test.js
+      - name: Push
+        run: |
+          set -euo pipefail
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse "origin/$BRANCH")" = "$EXPECTED_HEAD"
+          git config user.name sentient-phase5-recovery-priority
+          git config user.email sentient-phase5-recovery-priority@users.noreply.github.com
+          git add src/fly/self-execution.ts test/job2-self-execution.test.ts
+          git diff --cached --check
+          git commit -m "fix: prioritize recent Fly restart recovery"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_HEAD" origin "HEAD:refs/heads/$BRANCH"
+          echo PHASE5_RESTART_PRIORITY_SOURCE=PASS
+          echo NEW_SHA=$(git rev-parse HEAD)
+          echo NEW_TREE=$(git rev-parse 'HEAD^{tree}')
+          echo SECRET_VALUES_EXPOSED=false
