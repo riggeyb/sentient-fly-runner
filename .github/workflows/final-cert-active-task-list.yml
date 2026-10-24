@@ -10,8 +10,8 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
-      EXPECTED_SHA: aed9e3a974767eb5c4ac18d9a0321bb2404f20ef
-      EXPECTED_TREE: 5d0700883048031723edb3d1ffbc4becbdf558a0
+      EXPECTED_SHA: 3a0d39ed877c6321c181c7f75e2fd6f7de085564
+      EXPECTED_TREE: 8ef9f17c38bebe267a45f9aaeec799250a93bca1
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: List sanitized unfinished objective tasks without HTTP dependency
