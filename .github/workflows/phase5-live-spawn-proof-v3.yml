@@ -41,15 +41,19 @@ jobs:
           out = []
           for line in lines:
               if not line:
-                out.append("")
-                continue
+                  out.append("")
+                  continue
               if not line.startswith("          "):
-                break
+                  break
               out.append(line[10:])
           script = "\n".join(out) + "\n"
           script = script.replace("PHASE1_", "PHASE5_")
+          script = script.replace("AbortSignal.timeout(10000)", "AbortSignal.timeout(120000)")
+          script = script.replace('jq -er '.workId' <<"$ARM_JSON"', 'jq -er '.workId' <<<"$ARM_JSON"')
           checks = {
               "no_phase1": "PHASE1_" not in script,
+              "arm_timeout": "AbortSignal.timeout(120000)" in script,
+              "arm_json_here_string": 'jq -er '.workId' <<<"$ARM_JSON"' in script,
               "new_promise": "await new Promise" in script,
               "new_error": 'throw new Error("PHASE5_AUTOMATIC_RECOVERY_NOT_TERMINAL")' in script,
               "session_binding": "PHASE5_SESSION_ID=$SESSION" in script,
