@@ -15,32 +15,44 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       EXPECTED_SHA: ${{ inputs.sha }}
       EXPECTED_TREE: ${{ inputs.tree }}
+      APP_URL: https://sentient-validation-runner.fly.dev
     steps:
-      - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Verify exact live identity and production readiness
         shell: bash
         run: |
           set -euo pipefail
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
-          cat >/tmp/cert.mjs <<'NODE'
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 10 "$APP_URL/healthz" >/tmp/h.json 2>/dev/null &&
+               curl -fsS --max-time 10 "$APP_URL/readyz" >/tmp/r.json 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          node <<'NODE'
+          const fs=require("fs");
           const sha=String(process.env.EXPECTED_SHA??"");
           const tree=String(process.env.EXPECTED_TREE??"");
-          const read=async p=>{const r=await fetch("http://127.0.0.1:8080/"+p,{signal:AbortSignal.timeout(20000)});return {code:r.status,body:await r.json()};};
-          const h=await read("healthz"),r=await read("readyz");
-          const hi=h.body.application?.identity?.source,ri=r.body.identity?.source;
-          console.log("SANITIZED_LIVE_GATE="+JSON.stringify({healthCode:h.code,readyCode:r.code,healthSha:hi?.sha??null,healthTree:hi?.tree??null,readySha:ri?.sha??null,readyTree:ri?.tree??null,ready:r.body.ready??null,missingRequired:(r.body.bindings??[]).filter(x=>x.requiredForReadiness&&x.availability!=="AVAILABLE").map(x=>x.name),readinessScope:r.body.readinessScope??null}));
-          if(h.code!==200||r.code!==200||hi?.sha!==sha||hi?.tree!==tree||ri?.sha!==sha||ri?.tree!==tree||r.body.ready!==true) throw Error("FROZEN_LIVE_GATE_FAILED");
-          if(r.body.authorityOwner!=="SENTIENT_RUNTIME"||r.body.modelOutputIsNeverAuthority!==true) throw Error("AUTHORITY_GATE_FAILED");
-          const names=(r.body.bindings??[]).filter(x=>x.requiredForReadiness&&x.availability==="AVAILABLE").map(x=>x.name);
+          const h=JSON.parse(fs.readFileSync("/tmp/h.json","utf8"));
+          const r=JSON.parse(fs.readFileSync("/tmp/r.json","utf8"));
+          const hi=h.application?.identity?.source,ri=r.identity?.source;
+          console.log("SANITIZED_LIVE_GATE="+JSON.stringify({
+            healthCode:200,readyCode:200,
+            healthSha:hi?.sha??null,healthTree:hi?.tree??null,
+            readySha:ri?.sha??null,readyTree:ri?.tree??null,
+            ready:r.ready??null,
+            missingRequired:(r.bindings??[]).filter(x=>x.requiredForReadiness&&x.availability!=="AVAILABLE").map(x=>x.name),
+            readinessScope:r.readinessScope??null
+          }));
+          if(hi?.sha!==sha||hi?.tree!==tree||ri?.sha!==sha||ri?.tree!==tree||r.ready!==true) throw Error("FROZEN_LIVE_GATE_FAILED");
+          if(r.authorityOwner!=="SENTIENT_RUNTIME"||r.modelOutputIsNeverAuthority!==true) throw Error("AUTHORITY_GATE_FAILED");
+          const names=(r.bindings??[]).filter(x=>x.requiredForReadiness&&x.availability==="AVAILABLE").map(x=>x.name);
           if(!names.includes("COGNITION")||!names.includes("PHASE3_HF_COGNITION")) throw Error("COGNITION_NOT_READY");
           console.log("LIVE_RUNTIME_SHA="+ri.sha);
           console.log("LIVE_RUNTIME_TREE="+ri.tree);
           for(const k of ["LIVE_SHA_MATCH","LIVE_TREE_MATCH","LIVE_HEALTHZ","LIVE_READYZ","LOCAL_HF_COGNITION_LIVE"]) console.log(k+"=PASS");
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
-          b64="$(base64 -w0 /tmp/cert.mjs)"
-          flyctl ssh console -a sentient-validation-runner -C "sh -lc 'echo $b64 | base64 -d >/tmp/cert.mjs && EXPECTED_SHA=$EXPECTED_SHA EXPECTED_TREE=$EXPECTED_TREE node /tmp/cert.mjs; rc=\$?; rm -f /tmp/cert.mjs; exit \$rc'"
