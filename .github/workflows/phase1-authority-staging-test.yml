@@ -3,7 +3,6 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Exact Sentient staging ref
         required: true
         type: string
 permissions:
@@ -15,29 +14,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          path: runner
+      - uses: actions/checkout@v4
+        with:
           repository: riggeyb/sentient
           ref: ${{ inputs.ref }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: false
+          persist-credentials: true
           fetch-depth: 0
+          path: sentient
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build and test Phase1 authority staging
+      - name: Patch, build, test, and commit staging
         shell: bash
+        env:
+          EXPECTED_HEAD: cbb075e1632ef7673795bfbc41c9153d5369cf6c
+          TARGET_BRANCH: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 ../runner/scripts/phase1-wire-production.py
           export SENTIENT_RUNTIME_SHA="$(git rev-parse HEAD)"
           export SENTIENT_RUNTIME_TREE="$(git rev-parse HEAD^{tree})"
           export SENTIENT_SKILLS_SHA="d85eb820f18ad6d944ab93b03150d606273891a5"
-          echo "STAGING_HEAD=$SENTIENT_RUNTIME_SHA"
-          echo "STAGING_TREE=$SENTIENT_RUNTIME_TREE"
           npm ci --no-audit --no-fund
           npm run build
-          node --test \
-            dist/test/phase1-core-runtime.test.js \
-            dist/test/phase1-acceptance-policy.test.js \
-            dist/test/fly-phase1-acceptance-policy.test.js \
-            dist/test/production-phase3-cognition.test.js
+          node --test             dist/test/phase1-core-runtime.test.js             dist/test/phase1-acceptance-policy.test.js             dist/test/fly-phase1-acceptance-policy.test.js             dist/test/production-phase3-cognition.test.js
+          git diff --check
+          git config user.name "sentient-phase1-staging"
+          git config user.email "sentient-phase1-staging@users.noreply.github.com"
+          git add src/application/production-composition.ts
+          git commit -m "phase1: wire production acceptance policy helper"
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
           echo "PHASE1_AUTHORITY_STAGING=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
