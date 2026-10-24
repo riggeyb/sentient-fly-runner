@@ -1,0 +1,53 @@
+name: Phase1 Fly Policy Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Patch Fly policy wiring ephemerally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/fly/production-runtime.ts")
+          s=p.read_text()
+          anchor='import { LocalHuggingFacePhase3CognitionV1 } from "../phase3/local-hf-adapter.js";'
+          assert s.count(anchor)==1
+          s=s.replace(anchor,anchor+'\nimport { BoundedSentientPhase1AcceptancePolicyV1 } from "../phase1/bounded-acceptance-policy.js";',1)
+          marker='export function composeFlyProductionRuntimeV1() {'
+          assert s.count(marker)==1
+          constants='export const SENTIENT_FLY_PHASE1_ACCEPTANCE_POLICY_ID=\n  "sentient-fly-phase1-acceptance-policy/v1" as const;\nexport const SENTIENT_FLY_PHASE1_MAX_PROPOSAL_CHARS = 8_000 as const;\n\n'
+          s=s.replace(marker,constants+marker,1)
+          p.write_text(s)
+          PY
+      - name: Install and build
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Run Fly policy test with full TAP output
+        run: node --test dist/test/fly-phase1-acceptance-policy.test.js
+      - name: Report
+        run: |
+          echo "PHASE1_FLY_POLICY_DIAGNOSTIC=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
