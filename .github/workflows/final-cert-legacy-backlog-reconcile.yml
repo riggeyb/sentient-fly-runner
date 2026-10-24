@@ -33,7 +33,7 @@ jobs:
           ident="$(flyctl ssh console -a "$APP" -C 'sh -lc '"'"' printf "%s\n%s\n" "$SENTIENT_RUNTIME_SHA" "$SENTIENT_RUNTIME_TREE"'"'"'')"
           grep -Fxq "$EXPECTED_SHA" <<<"$ident"
           grep -Fxq "$EXPECTED_TREE" <<<"$ident"
-          echo LEGAACY_RECONCILE_IDENTITY=PASS
+          echo LEGACY_RECONCILE_IDENTITY=PASS
 
           cat >/tmp/reconcile.mjs <<'NODE'
           import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
@@ -70,7 +70,7 @@ jobs:
           flyctl machine restart "$mid" -a "$APP" >/dev/null
           ready=false
           for _ in $(seq 1 180); do
-            if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2/dev/null &&
+            if curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
               jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
               ready=true; break
             fi
