@@ -6,7 +6,7 @@ name: Sentient Phase 5 Runtime Resource Diagnostic
         required: true
         type: string
       tree:
-        required: trung
+        required: true
         type: string
 permissions:
   contents: read
