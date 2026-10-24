@@ -55,6 +55,10 @@ jobs:
           old = 'return { httpStatus: 200, body: { result: { status: "COMPLETED" } } };'
           new = 'return { httpStatus: 200, body: { mode: "collaborative" as const, result: { status: "COMPLETED" } } };'
           assert q.count(old) == 1, q.count(old)
+          q = q.replace(old, new, 1)
+          old = '  assert.ok(source.includes("inheritedRestart\\\\n      ? await runObjectiveWithInheritedPhase5LeaseRetryV1"));'
+          new = '  assert.ok(source.includes("runObjectiveWithInheritedPhase5LeaseRetryV1(this.#application, applicationInput)"));'
+          assert q.count(old) == 1, q.count(old)
           t.write_text(q.replace(old, new, 1))
           PY
           git add -N test/phase5-fly-restart-lease-retry.test.ts
