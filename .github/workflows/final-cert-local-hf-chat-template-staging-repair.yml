@@ -1,0 +1,112 @@
+name: Final Cert Local HF Chat Template Staging Repair
+"on":
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        type: string
+      expected_head:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence, patch, test, and push staging repair
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          TARGET_BRANCH: ${{ inputs.branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/model/providers/huggingface-worker.ts")
+          s=p.read_text()
+          a='import { LOCAL_HF_CACHE_DIR_V1, LOCAL_HF_DTYPE_V1, LOCAL_HF_MODEL_REVISION_V1, LOCAL_HF_MODEL_V1 } from "./huggingface.js";\n'
+          b=a+'import { formatLocalHfChatPromptV1, type LocalHfChatTokenizerV1 } from "./huggingface-chat-template.js";\n'
+          assert s.count(a)==1
+          s=s.replace(a,b,1)
+          a='type TokenizerLike = { encode(text: string): unknown };'
+          b='type TokenizerLike = LocalHfChatTokenizerV1 & { encode(text: string): unknown };'
+          assert s.count(a)==1
+          s=s.replace(a,b,1)
+          a='      const prompt = truncateToTokenBudget(request.prompt, request.maxInputTokens, pipeline.tokenizer);'
+          b='      const templated = formatLocalHfChatPromptV1(request.prompt, pipeline.tokenizer);\\n      const prompt = truncateToTokenBudget(templated, request.maxInputTokens, pipeline.tokenizer);'
+          assert s.count(a)==1
+          s=s.replace(a,b,1)
+          a='    if (pipeline.tokenizer?.encode === undefined) throw new Error("local_hf_tokenizer_unavailable");'
+          b='    if (pipeline.tokenizer?.encode === undefined || pipeline.tokenizer.apply_chat_template === undefined) throw new Error("local_hf_tokenizer_unavailable");'
+          assert s.count(a)==1
+          s=s.replace(a,b,1)
+          p.write_text(s)
+          PY
+          cat >test/local-hf-chat-template.test.ts <<'TEST'
+          import assert from "node:assert/strict";
+          import test from "node:test";
+          import { formatLocalHfChatPromptV1, type LocalHfChatMessageV1 } from "../src/model/providers/huggingface-chat-template.js";
+
+          test("local HF worker formats production Phase1 prompt through tokenizer chat template", () => {
+            let observed: readonly LocalHfChatMessageV1[] | null = null;
+            const formatted = formatLocalHfChatPromptV1(
+              "System:\nSentient subordinate policy.\n\nUser:\nInspect the safe fixture.\n\nAssistant:",
+              {
+                apply_chat_template(conversation, options) {
+                  observed = conversation;
+                  assert.deepEqual(options, { tokenize: false, add_generation_prompt: true });
+                  return "<|im_start|>system\nSentient subordinate policy.<|im_end|>\n<|im_start|>user\nInspect the safe fixture.<|im_end|>\n<|im_start|>assistant\n";
+                },
+              },
+            );
+            assert.deepEqual(observed, [
+              { role: "system", content: "Sentient subordinate policy." },
+              { role: "user", content: "Inspect the safe fixture." },
+            ]);
+            assert.match(formatted, /<\|im_start\|>assistant\n$/);
+          });
+
+          test("local HF chat formatter leaves non-production prompts unchanged", () => {
+            const prompt = "plain bounded prompt";
+            const formatted = formatLocalHfChatPromptV1(prompt, {
+              apply_chat_template() { throw new Error("chat template should not be used"); },
+            });
+            assert.equal(formatted, prompt);
+          });
+
+          test("local HF chat formatter fails closed on invalid tokenizer template output", () => {
+            assert.throws(
+              () => formatLocalHfChatPromptV1(
+                "System:\npolicy\n\nUser:\nrequest\n\nAssistant:",
+                { apply_chat_template: () => "" },
+              ),
+              /local_hf_chat_template_invalid/,
+            );
+          });
+          TEST
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/local-hf-chat-template.test.js dist/test/local-hf-worker-isolation.test.js
+          git diff --check
+          git config user.name "sentient-final-cert"
+          git config user.email "sentient-final-cert@users.noreply.github.com"
+          git add src/model/providers/huggingface-worker.ts src/model/providers/huggingface-chat-template.ts test/local-hf-chat-template.test.ts
+          git commit -m "fix: apply local HF tokenizer chat template"
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:Refs/heads/${TARGET_BRANCH}"
+          echo "STAGING_SHA=$(git rev-parse HEAD)"
+          echo "STAGING_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "LOCAL_HF_CHAT_TEMPLATE_TARGETED_TESTS=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
