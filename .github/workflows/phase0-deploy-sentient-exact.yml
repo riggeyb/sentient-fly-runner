@@ -8,6 +8,11 @@ on:
       tree:
         required: true
         type: string
+      objective_id:
+        description: Governor deployment objective/correlation id
+        required: false
+        default: phase1-7-final-convergence
+        type: string
 
 permissions:
   contents: read
@@ -21,6 +26,7 @@ jobs:
       S: ${{ inputs.sha }}
       T: ${{ inputs.tree }}
       K: d85eb820f18ad6d944ab93b03150d606273891a5
+      O: ${{ inputs.objective_id }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy exact Sentient through recovered Governor
@@ -37,12 +43,12 @@ jobs:
           done
           test "$st" = started
           cat >/tmp/deploy.mjs <<'NODE'
-          const sha=process.env.S,tree=process.env.T,skillsSha=process.env.K;
+          const sha=process.env.S,tree=process.env.T,skillsSha=process.env.K,objectiveId=String(process.env.O??"").trim();
           const token=String(process.env.SENTIENT_DEPLOYMENT_API_TOKEN??"").trim();
-          if(!token) process.exit(20);
+          if(!token||!objectiveId||objectiveId.length>160||!/^[A-Za-z0-9._:-]+$/.test(objectiveId)) process.exit(20);
           const r=await fetch("http://127.0.0.1:8080/v1/deployments/sentient",{
             method:"POST",
-            headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":"phase1-7-final-convergence"},
+            headers:{authorization:"Bearer "+token,"content-type":"application/json","x-sentient-objective-id":objectiveId},
             body:JSON.stringify({sha,tree,skillsSha}),
             signal:AbortSignal.timeout(1100000)
           });
@@ -51,7 +57,7 @@ jobs:
           if(!r.ok||v.REQUESTED_SHA!==sha||v.REQUESTED_TREE!==tree||v.DEPLOYED_SHA!==sha||v.DEPLOYED_TREE!==tree||v.BUILD_RESULT!=="SUCCEEDED"||v.HEALTHZ?.statusCode!==200||v.READYZ?.statusCode!==200||v.READYZ_FAILURE!==null) process.exit(21);
           NODE
           b64="$(base64 -w0 /tmp/deploy.mjs)"
-          flyctl ssh console -a "$app" -C "sh -lc 'echo $b64 | base64 -d >/tmp/deploy.mjs && S=$S T=$T K=$K node /tmp/deploy.mjs'"
+          flyctl ssh console -a "$app" -C "sh -lc 'echo $b64 | base64 -d >/tmp/deploy.mjs && S=$S T=$T K=$K O=$O node /tmp/deploy.mjs'"
           ok=false
           for _ in $(seq 1 180); do
             h="$(curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/healthz || true)"
