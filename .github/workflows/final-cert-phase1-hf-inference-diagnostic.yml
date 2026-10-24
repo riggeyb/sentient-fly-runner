@@ -1,0 +1,69 @@
+name: Final Cert Phase1 Local HF Inference Diagnostic
+'on':
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      APP: sentient-validation-runner
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Run one isolated exact-current local HF completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
+          state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
+          if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+          ready=false
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+              ready=true; break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          echo PHASE1_HF_DIAG_EXACT_READINESS=PASS
+          cat >/tmp/hfdiag.mjs <<'NODE'
+          import {LocalHuggingFaceRuntimeV1} from "/app/dist/src/model/providers/huggingface.js";
+          const r=new LocalHuggingFaceRuntimeV1();
+          try {
+            await r.initialize();
+            console.log("PHASE1_HF_DIAG_INITIALIZE=PASS");
+            const started=Date.now();
+            const out=await r.complete({
+              systemPrompt:"You are subordinate cognition. Return a short candidate answer only.",
+              userPrompt:"Why does exact source identity matter for a trustworthy runtime?",
+              maxInputTokens:512,
+              maxOutputTokens:64
+            });
+            console.log("PHASE1_HF_DIAG_GENERATE=PASS");
+            console.log("PHASE1_HF_DIAG_PROVIDER="+out.provider);
+            console.log("PHASE1_HF_DIAG_MODEL="+out.model);
+            console.log("PHASE1_HF_DIAG_REVISION="+out.revision);
+            console.log("PHASE1_HF_DIAG_OUTPUT_TOKENS="+out.outputTokens);
+            console.log("PHASE1_HF_DIAG_LATENCY_MS="+(Date.now()-started));
+          } catch (e) {
+            const m=(e instanceof Error?e.message:String(e)).replace(/[\r\n]+/g," ").slice(0,500);
+            console.log("PHASE1_HF_DIAG_GENERATE=FAIL");
+            console.log("PHASE1_HF_DIAG_ERROR="+m);
+            process.exitCode=1;
+          } finally {
+            await r.close().catch(()=>undefined);
+          }
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          b="$(base64 -w0 /tmp/hfdiag.mjs)"
+          timeout 180s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/tmp/hfdiag-${GITHUB_RUN_ID}.mjs; node /tmp/hfdiag-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/hfdiag-${GITHUB_RUN_ID}.mjs; exit \$rc'"
