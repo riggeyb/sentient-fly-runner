@@ -1,0 +1,21 @@
+name: Gov Jobs Diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      expected_head:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      H: ${{ inputs.expected_head }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - shell: bash
+        run: |
+          set -euo pipefail
+          flyctl ssh console -a sentient-deployment-governor -C "sh -lc 'cd /app && H=$H node --input-type=module -e \"import pg from \\\"/app/node_modules/pg/lib/index.js\\\";const{Pool}=pg;const p=new Pool({connectionString:process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL,max:1});const r=await p.query(\\\"select job_id,status,expected_head,left(objective,120) objective_prefix,created_at,completed_at,error_code from sentient_deployment_governor.engineering_jobs where expected_head=\\$1 and created_at>now()-interval \\\'60 minutes\\\' order by created_at desc limit 20\\\",[process.env.H]);console.log(\\\"JOBS=\\\"+JSON.stringify(r.rows));await p.end();\"'"
