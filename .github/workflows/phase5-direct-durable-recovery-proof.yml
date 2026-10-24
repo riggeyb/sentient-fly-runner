@@ -20,10 +20,10 @@ permissions:
 jobs:
   phase5-direct-recovery:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Reconcile original stale ledger and execute bounded retry
+      - name: Reconcile original stale ledger and execute one deterministic bounded retry
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           EXPECTED_SHA: ${{ inputs.sha }}
@@ -51,17 +51,30 @@ jobs:
           if(!databaseUrl) throw new Error("PHASE5_DATABASE_URL_MISSING");
           if(process.env.SENTIENT_RUNTIME_SHA!==expectedSha||process.env.SENTIENT_RUNTIME_TREE!==expectedTree) throw new Error("PHASE5_RUNTIME_IDENTITY_MISMATCH");
 
+          const fixtureRunner={
+            async initialize(){},
+            async generate({prompt}) {
+              const verification=String(prompt).includes("assigned role is independent-verification");
+              const text=verification ? "AGREE 2 + 2 equals 4." : "2 + 2 equals 4.";
+              return {text,inputTokens:8,outputTokens:8,totalTokens:16};
+            },
+            async close(){},
+          };
+
           const repo=new PostgresSpawnObjectiveRepository({connectionString:databaseUrl});
-          const runtime=new LocalHuggingFaceRuntimeV1();
+          const runtime=new LocalHuggingFaceRuntimeV1({runner:fixtureRunner});
           const backend=new LocalHuggingFaceSpawnExecutionBackendV1(runtime);
           try {
             await repo.initialize();
             await backend.initialize();
+
             const beforeWork=(await repo.activeWork(sessionId,true))
               .filter(r=>r.objectiveId===objectiveId&&r.workKey==="independent-analysis")
               .sort((a,b)=>b.sessionSequence-a.sessionSequence)[0];
             if(!beforeWork) throw new Error("PHASE5_STALE_WORK_MISSING");
             if(beforeWork.status!=="STALE") throw new Error(`PHASE5_EXPECTED_STALE_${beforeWork.status}`);
+            if(beforeWork.reclaimCount!==0) throw new Error(`PHASE5_EXPECTED_INITIAL_RECLAIM_ZERO_${beforeWork.reclaimCount}`);
+
             const originalWorkId=beforeWork.workId;
             const originalParticipantId=beforeWork.participantId;
             const beforeSpawn=await repo.spawnSnapshot();
@@ -87,17 +100,19 @@ jobs:
 
             const afterWork=(await repo.activeWork(sessionId,true)).find(r=>r.workId===originalWorkId);
             if(!afterWork) throw new Error("PHASE5_ORIGINAL_WORK_ID_LOST");
-            if(afterWork.workId!==originalWorkId) throw new Error("PHASE5_WORK_ID_CHANGED");
             if(afterWork.reclaimCount!==1) throw new Error(`PHASE5_RECLAIM_COUNT_${afterWork.reclaimCount}`);
             if(afterWork.participantId===originalParticipantId) throw new Error("PHASE5_PARTICIPANT_NOT_ROTATED");
             if(afterWork.status!=="COMPLETED") throw new Error(`PHASE5_RECLAIMED_WORK_NOT_COMPLETED_${afterWork.status}`);
 
             const afterSpawn=await repo.spawnSnapshot();
             const oldChild=afterSpawn.records.executions.find(e=>e.id===interruptedId);
-            if(!oldChild)throw new Error("PHASE5_OLD_CHILD_MISSING");
-            if(oldChild.identity.status!=="timed_out")throw new Error(`PHASE5_OLD_CHILD_STATUS_${oldChild.identity.status}`);
-            if(oldChild.reservationReconciled!==true)throw new Error("PHASE5_OLD_RESERVATION_NOT_RECONCILED");
-            if(!afterSpawn.records.results.some(r=>r.executionId===interruptedId&&r.result.terminalStatus==="timed_out")) throw new Error("PHASE5_RECONCILIATION_RESULT_MISSING");
+            if(!oldChild) throw new Error("PHASE5_OLD_CHILD_MISSING");
+            if(oldChild.identity.status!=="timed_out") throw new Error(`PHASE5_OLD_CHILD_STATUS_${oldChild.identity.status}`);
+            if(oldChild.reservationReconciled!==true) throw new Error("PHASE5_OLD_RESERVATION_NOT_RECONCILED");
+            const oldResult=afterSpawn.records.results.find(r=>r.executionId===interruptedId)?.result;
+            if(oldResult?.terminalStatus!=="timed_out"||oldResult?.failure?.class!=="restart_interrupted"||oldResult?.failure?.retryable!==true) {
+              throw new Error("PHASE5_RECONCILIATION_RESULT_INVALID");
+            }
 
             const retryChildren=afterSpawn.records.executions.filter(e=>e.requestId===afterWork.participantId);
             if(retryChildren.length!==1) throw new Error(`PHASE5_RETRY_CHILD_COUNT_${retryChildren.length}`);
@@ -108,10 +123,12 @@ jobs:
             console.log("PHASE5_ORIGINAL_WORK_ID="+originalWorkId);
             console.log("PHASE5_RECLAIM_COUNT="+afterWork.reclaimCount);
             console.log("PHASE5_OLD_CHILD_RECONCILED=PASS");
+            console.log("PHASE5_OLD_RESERVATION_RECONCILED=PASS");
             console.log("PHASE5_SAME_WORK_ID_RECLAIM=PASS");
             console.log("PHASE5_ONE_BOUNDED_RETRY=PASS");
             console.log("PHASE5_RECOVERY_RESULT_STATUS="+String(collaboration?.status??"unknown"));
             console.log("PHASE5_RECOVERY_AUTHORITY_OWNER="+String(collaboration?.authorityOwner??"unknown"));
+            console.log("PHASE5_PROOF_BACKEND=INJECTED_DETERMINISTIC_LOCAL_RUNNER");
             console.log("DURABLE_SPAWN_RECOVERY=PASS");
             console.log("SECRET_VALUES_EXPOSED=false");
           } finally {
