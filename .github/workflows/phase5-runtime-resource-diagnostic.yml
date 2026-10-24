@@ -21,7 +21,7 @@ jobs:
       EXPECTED_TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Inspect sanitized Fly machine states without starting or changing machines
+      - name: Inspect sanitized Fly machine states and live service policy without mutating machines
         shell: bash
         run: |
           set -euo pipefail
@@ -29,10 +29,16 @@ jobs:
           [[ "$EXPECTED_TREE" =~ ^[a-f0-9]{40}$ ]]
           flyctl machine list -a "$APP" --json > /tmp/sentient-machines.json
           jq -ce --arg sha "$EXPECTED_SHA" '
-            if type == "array" then .
-            elif type == "object" then (.machines // [])
-            else [] end
-            | {machineCount:length, machineStates:([.[]|{id: .id,state: .state,region: .region,imageExact: ((.config.image // .image // "")|tostring|contains($sha))}])}
+            (if type == "array" then . elif type == "object" then (.machines // []) else [] end)
+            | {machineCount:length, machineStates:
+                ([.[] | {
+                  id: .id, state: .state, region: .region,
+                  imageExact: ((.config.image // .image // "" | tostring) | contains($sha)),
+                  servicePolicies: [(.config.services // [])[] |
+                    {autostop:(if has("autostop") then .autostop else null end),
+                     autostart:(if has("autostart") then .autostart else null end),
+                     min_machines_running:(if has("min_machines_running") then .min_mmachines_running else null end)}]
+                }])}
           ' /tmp/sentient-machines.json
           echo "PHASE5_MACHINE_CONTROL_PLANE_READ_ONLY=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
