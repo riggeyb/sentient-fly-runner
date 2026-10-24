@@ -43,6 +43,15 @@ jobs:
               order by started_at desc limit 5
             `,[objective,sha]);
             console.log("GOVERNOR_ATTEMPTS="+JSON.stringify(r.rows));
+            const a=await pool.query(`
+              select attempt_id, objective_id, requested_sha, requested_tree,
+                     started_at, completed_at, result, attempt_number,
+                     extract(epoch from (now()-started_at))*1000 as age_ms
+              from sentient_deployment_governor.deployment_attempts
+              where completed_at is null and result='ACTIVE'
+              order by started_at asc limit 10
+            `);
+            console.log("GOVERNOR_ACTIVE_ATTEMPTS="+JSON.stringify(a.rows));
           } finally { await pool.end(); }
           NODE
           B64="$(base64 -w0 /tmp/deployment-ledger.mjs)"
