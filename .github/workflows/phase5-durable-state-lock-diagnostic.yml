@@ -1,0 +1,109 @@
+name: Sentient Phase 5 Durable State Lock Diagnostic
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe canonical durable-state row lock without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          ready="$(curl -fsS --max-time 10 https://sentient-validation-runner.fly.dev/readyz)"
+          grep -Fq "$EXPECTED_SHA" <<<"$ready"
+          grep -Fq "$EXPECTED_TREE" <<<"$ready"
+          grep -Fq '"ready":true' <<<"$ready"
+          echo "PHASE1_LOCK_DIAG_IDENTITY=PASS"
+
+          cat >/tmp/phase5-lock.mjs <<'NODE'
+          import { Pool } from "pg";
+          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString});
+          const pool=new Pool({connectionString,max:2,connectionTimeoutMillis:10000});
+          try {
+            const getStarted=Date.now();
+            const missing=await repo.get("task","phase5-lock-diagnostic-nonexistent");
+            console.log(`PHASE5_LOCK_DIAG_GET_MS=${Date.now()-getStarted}`);
+            console.log(`PHASE5_LOCK_DIAG_GET_MISSING=${missing===undefined}`);
+
+            const stats=await pool.query(`
+              SELECT
+                count() FILTER (WHERE pid <> pg_backend_pid())::int AS other_sessions,
+                count() FILTER (
+                  WHERE pid <> pg_backend_pid()
+                    AND xact_start IS NOT NULL
+                    AND xact_start < now() - interval '5 seconds'
+                )::int AS long_transactions,
+                count(*) FILTER (
+                  WHERE pid <> pg_backend_pid()
+                    AND wait_event_type = 'Lock'
+                )::int AS lock_waiters,
+                COALESCE(
+                  floor(EXTRACT(EPOCH FROM (now() - min(xact_start))) * 1000),
+                  0
+                )::bigint AS oldest_transaction_age_ms
+              FROM pg_stat_activity
+              WHERE datname=current_database()
+            `);
+            const row=stats.rows[0]??{};
+            console.log(`PHASE5_LOCK_DIAG_OTHER_SESSIONS=${Number(row.other_sessions??0)}`);
+            console.log(`PHASE5_LOCK_DIAG_LONG_TRANSACTIONS=${Number(row.long_transactions??0)}`);
+            console.log(`PHASE5_LOCK_DIAG_LOCK_WAITERS=${Number(row.lock_waiters??0)}`);
+            console.log(`PHASE5_LOCK_DIAG_OLDEST_TRANSACTION_AGE_MS=${Number(row.oldest_transaction_age_ms??0)}`);
+
+            const client=await pool.connect();
+            try {
+              await client.query("BEGIN");
+              let available=false;
+              let code="none";
+              const started=Date.now();
+              try {
+                await client.query(
+                  `SELECT generation FROM sentient_durable_state
+                  WHERE state_key = $1
+                  FOR UPDATE NOWAIT`,
+                  ["canonical"],
+                );
+                available=true;
+              } catch(error) {
+                code=String(error?.code??"unknown");
+              }
+              console.log(`PHASE5_LOCK_DIAG_NOWAIT_MS=${Date.now()-started}`);
+              console.log(`PHASE5_LOCK_DIAG_ROW_LOCK_AVAILABLE=${available}`);
+              console.log(`PHASE5_LOCK_DIAG_ROW_LOCK_ERROR_CODE=${code}`);
+              await client.query("ROLLBACK").catch(()=>undefined);
+            } finally {
+              client.release();
+            }
+            console.log("SECRET_VALUES_EXPOSED=false");
+            console.log("PHASE1_DURABLE_STATE_LOCK_DIAGNOSTIC=COMPLETE");
+          } finally {
+            await repo.close().catch(()=>undefined);
+            await pool.end().catch(()=>undefined);
+          }
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-lock.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-lock.mjs && node /app/phase5-lock.mjs; rc=\$?; rm -f /app/phase5-lock.mjs; exit \$rc'"
