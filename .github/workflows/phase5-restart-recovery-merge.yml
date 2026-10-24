@@ -47,11 +47,33 @@ jobs:
           s=p.read_text()
           a="await repository.completeSpawnChild(execution.id, result);"
           b="await repository.completeSpawnChild({ executionId: execution.id, endedAt, result });"
-          c="spawn.lineage"
-          d="spawn.records.lineage"
+          c="snapshot.lineage"
+          d="snapshot.records.lineage"
           assert s.count(a)==1, s.count(a)
           assert s.count(c)==1, s.count(c)
           p.write_text(s.replace(a,b,1).replace(c,d,1))
+
+          t=Path("test/production-collaboration-restart-recovery.test.ts")
+          q=t.read_text()
+          old1='return { records: { executions: [runningExecution()] }, lineage: [] };'
+          new1='return { records: { executions: [runningExecution()], lineage: [] } };'
+          assert q.count(old1)==1, q.count(old1)
+          q=q.replace(old1,new1,1)
+          old2='''async completeSpawnChild(_id: string, result: unknown) {
+      settled = result;
+      return { execution: runningExecution(), result };
+    },'''
+          new2='''async completeSpawnChild(input: { result: unknown }) {
+      settled = input.result;
+      return { execution: runningExecution(), result: input.result };
+    },'''
+          assert q.count(old2)==1, q.count(old2)
+          q=q.replace(old2,rew2,1)
+          old3='async spawnSnapshot() { return { records: { executions: [] }, lineage: [] }; },'
+          new3='async spawnSnapshot() { return { records: { executions: [], lineage: [] } }; },'
+          assert q.count(old3)==1, q.count(old3)
+          q=q.replace(old3,new3,1)
+          t.write_text(q)
           PY
           git diff --check
       - name: Install
