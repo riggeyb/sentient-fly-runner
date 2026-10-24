@@ -5,80 +5,73 @@ name: Final Cert Continuation Diagnostic
       objective_id:
         type: string
         required: true
+      sha:
+        type: string
+        required: true
+      tree:
+        type: string
+        required: true
 permissions:
   contents: read
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       ID: ${{ inputs.objective_id }}
       APP: sentient-validation-runner
-      SHA: aed9e3a974767eb5c4ac18d9a0321bb2404f20ef
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
     steps:
-    - uses: superfly/flyctl-actions/setup-flyctl@master
-    - name: Short direct VM read-only objective, exact machine image gate
-      shell: bash
-      run: 'set -euo pipefail
-
-        [[ "$ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
-
-        machine="$(flyctl machines list -a "$APP" --json)"
-
-        jq -e --arg s "$SHA" ''length==1 and all(.[]; ((.config.image // .image //
-        "") | tostring | contains($s)))'' <<<"$machine" >/dev/null
-
-        echo EXACT_MACHINE_IMAGE=PASS
-
-        cat >/tmp/cert-check.mjs <<''NODE''
-
-        import {PostgresSpawnObjectiveRepository as Repo} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
-
-        const id=process.env.CERT_ID,db=process.env.DATABASE_URL??process.env.DIRECT_URL;
-
-        if(!id||!db)throw Error("CERT_BINDING_MISSING");
-
-        const repo=new Repo({connectionString:db});
-
-        try {
-
-        const started=Date.now();
-
-        const task=await repo.get("task",id);
-
-        const afterTask=Date.now();
-
-        const root=await repo.getObjectiveContinuation(id);
-
-        const afterRoot=Date.now();
-
-        console.log("CERT_READONLY="+JSON.stringify({
-
-        id,taskStatus:task?.status??null,taskUpdated:task?.updatedAt??null,
-
-        taskSourceSha:task?.version?.commitSha??null,
-
-        rootStatus:root?.status??null,revision:root?.revision??null,
-
-        terminal:root?.terminal?.status??null,
-
-        satisfied:(root?.evidenceDependencies??[]).filter(d=>d.status==="SATISFIED").length,
-
-        taskQueryMs:afterTask-started,rootQueryMs:afterRoot-afterTask
-
-        }));
-
-        console.log("SECRET_VALUES_EXPOSED=false");
-
-        }finally{await repo.close();}
-
-        NODE
-
-        b="$(base64 -w0 /tmp/cert-check.mjs)"
-
-        timeout 75s flyctl ssh console -a "$APP" -C "sh -lc ''echo $b|base64 -d >/tmp/cert-check-${GITHUB_RUN_ID}.mjs;
-        CERT_ID=$ID node /tmp/cert-check-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/cert-check-${GITHUB_RUN_ID}.mjs;
-        exit \$rc''"
-
-        '
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Read exact durable objective and continuation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          ready=false
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          echo CONTINUATION_DIAG_EXACT_READINESS=PASS
+          cat >/tmp/cert-check.mjs <<'NODE'
+          import {PostgresSpawnObjectiveRepository as Repo} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const id=process.env.CERT_ID,db=process.env.DATABASE_URL??process.env.DIRECT_URL;
+          if(!id||!db)throw Error("CERT_BINDING_MISSING");
+          const repo=new Repo({connectionString:db});
+          try {
+            const started=Date.now();
+            const task=await repo.get("task",id);
+            const afterTask=Date.now();
+            const root=await repo.getObjectiveContinuation(id);
+            const afterRoot=Date.now();
+            const md=(task?.metadata && typeof task.metadata==="object" && !Array.isArray(task.metadata))?task.metadata:{};
+            console.log("CERT_READONLY="+JSON.stringify({
+              id,
+              taskStatus:task?.status??null,
+              taskUpdated:task?.updatedAt??null,
+              taskSourceSha:task?.version?.commitSha??null,
+              taskError:typeof md.error==="string"?md.error.replace(/[\r\n]/g," ").slice(0,500):null,
+              resultPresent:md.result!==null&&md.result!==undefined,
+              rootStatus:root?.status??null,
+              revision:root?.revision??null,
+              terminal:root?.terminal?.status??null,
+              terminalReason:root?.terminal?.reason??null,
+              satisfied:(root?.evidenceDependencies??[]).filter(d=>d.status==="SATISFIED").length,
+              taskQueryMs:afterTask-started,
+              rootQueryMs:afterRoot-afterTask
+            }));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          }finally{await repo.close();}
+          NODE
+          b="$(base64 -w0 /tmp/cert-check.mjs)"
+          timeout 75s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b|base64 -d >/tmp/cert-check-${GITHUB_RUN_ID}.mjs; CERT_ID=$ID node /tmp/cert-check-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/cert-check-${GITHUB_RUN_ID}.mjs; exit \$rc'"
