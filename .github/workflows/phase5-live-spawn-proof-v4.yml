@@ -2,16 +2,9 @@ name: Sentient Phase 5 Live Restart Reclaim Proof V4
 "on":
   workflow_dispatch:
     inputs:
-      sha:
-        required: true
-        type: string
-      tree:
-        required: true
-        type: string
-
-permissions:
-  contents: read
-
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions: {contents: read}
 jobs:
   phase5-live-restart:
     runs-on: ubuntu-latest
@@ -23,35 +16,99 @@ jobs:
       EXPECTED_TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Materialize corrected immutable shared proof
+      - name: Arm, restart externally, and prove durable recovery
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/4b26935d44268f93cdf240f4e83e9a4703af93df/.github/workflows/phase5-live-spawn-proof.yml -o /tmp/shared.yml
-          python3 - <<'PY'
-          from pathlib import Path
-          text=Path("/tmp/shared.yml").read_text()
-          marker="        run: |\n"
-          if text.count(marker)!=1: raise SystemExit("RUN_BLOCK_INVALID")
-          lines=text.split(marker,1)[1].splitlines()
-          out=[]
-          for line in lines:
-              if line=="":
-                  out.append("")
-              elif line.startswith("          "):
-                  out.append(line[10:])
-              else:
-                  break
-          Path("/tmp/proof.sh").write_text(("\n".join(out)+"\n").replace("PHASE1_","PHASE5_"))
-          PY
-          ! grep -Fq 'PHASE1_' /tmp/proof.sh
-          grep -Fq 'PHASE5_SESSION_ID=$SESSION' /tmp/proof.sh
-          grep -Fq 'PHASE5_ORIGINAL_WORK_ID=$ORIGINAL_WORK_ID' /tmp/proof.sh
-          grep -Fq 'PHASE5_INTERRUPT_ARMED=PASS' /tmp/proof.sh
-          grep -Fq 'await new Promise' /tmp/proof.sh
-          grep -Fq 'throw new Error("PHASE5_AUTOMATIC_RECOVERY_NOT_TERMINAL")' /tmp/proof.sh
-          bash -n /tmp/proof.sh
-          echo PHASE5_SHARED_PROOF_TRANSFORM=PASS
-      - name: Execute corrected immutable shared proof
-        shell: bash
-        run: bash /tmp/proof.sh
+          OBJ="phase5-v4-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SESSION="session-${OBJ}"
+          ready_exact() {
+            for _ in $(seq 1 "$1"); do
+              r="$(curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/readyz || true)"
+              if grep -Fq "$EXPECTED_SHA" <<<"$r" && grep -Fq "$EXPECTED_TREE" <<<"$r" && grep -Fq '"ready":true' <<<"$r"; then return 0; fi
+              sleep 2
+            done
+            return 1
+          }
+          ready_exact 120
+          echo PHASE5_PRE_INTERRUPT_IDENTITY=PASS
+
+          cat >/tmp/arm.mjs <<'NODE'
+          import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const objectiveId=process.env.PHASE5_OBJECTIVE_ID,sessionId=process.env.PHASE5_SESSION_ID;
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!objectiveId||!sessionId||!token||!db) throw new Error("PHASE5_RUNTIME_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
+          try{
+            const response=await fetch("http://127.0.0.1:8080/v1/objectives",{
+              method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},
+              body:JSON.stringify({request:"Independently analyze restart-safe durable collaboration, verify it, and converge under Sentient authority.",objectiveId,sessionId,mode:"collaborative",privacy:"public_fixture"}),
+              signal:AbortSignal.timeout(120000)
+            });
+            if(response.status!==202) throw new Error(`PHASE5_OBJECTIVE_HTTP_${response.status}`);
+            for(let i=0;i<1200;i++){
+              const work=(await repo.activeWork(sessionId,true)).find(r=>r.objectiveId===objectiveId&&r.workKey==="independent-analysis"&&r.status==="ACTIVE");
+              if(work){
+                const s=await repo.spawnSnapshot();
+                const child=s.records.executions.find(r=>r.requestId===work.participantId&&["reserved","running"].includes(r.identity.status)&&r.reservationReconciled===false);
+                if(child){
+                  console.log(JSON.stringify({event:"PHASE5_INTERRUPT_ARMED",workId:work.workId,requestId:work.participantId,childExecutionId:child.id}));
+                  console.log("PHASE5_INTERRUPT_ARMED=PASS");
+                  process.exit(0);
+                }
+              }
+              await new Promise(r=>setTimeout(r,50));
+            }
+            throw new Error("PHASE5_INTERRUPT_WINDOW_NOT_OBSERVED");
+          } finally {await repo.close().catch(()=>undefined);}
+          NODE
+
+          ARM_B64="$(base64 -w0 /tmp/arm.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $ARM_B64 | base64 -d >/tmp/arm.mjs && PHASE5_OBJECTIVE_ID=$OBJ PHASE5_SESSION_ID=$SESSION node /tmp/arm.mjs; rc=\$?; rm -f /tmp/arm.mjs; exit \$rc'" | tee /tmp/arm.out
+          grep -Fq 'PHASE5_INTERRUPT_ARMED=PASS' /tmp/arm.out
+          J="$(grep -F '"event":"PHASE5_INTERRUPT_ARMED"' /tmp/arm.out | tail -n1)"
+          WORK_ID="$(jq -er '.workId' <<<"$J")"
+          REQUEST_ID="$(jq -er '.requestId' <<<"$J")"
+          CHILD_ID="$(jq -er '.childExecutionId' <<<"$J")"
+          echo PHASE5_ARM_METADATA_CAPTURED=PASS
+
+          flyctl machines list -a "$APP" --json >/tmp/machines.json
+          MACHINE_ID="$(jq -r '([.[]|select((((.state//.State//"")|tostring|ascii_downcase)=="started"))]|(.[0].id//.[0].ID//empty))//(.[0].id//.[0].ID//empty)' /tmp/machines.json)"
+          test -n "$MACHINE_ID"
+          flyctl machine restart "$MACHINE_ID" -a "$APP"
+          echo PHASE5_PROCESS_INTERRUPTED=PASS
+          echo PHASE5_EXTERNAL_MACHINE_RESTART=PASS
+
+          ready_exact 180
+          echo PHASE5_POST_RESTART_IDENTITY=PASS
+
+          cat >/tmp/observe.mjs <<'NODE'
+          import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const objectiveId=process.env.PHASE5_OBJECTIVE_ID,sessionId=process.env.PHASE5_SESSION_ID;
+         ÛÛœÝÛÜšÒY\›ØÙ\ÜË™[‹”TÑMWÕÓÔ’×ÒQ™\]Y\ÝY\›ØÙ\ÜË™[‹”TÑMWÔ‘TUQTÕÒQÚ[Y\›ØÙ\ÜË™[‹”TÑMWÐÒSÒQÂˆÛÛœÝTÝš[™Ê›ØÙ\ÜË™[‹‘UPTÑWÕT“ÏÜ›ØÙ\ÜË™[‹‘T‘PÕÕT“ÏÈˆŠKš[J
+NÂˆÛÛœÝ™\Ï[™]ÈÜÝÜ™\ÔÜ]Û“Øš™XÝ]™T™\ÜÚ]ÜžJØÛÛ›™XÝ[Û”Ýš[™Î™ŸJNÂˆ6öç7BFW&Ö–æÄ6†–ÆCÖæWr6WB…²'7V66VVFVB"Â&f–ÆVB"Â&6æ6VÆÆVB"Â'F–ÖVEö÷WB"Â'&V¦V7FVB%Ò“°¢6öç7BFW&Ö–æÅv÷&³ÖæWr6WB…²$4ôÕÄUDTB"Â$$äDôäTB%Ò“°¢ÆWBÆ7CÖçVÆÃ°¢G'—°¢f÷"†ÆWB“Ó¶“ÃCƒ¶’²²—°¢6öç7Bv÷&³Ò†v—B&Wòæ7F—fUv÷&²‡6W76–öä–BÇG'VR’’æf–æB‡#Óç"æö&¦V7F—fT–CÓÓÖö&¦V7F—fT–Bbg"çv÷&´¶W“ÓÓÒ&–æFWVæFVçBÖæÇ—6—2"bg"çv÷&´–CÓÓ×v÷&´–B“óöçVÆÃ°¢6öç7B3Öv—B&Wòç7vå6æ6†÷B‚“°¢6öç7BæÇ—6W3×2ç&V6÷&G2æW†V7WF–öç2æf–ÇFW"‡#Óç"æ–FVçF—G’çF6´–CÓÓÖö&¦V7F—fT–Bbg"æ–FVçF—G’ç&öÆSÓÓÒ&–æFWVæFVçBÖæÇ—6—2"bg"æ–FVçF—G’ç&VçDW†V7WF–öä–CÓÓÖ&ö÷C¢G¶ö&¦V7F—fT–GÖ“°¢6öç7BöÆC×2ç&V6÷&G2æW†V7WF–öç2æf–æB‡#Óç"æ–CÓÓÖ6†–ÆD–B“óöçVÆÃ°¢6öç7BöÆE&W7VÇC×2ç&V6÷&G2ç&W7VÇG2æf–æB‡#Óç"æW†V7WF–öä–CÓÓÖ6†–ÆD–B“òç&W7VÇCóöçVÆÃ°¢½¹ÍÐÉ•ÑÉ¥•ÌõÝ½É¬ýÌ¹É•½É‘Ì¹•á•ÕÑ¥½¹Ì¹™¥±Ñ•È¡ÈôùÈ¹É•ÅÕ•ÍÑ%ôôõÝ½É¬¹Á…ÉÑ¥¥Á…¹Ñ%¤émtì(€€€€€€€€€€€€€±…ÍÐõíÝ½É¬éÝ½É¬ýíÝ½É­%éÝ½É¬¹Ý½É­%±ÍÑ…ÑÕÌéÝ½É¬¹ÍÑ…ÑÕÌ±Á…ÉÑ¥¥Á…¹Ñ%éÝ½É¬¹Á…ÉÑ¥¥Á…¹Ñ%±É•±…¥µ½Õ¹ÐéÝ½É¬¹É•±…¥µ½Õ¹Ñôé¹Õ±°±½±é½±ýíÍÑ…ÑÕÌé½±¹¥‘•¹Ñ¥Ñä¹ÍÑ…ÑÕÌ±É•Í•ÉÙ…Ñ¥½¹I•½¹¥±•é½±¹É•Í•ÉÙ…Ñ¥½¹I•½¹¥±•‘ôé¹Õ±°±½±‘I•ÍÕ±Ðé½±‘I•ÍÕ±ÐýíÑ•Éµ¥¹…±MÑ…ÑÕÌé½±‘I•ÍÕ±Ð¹Ñ•Éµ¥¹…±MÑ…ÑÕÌ±™…¥±ÕÉ•±…ÍÌé½±‘I•ÍÕ±Ð¹™…¥±ÕÉ”ü¹±…ÍÌ±É•ÑÉå…‰±”é½±‘I•ÍÕ±Ð¹™…¥±ÕÉ”ü¹É•ÑÉå…‰±•ôé¹Õ±°±É•ÑÉå½Õ¹ÐéÉ•ÑÉ¥•Ì¹±•¹Ñ ±…¹…±åÍ¥Í½Õ¹Ðé…¹…±åÍ•Ì¹±•¹Ñ ±É•ÑÉäéÉ•ÑÉ¥•ÍlÁtýíÍÑ…ÑÕÌéÉ•ÑÉ¥•ÍlÁt¹¥‘•¹Ñ¥Ñä¹ÍÑ…ÑÕÌ±É•Í•ÉÙ…Ñ¥½¹I•½¹¥±•éÉ•ÑÉ¥•ÍlÁt¹É•Í•ÉÙ…Ñ¥½¹I•½¹¥±•‘ôé¹Õ±±ôì(€€€€€€€€€€€€€¥˜¡Ý½É¬ü¹É•±…¥µ½Õ¹ÐøÅññ…¹…±åÍ•Ì¹±•¹Ñ øÉññÉ•ÑÉ¥•Ì¹±•¹Ñ øÄ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰A!MÕ}UA1%Q}=I}aMM}I1%4ˆ¤ì(€€€€€€€€€€€€€const retry=retries[0]??null;
+              const pass=work&&work.reclaimCount===1&&work.participantId!==requestId&&terminalWork.has(work.status)
+                &&old?.identity.status==="timed_out"&&old.reservationReconciled===true
+                &&oldResult?.terminalStatus==="timed_out"&&oldResult?.failure?.class==="restart_interrupted"&&oldResult?.failure?.retryable===true
+                &&analyses.length===2&&retries.length===1&&retry&&terminalChild.has(retry.identity.status)&&retry.reservationReconciled===true;
+              if(pass){
+                console.log("PHASE5_RECOVERY_STATE="+JSON.stringify(last));
+                for(const m of ["PHASE5_SAME_WORK_ID_RECLAIM=PASS","PHASE5_RECLAIM_COUNT=1","PHASE5_PARTICIPANT_ROTATED=PASS","PHASE5_OLD_CHILD_RECONCILED=PASS","PHASE5_OLD_RESERVATION_RECONCILED=PASS","PHASE5_ONE_BOUNDED_RETRY=PASS","PHASE5_NO_DUPLICATE_ANALYSIS_CHILD=PASS","PHASE5_RETRY_RESERVATION_RECONCILED=PASS","DURABLE_SPAWN_RECOVERY=PASS","SECRET_VALUES_EXPOSED=false"]) console.log(m);
+                console.log("PHASE5_RETRY_TERMINAL_STATUS="+retry.identity.status);
+                console.log("PHASE5_RECOVERED_WORK_TERMINAL_STATUS="+work.status);
+                process.exit(0);
+              }
+              await new Promise(r=>setTimeout(r,500));
+            }
+            console.log("PHASE5_RECOVERY_STATE_TIMEOUT="+JSON.stringify(last));
+            throw new Error("PHASE5_AUTOMATIC_RECOVERY_NOT_TERMINAL");
+          } finally {await repo.close().catch(()=>undefined);}
+          NODE
+
+          OBS_B64="$(base64 -w0 /tmp/observe.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $OBS_B64 | base64 -d >/tmp/observe.mjs && PHASE5_OBJECTIVE_ID=$OBJ PHASE5_SESSION_ID=$SESSION PHASE5_WORK_ID=$WORK_ID PHASE5_REQUEST_ID=$REQUEST_ID PHASE5_CHILD_ID=$CHILD_ID node /tmp/observe.mjs; rc=\$?; rm -f /tmp/observe.mjs; exit \$rc'"
+          echo "PHASE5_OBJECTIVE_ID=$OBJ"
+          echo "PHASE5_SESSION_ID=$SESSION"
+          echo PHASE5_LIVE_RESTART_RECOVERY_PROOF=PASS
+          echo SECRET_VALUES_EXPOSED=false
