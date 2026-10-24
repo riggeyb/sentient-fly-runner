@@ -1,0 +1,340 @@
+name: Sentient Phase 5 Restart Lease Repair
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Fence exact canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "545b2555a978af14c5525a88d37c458264044e31"
+          test "$(git rev-parse 'HEAD^{tree}')" = "d8dc7ca07c5d92370c0d57d2d384556ea00bb51a"
+          echo "CANONICAL_FENCE=PASS"
+
+      - name: Apply bounded inherited lease restart repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          collaboration = Path("src/application/production-collaboration.ts")
+          text = collaboration.read_text()
+          identity_anchor = '''export interface ProductionCollaborationIdentityV1 {
+            sourceSha: string;
+            applicationVersion: string;
+          }
+          '''
+          error_class = identity_anchor + '''
+          export class ProductionCollaborationLeaseLiveErrorV1 extends Error {
+            public constructor(
+              public readonly role: "independent-analysis" | "independent-verification",
+              public readonly workId: string,
+              public readonly leaseExpiresAt: string,
+            ) {
+              super(`phase5_active_work_already_live:${role}:${workId}`);
+              this.name = "ProductionCollaborationLeaseLiveErrorV1";
+            }
+          }
+          '''
+          if identity_anchor not in text:
+              raise SystemExit("IDENTITY_ANCHOR_MISSING")
+          text = text.replace(identity_anchor, error_class, 1)
+          old_collision = '''  if (current && current.status !== "STALE") {
+            throw new Error(`phase5_active_work_already_live:${role}:${current.workId}`);
+          }
+          '''
+          new_collision = '''  if (current && current.status !== "STALE") {
+            if (current.status === "ACTIVE" && current.leaseExpiresAt !== null) {
+              throw new ProductionCollaborationLeaseLiveErrorV1(
+                role,
+                current.workId,
+                current.leaseExpiresAt,
+              );
+            }
+            throw new Error(`phase5_active_work_already_live:${role}:${current.workId}`);
+          }
+          '''
+          if old_collision not in text:
+              raise SystemExit("COLLISION_ANCHOR_MISSING")
+          collaboration.write_text(text.replace(old_collision, new_collision, 1))
+
+          self_exec = Path("src/fly/self-execution.ts")
+          text = self_exec.read_text()
+          contract_import = '''import type {
+            ProductionPhase4ExecutorFactoryV1,
+            SentientApplication,
+            SentientApplicationIdentity,
+            SentientApplicationResult,
+            SentientObjectiveInput,
+          } from "../application/contracts.js";
+          '''
+          if contract_import not in text:
+              raise SystemExit("CONTRACT_IMPORT_ANCHOR_MISSING")
+          text = text.replace(
+              contract_import,
+              contract_import + 'import { ProductionCollaborationLeaseLiveErrorV1 } from "../application/production-collaboration.js";\n',
+              1,
+          )
+
+          class_anchor = "export class FlyObjectiveRunnerV1 {"
+          helper = '''export interface Phase5RestartLeaseTimingV1 {
+            now(): number;
+            sleep(ms: number): Promise<void>;
+          }
+
+          const SYSTEM_PHASE5_RESTART_LEASE_TIMING: Phase5RestartLeaseTimingV1 = {
+            now: () => Date.now(),
+            sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+          };
+
+          const PHASE5_RESTART_LEASE_SAFETY_MS = 250;
+          const PHASE5_RESTART_LEASE_MAX_WAIT_MS = 180_250;
+
+          export async function runObjectiveWithInheritedPhase5LeaseRetryV1(
+            application: Pick<SentientApplication, "runObjective">,
+            input: SentientObjectiveInput,
+            timing: Phase5RestartLeaseTimingV1 = SYSTEM_PHASE5_RESTART_LEASE_TIMING,
+          ): Promise<SentientApplicationResult> {
+            try {
+              return await application.runObjective(input);
+            } catch (error) {
+              if (!(error instanceof ProductionCollaborationLeaseLiveErrorV1)) throw error;
+              const expiresAtMs = Date.parse(error.leaseExpiresAt);
+              if (!Number.isFinite(expiresAtMs)) throw error;
+              const waitMs = Math.max(0, expiresAtMs - timing.now() + PHASE5_RESTART_LEASE_SAFETY_MS);
+              if (waitMs > PHASE5_RESTART_LEASE_MAX_WAIT_MS) throw error;
+              await timing.sleep(waitMs);
+              return application.runObjective(input);
+            }
+          }
+
+          '''
+          if class_anchor not in text:
+              raise SystemExit("RUNNER_CLASS_ANCHOR_MISSING")
+          text = text.replace(class_anchor, helper + class_anchor, 1)
+
+          old_resume = '''      count += 1;
+              this.#schedule(task.id);
+          '''
+          new_resume = '''      count += 1;
+              this.#schedule(task.id, true);
+          '''
+          if old_resume not in text:
+              raise SystemExit("RESUME_ANCHOR_MISSING")
+          text = text.replace(old_resume, new_resume, 1)
+
+          old_schedule = '''  #schedule(objectiveId: string): void {
+            if (this.#active.has(objectiveId)) return;
+            const work = this.#run(objectiveId)
+          '''
+          new_schedule = '''  #schedule(objectiveId: string, inheritedRestart = false): void {
+            if (this.#active.has(objectiveId)) return;
+            const work = this.#run(objectiveId, inheritedRestart)
+          '''
+          if old_schedule not in text:
+              raise SystemExit("SCHEDULE_ANCHOR_MISSING")
+          text = text.replace(old_schedule, new_schedule, 1)
+
+          old_run = "  async #run(objectiveId: string): Promise<void> {"
+          new_run = "  async #run(objectiveId: string, inheritedRestart: boolean): Promise<void> {"
+          if old_run not in text:
+              raise SystemExit("RUN_SIGNATURE_ANCHOR_MISSING")
+          text = text.replace(old_run, new_run, 1)
+
+          old_call = "    const result = await this.#application.runObjective(applicationInput);"
+          new_call = '''    const result = inheritedRestart
+              ? await runObjectiveWithInheritedPhase5LeaseRetryV1(this.#application, applicationInput)
+              : await this.#application.runObjective(applicationInput);'''
+          if old_call not in text:
+              raise SystemExit("RUN_OBJECTIVE_ANCHOR_MISSING")
+          self_exec.write_text(text.replace(old_call, new_call, 1))
+
+          test = Path("test/phase5-fly-restart-lease-retry.test.ts")
+          test.write_text('''import assert from "node:assert/strict";
+          import test from "node:test";
+          import { readFile } from "node:fs/promises";
+
+          import type {
+            SentientApplication,
+            SentientObjectiveInput,
+          } from "../src/application/contracts.js";
+          import { ProductionCollaborationLeaseLiveErrorV1 } from "../src/application/production-collaboration.js";
+          import { runObjectiveWithInheritedPhase5LeaseRetryV1 } from "../src/fly/self-execution.js";
+
+          const input: SentientObjectiveInput = {
+            request: "recover inherited Phase 5 lease",
+            objectiveId: "phase5-restart-objective",
+            sessionId: "phase5-restart-session",
+            mode: "collaborative",
+            privacy: "public_fixture",
+          };
+
+          test("inherited ACTIVE Phase 5 lease waits through expiry then retries exactly once", async () => {
+            let calls = 0;
+            const sleeps: number[] = [];
+            const application = {
+              async runObjective() {
+                calls += 1;
+                if (calls === 1) {
+                  throw new ProductionCollaborationLeaseLiveErrorV1(
+                    "independent-analysis",
+                    "work-1",
+                    new Date(10_000).toISOString(),
+                  );
+                }
+                return { httpStatus: 200, body: { result: { status: "COMPLETED" } } };
+              },
+            } as Pick<SentientApplication, "runObjective">;
+
+            const result = await runObjectiveWithInheritedPhase5LeaseRetryV1(
+              application,
+              input,
+              {
+                now: () => 0,
+                async sleep(ms) { sleeps.push(ms); },
+              },
+            );
+
+            assert.equal(calls, 2);
+            assert.deepEqual(sleeps, [10_250]);
+            assert.equal(result.httpStatus, 200);
+          });
+
+          test("inherited Phase 5 lease retry remains bounded to one retry", async () => {
+            let calls = 0;
+            const application = {
+              async runObjective() {
+                calls += 1;
+                throw new ProductionCollaborationLeaseLiveErrorV1(
+                  "independent-analysis",
+                  "work-2",
+                  new Date(10_000).toISOString(),
+                );
+              },
+            } as Pick<SentientApplication, "runObjective">;
+
+            await assert.rejects(
+              runObjectiveWithInheritedPhase5LeaseRetryV1(
+                application,
+                input,
+                { now: () => 0, async sleep() {} },
+              ),
+              /phase5_active_work_already_live/,
+            );
+            assert.equal(calls, 2);
+          });
+
+          test("non-Phase5 errors and implausibly distant leases fail closed without waiting", async () => {
+            const sleeps: number[] = [];
+            await assert.rejects(
+              runObjectiveWithInheritedPhase5LeaseRetryV1(
+                { async runObjective() { throw new Error("other_failure"); } },
+                input,
+                { now: () => 0, async sleep(ms) { sleeps.push(ms); } },
+              ),
+              /other_failure/,
+            );
+            await assert.rejects(
+              runObjectiveWithInheritedPhase5LeaseRetryV1(
+                {
+                  async runObjective() {
+                    throw new ProductionCollaborationLeaseLiveErrorV1(
+                      "independent-analysis",
+                      "work-far",
+                      new Date(300_000).toISOString(),
+                    );
+                  },
+                },
+                input,
+                { now: () => 0, async sleep(ms) { sleeps.push(ms); } },
+              ),
+              /phase5_active_work_already_live/,
+            );
+            assert.deepEqual(sleeps, []);
+          });
+
+          test("restart lease retry is wired only from resumeUnfinished", async () => {
+            const source = await readFile("src/fly/self-execution.ts", "utf8");
+            assert.ok(source.includes("this.#schedule(task.id, true)"));
+            assert.ok(source.includes("#schedule(objectiveId: string, inheritedRestart = false)"));
+            assert.ok(source.includes("inheritedRestart\\n      ? await runObjectiveWithInheritedPhase5LeaseRetryV1"));
+          });
+          ''')
+          PY
+
+          git add -N test/phase5-fly-restart-lease-retry.test.ts
+          mapfile -t changed < <(git diff --name-only | sort)
+          printf 'CHANGED_FILE=%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 3
+          test "${changed[0]}" = "src/application/production-collaboration.ts"
+          test "${changed[1]}" = "src/fly/self-execution.ts"
+          test "${changed[2]}" = "test/phase5-fly-restart-lease-retry.test.ts"
+          git diff --check
+
+      - name: Build and Phase 5 restart regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/spawn-immutable-identity.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/active-work-restart-edge.test.js \
+            dist/test/active-work-expiry-fencing.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/job2-production-convergence.test.js \
+            dist/test/job2-self-execution.test.js
+          echo "PHASE5_RESTART_LEASE_REGRESSION=PASS"
+          echo "PHASE5_IDENTITY_REGRESSION=PASS"
+
+      - name: Critical cross-phase regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/permanent-continuation-http.test.js \
+            dist/test/permanent-continuation-multiprocess.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/pasee1-acceptance-policy.test.js \
+            dist/test/fly-phase1-acceptance-policy.test.js \
+            dist/test/production-phase3-cognition.test.js \
+            dist/test/phase0-control-recovery.test.js \
+            dist/test/pase0-engineering-readiness.test.js
+          echo "CRITICAL_CROSS_PHASE_REGRESSIONS=PASS"
+
+      - name: Commit tested restart lease repair to shared canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "545b2555a978af14c5525a88d37c458264044e31"
+          git fetch origin sentient-production-composition-20261017
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "545b2555a978af14c5525a88d37c458264044e31"
+          git config user.name "sentient-phase5-convergence"
+          git config user.email "sentient-phase5-convergence@users.noreply.github.com"
+          git add src/application/production-collaboration.ts src/fly/self-execution.ts test/phase5-fly-restart-lease-retry.test.ts
+          git commit -m "fix: resume Phase5 recovery after inherited lease"
+          git push origin HEAD:Sentient-production-composition-20261017
+          echo "NEW_SHA=$(git rev-parse HEAD)"
+          echo "NEW_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "PUBLIC_RUNNER_USED=true"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "NETLIFY_USAGE=0"
+          echo "SECRET_VALUES_EXPOSED=false"
