@@ -23,7 +23,7 @@ try{
   for(const work of works){
    const child=spawn.records.executions.find(e=>e.requestId===work.participantId&&["reserved","running"].includes(e.identity.status)&&e.reservationReconciled===false);
    if(child&&satisfied>=2){
-    console.log("INTEGRATED_ARM_JSON="+JSON.stringify({workN9:work.workId,participantId:work.participantId,childId:child.id,rootRevision:root?.revision??null,satisfied}));
+    console.log("INTEGRATED_ARM_JSON="+JSON.stringify({workId:work.workId,participantId:work.participantId,childId:child.id,rootRevision:root?.revision??null,satisfied}));
     console.log("INTEGRATED_RESTART_ARMED=PASS");
     armed=true;
     break;
