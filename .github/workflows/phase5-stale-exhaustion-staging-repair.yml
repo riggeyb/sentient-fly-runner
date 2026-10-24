@@ -1,0 +1,211 @@
+name: Phase5 Stale Exhaustion Staging Repair
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        type: string
+      expected_head:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence exact staging head
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Apply bounded stale exhaustion repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          finish = Path("src/collaboration/active-work-finish.ts")
+          text = finish.read_text()
+          old = '  if (!LIVE_ACTIVE_WORK.has(record.status)) {'
+          new = '  if (!LIVE_ACTIVE_WORK.has(record.status) && !(kind === "ABANDON" && record.status === "STALE")) {'
+          if text.count(old) != 1:
+              raise SystemExit(f"finish anchor count={text.count(old)}")
+          finish.write_text(text.replace(old, new, 1))
+
+          collaboration = Path("src/application/production-collaboration.ts")
+          text = collaboration.read_text()
+          old = '''    if (current.reclaimCount >= 1) {
+              const reclaimed = await repository.reclaimActiveWork({
+                operationId: `${current.workId}:restart-exhausted:${current.revision}`,
+                workId: current.workId,
+                participantId: current.participantId,
+                expectedRevision: current.revision,
+                currentAction: "reconcile interrupted Spawn child after bounded retry exhaustion",
+                nextStep: "fail closed without creating another child",
+              });
+              await repository.abandonActiveWork({
+                operationId: `${current.workId}:restart-exhausted:abandon:${reclaimed.record.revision}`,
+                workId: current.workId,
+                participantId: reclaimed.record.participantId,
+                expectedRevision: reclaimed.record.revision,
+                currentAction: "bounded Phase 5 restart retry exhausted",
+                nextStep: "surface terminal collaboration failure to Sentient",
+              });
+              throw new Error(`phase5_restart_retry_exhausted:${role}:${current.workId}`);
+            }'''
+          new = '''    if (current.reclaimCount >= 1) {
+              await repository.abandonActiveWork({
+                operationId: `${current.workId}:restart-exhausted:abandon:${current.revision}`,
+                workId: current.workId,
+                participantId: current.participantId,
+                expectedRevision: current.revision,
+                currentAction: "bounded Phase 5 restart retry exhausted",
+                nextStep: "surface terminal collaboration failure to Sentient",
+              });
+              throw new Error(`phase5_restart_retry_exhausted:${role}:${current.workId}`);
+            }'''
+          if text.count(old) != 1:
+              raise SystemExit(f"collaboration anchor count={text.count(old)}")
+          collaboration.write_text(text.replace(old, new, 1))
+
+          restart_test = Path("test/production-collaboration-restart-recovery.test.ts")
+          text = restart_test.read_text()
+          old = '''  let settled: any = null;
+            let abandoned = false;'''
+          new = '''  let settled: any = null;
+            let abandoned = false;
+            let reclaimCalls = 0;'''
+          if text.count(old) != 1:
+              raise SystemExit(f"restart test state anchor count={text.count(old)}")
+          text = text.replace(old, new, 1)
+          old = '''    async reclaimActiveWork(input: { participantId: string }) {
+              return {'''
+          new = '''    async reclaimActiveWork(input: { participantId: string }) {
+              reclaimCalls += 1;
+              return {'''
+          if text.count(old) != 1:
+              raise SystemExit(f"restart test reclaim anchor count={text.count(old)}")
+          text = text.replace(old, new, 1)
+          old = '''  return { repo, settled: () => settled, abandoned: () => abandoned };'''
+          new = '''  return { repo, settled: () => settled, abandoned: () => abandoned, reclaimCalls: () => reclaimCalls };'''
+          if text.count(old) != 1:
+              raise SystemExit(f"restart test return anchor count={text.count(old)}")
+          text = text.replace(old, new, 1)
+          old = '''  assert.equal(f.abandoned(), false);
+          });'''
+          new = '''  assert.equal(f.abandoned(), false);
+            assert.equal(f.reclaimCalls(), 1);
+          });'''
+          if text.count(old) != 1:
+              raise SystemExit(f"restart first assertion anchor count={text.count(old)}")
+          text = text.replace(old, new, 1)
+          old = '''  assert.equal(f.settled()?.terminalStatus, "timed_out");
+            assert.equal(f.abandoned(), true);
+          });'''
+          new = '''  assert.equal(f.settled()?.terminalStatus, "timed_out");
+            assert.equal(f.abandoned(), true);
+            assert.equal(f.reclaimCalls(), 0);
+          });'''
+          if text.count(old) != 1:
+              raise SystemExit(f"restart second assertion anchor count={text.count(old)}")
+          restart_test.write_text(text)
+
+          core = Path("test/active-work-core.test.ts")
+          text = core.read_text()
+          addition = r'''
+
+          test("STALE work can fail closed without a second reclaim lease", async () => {
+            const h = await harness();
+            try {
+              await h.repo.claimActiveWork(claimInput());
+
+              h.setNow("2026-10-07T17:00:16.000Z");
+              let view = await h.repo.activeWork(SESSION);
+              assert.equal(view[0]?.status, "STALE");
+              assert.equal(view[0]?.revision, 1);
+
+              const reclaimed = await h.repo.reclaimActiveWork({
+                operationId: "reclaim-once",
+                workId: "work-1",
+                participantId: "sentient-b",
+                expectedRevision: 1,
+                currentAction: "retry once",
+                nextStep: "finish or fail closed",
+                leaseSeconds: 15,
+              });
+              assert.equal(reclaimed.record.reclaimCount, 1);
+              assert.equal(reclaimed.record.revision, 2);
+
+              h.setNow("2026-10-07T17:00:32.000Z");
+              view = await h.repo.activeWork(SESSION);
+              assert.equal(view[0]?.status, "STALE");
+              assert.equal(view[0]?.revision, 3);
+              assert.equal(view[0]?.reclaimCount, 1);
+
+              const abandoned = await h.repo.abandonActiveWork({
+                operationId: "abandon-after-retry-exhaustion",
+                workId: "work-1",
+                participantId: "sentient-b",
+                expectedRevision: 3,
+                currentAction: "bounded retry exhausted",
+                nextStep: "surface terminal failure",
+              });
+              assert.equal(abandoned.record.status, "ABANDONED");
+              assert.equal(abandoned.record.reclaimCount, 1);
+              assert.equal(abandoned.record.revision, 4);
+              assert.equal("leaseExpiresAt" in abandoned.record, false);
+            } finally {
+              await rm(h.directory, { recursive: true, force: true });
+            }
+          });
+          '''
+          if "STALE work can fail closed without a second reclaim lease" in text:
+              raise SystemExit("active-work stale-abandon test already exists")
+          core.write_text(text + addition)
+          PY
+          git diff --check
+      - name: Build and targeted Phase5 regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/active-work-core.test.js \
+            dist/test/active-work-expiry-fencing.test.js \
+            dist/test/active-work-restart-edge.test.js \
+            dist/test/phase5-fly-restart-lease-retry.test.js
+          echo PHASE5_STALE_EXHAUSTION_TARGETED_TESTS=PASS
+      - name: Commit tested staging repair
+        env:
+          TARGET_BRANCH: ${{ inputs.branch }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-phase5-convergence"
+          git config user.email "sentient-phase5-convergence@users.noreply.github.com"
+          git add src/collaboration/active-work-finish.ts src/application/production-collaboration.ts test/production-collaboration-restart-recovery.test.ts test/active-work-core.test.ts
+          git diff --cached --check
+          git diff --cached --quiet && { echo NO_CHANGES; exit 1; }
+          git commit -m "fix: bound Phase5 stale retry exhaustion"
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          echo STAGING_SHA="$(git rev-parse HEAD)"
+          echo STAGING_TREE="$(git rev-parse 'HEAD^{tree}')"
+          echo SECRET_VALUES_EXPOSED=false
