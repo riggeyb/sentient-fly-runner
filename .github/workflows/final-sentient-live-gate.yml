@@ -31,4 +31,4 @@ jobs:
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
           b64="$(base64 -w0 /tmp/cert.mjs)"
-          flyctl ssh console -a sentient-validation-runner -C "sh -lc 'echo $b64 | base64 -d >/app/cert.mjs && node /app/cert.mjs; rc=\$?; rm -f /app/cert.mjs; exit \$rc'"
+          flyctl ssh console -a sentient-validation-runner -C "sh -lc 'echo $b64 | base64 -d >/tmp/cert.mjs && node /tmp/cert.mjs; rc=\$?; rm -f /tmp/cert.mjs; exit \$rc'"
