@@ -128,4 +128,4 @@ jobs:
           NODE
           B64="$(base64 -w0 /tmp/enqueue-diag.mjs)"
           flyctl ssh console -a "$APP" -C \
-            "sh -lc 'cd /app && echo $B64 | base64 -d >/tmp/enqueue-diag.mjs && PHASE5_DIAG_OBJECTIVE_ID=$OBJ node /tmp/enqueue-diag.mjs; rc=\$?; rm -f /tmp/enqueue-diag.mjs; exit \$rc'"
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/enqueue-diag.mjs && PHASE5_DIAG_OBJECTIVE_ID=$OBJ node /app/enqueue-diag.mjs; rc=\$?; rm -f /app/enqueue-diag.mjs; exit \$rc'"
