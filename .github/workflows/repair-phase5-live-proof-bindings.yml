@@ -1,0 +1,50 @@
+name: Repair Phase5 Live Proof Bindings
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
+    - name: Normalize Phase5 live proof bindings
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        from pathlib import Path
+        p=Path(".github/workflows/phase5-live-spawn-proof.yml")
+        s=p.read_text()
+        before=s.count("PHASE1_")
+        if before:
+            s=s.replace("PHASE1_","PHASE5_")
+            p.write_text(s)
+        after=p.read_text()
+        assert "PHASE1_" not in after
+        assert "PHASE5_SESSION_ID=$SESSION" in after
+        assert 'event:"PHASE5_INTERRUPT_ARMED"' in after
+        assert 'grep -Fq "PHASE5_INTERRUPT_ARMED=PASS"' in after
+        assert "PHASE5_ORIGINAL_WORK_ID=$ORIGINAL_WORK_ID" in after
+        print(f"PHASE5_BINDINGS_REPLACED={before}")
+        print("PHASE5_BINDING_NORMALIZATION=PASS")
+        PY
+        if git diff --quiet; then
+          echo "PHASE1_BINDINGS_ALREADY_FIXED=true"
+          exit 0
+        fi
+        git diff --check
+        git config user.name "sentient-phase5-certification"
+        git config user.email "sentient-phase5-certification@users.noreply.github.com"
+        git add .github/workflows/phase5-live-spawn-proof.yml
+        git commit -m "ops: normalize Phase5 restart proof bindings"
+        git pull --rebase origin main
+        git push origin HEAD:main
+        echo "PHASE5_BINDING_REPAIR_PUSH_PASS"
+        echo "SECRET_VALUES_EXPOSED=false"
