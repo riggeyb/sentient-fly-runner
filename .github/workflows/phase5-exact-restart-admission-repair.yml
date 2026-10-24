@@ -1,10 +1,11 @@
 name: Phase5 Exact Restart Admission Repair
-on:
+"on":
   workflow_dispatch:
     inputs:
       sha: {required: true, type: string}
       tree: {required: true, type: string}
-permissions: {contents: read}
+permissions:
+  contents: read
 concurrency:
   group: phase5-canonical-source-repair
   cancel-in-progress: false
@@ -15,7 +16,10 @@ jobs:
     services:
       postgres:
         image: postgres:16
-        env: {POSTGRES_USER: sentient, POSTGRES_PASSWORD: sentient, POSTGRES_DB: sentient}
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U sentient -d sentient"
@@ -27,7 +31,6 @@ jobs:
       EXPECTED_TREE: ${{ inputs.tree }}
       TARGET_BRANCH: sentient-production-composition-20261017
       SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
-      FIXTURE_REF: a939f9df6f09ca2815fcc65dc310ae5d0e705965
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,38 +48,178 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
           test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_SHA"
-      - name: Serialize inherited backlog
+      - name: Atomically admit production objective state
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path("src/fly/self-execution.ts"); s=p.read_text()
-          old="        this.#schedule(objectiveId, true);\n        await new Promise<void>((resolve) =>\n          setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)\n        );"
-          new="        this.#schedule(objectiveId, true);\n        const work = this.#active.get(objectiveId);\n        if (work !== undefined) await work;\n        await new Promise<void>((resolve) =>\n          setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)\n        );"
-          assert s.count(old)==1, s.count(old); p.write_text(s.replace(old,new,1))
-          t=Path("test/phase5-fly-restart-lease-retry.test.ts"); q=t.read_text()
-          q=q.replace("restart recovery paces admission without waiting for a previous objective lifetime","restart recovery serializes inherited backlog while fresh admission stays independent")
-          old2='assert.ok(!source.includes("if (work !== undefined) await work"));'
-          new2='assert.ok(source.includes("const work = this.#active.get(objectiveId)"));\\n  assert.ok(source.includes("if (work !== undefined) await work"));'
-          assert q.count(old2)==1, q.count(old2); t.write_text(q.replace(old2,new2,1))
+          p=Path("src/application/production-state.ts")
+          s=p.read_text()
+          marker='import type { PostgresSpawnObjectiveRepository } from "../objective-continuation/postgres-spawn-repository.js";\n'
+          additions='import { sanitizeRecord } from "../state/sanitize.js";\nimport { assertPersistableRecord } from "../state/state-integrity.js";\n'
+          assert marker in s
+          if additions not in s:
+            s=s.replace(marker, marker+additions, 1)
+          start=s.index("export async function ensureProductionObjectiveStateV1(")
+          end=s.index("export async function completeProductionObjectiveStateV1(")
+          replacement='''export async function ensureProductionObjectiveStateV1(
+  repository: PostgresSpawnObjectiveRepository,
+  input: SentientObjectiveInput,
+  identity: SentientApplicationIdentity,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const version = {
+    schemaVersion: STATE_SCHEMA_VERSION,
+    applicationVersion: SENTIENT_APPLICATION_CONTRACT,
+    repository: identity.source.repository,
+    commitSha: identity.source.sha,
+  } as const;
+
+  await repository.withSnapshotTransaction((snapshot) => {
+    const taskIndex = snapshot.records.tasks.findIndex((record) => record.id === input.objectiveId);
+    const currentTask = taskIndex < 0 ? undefined : snapshot.records.tasks[taskIndex];
+    const task = sanitizeRecord<SentientTask>(currentTask === undefined
+      ? {
+          kind: "task",
+          id: input.objectiveId,
+          createdAt: now,
+          updatedAt: now,
+          provenance: { actor: "user" },
+          version,
+          title: input.request,
+          status: "running",
+        }
+      : {
+          ...currentTask,
+          title: input.request,
+          status: "running",
+          updatedAt: now,
+          version,
+        });
+    assertPersistableRecord(snapshot, task);
+    if (taskIndex < 0) snapshot.records.tasks.push(task);
+    else snapshot.records.tasks[taskIndex] = task;
+
+    const sessionIndex = snapshot.records.sessions.findIndex((record) => record.id === input.sessionId);
+    const currentSession = sessionIndex < 0 ? undefined : snapshot.records.sessions[sessionIndex];
+    const session = sanitizeRecord<Session>(currentSession === undefined
+      ? {
+          kind: "session",
+          id: input.sessionId,
+          createdAt: now,
+          updatedAt: now,
+          provenance: { actor: "sentient" },
+          version,
+          taskId: input.objectiveId,
+          label: "sentient-objective-session",
+        }
+      : {
+          ...currentSession,
+          taskId: input.objectiveId,
+          updatedAt: now,
+          version,
+        });
+    assertPersistableRecord(snapshot, session);
+    if (sessionIndex < 0) snapshot.records.sessions.push(session);
+    else snapshot.records.sessions[sessionIndex] = session;
+
+    return { result: undefined, changed: true };
+  });
+}
+
+'''
+          s=s[:start]+replacement+s[end:]
+          p.write_text(s)
+
+          t=Path("test/phase5-fly-restart-lease-retry.test.ts")
+          q=t.read_text()
+          old='''test("restart recovery paces admission without waiting for a previous objective lifetime", async () => {
+  const source = await readFile("src/fly/self-execution.ts", "utf8");
+  assert.ok(source.includes("this.#scheduleInheritedRestart(task.id)"));
+  assert.ok(source.includes("PHASE5_RESTART_ADMISSION_PACING_MS = 1_000"));
+  assert.ok(source.includes("this.#schedule(objectiveId, true)"));
+  assert.ok(source.includes("setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)"));
+  assert.ok(!source.includes("if (work !== undefined) await work"));
+  assert.ok(source.includes("#schedule(objectiveId: string, inheritedRestart = false)"));
+  assert.ok(source.includes("inheritedRestart\\n      ? await runObjectiveWithInheritedPhase5LeaseRetryV1"));
+});
+'''
+          new='''test("restart recovery serializes inherited objectives while fresh admission remains independently schedulable", async () => {
+  const source = await readFile("src/fly/self-execution.ts", "utf8");
+  assert.ok(source.includes("this.#scheduleInheritedRestart(task.id)"));
+  assert.ok(source.includes("PHASE5_RESTART_ADMISSION_PACING_MS = 1_000"));
+  assert.ok(source.includes("await this.#schedule(objectiveId, true)"));
+  assert.ok(source.includes("setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)"));
+  assert.ok(source.includes("setImmediate(() => this.#schedule(input.objectiveId))"));
+  assert.ok(source.includes("#schedule(objectiveId: string, inheritedRestart = false)"));
+  assert.ok(source.includes("inheritedRestart\\n      ? await runObjectiveWithInheritedPhase5LeaseRetryV1"));
+});
+'''
+          assert old in q, "stale restart regression contract not found"
+          t.write_text(q.replace(old,new,1))
+
+          r=Path("test/final-cert-objective-admission-atomicity.test.ts")
+          r.write_text('''import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+test("production objective admission persists task and session in one snapshot transaction", async () => {
+  const source = await readFile("src/application/production-state.ts", "utf8");
+  const start = source.indexOf("export async function ensureProductionObjectiveStateV1(");
+  const end = source.indexOf("export async function completeProductionObjectiveStateV1(");
+  assert.ok(start >= 0 && end > start);
+  const admission = source.slice(start, end);
+  assert.ok(admission.includes("repository.withSnapshotTransaction"));
+  assert.ok(admission.includes("snapshot.records.tasks"));
+  assert.ok(admission.includes("snapshot.records.sessions"));
+  assert.ok(admission.includes("sanitizeRecord<SentientTask>"));
+  assert.ok(admission.includes("sanitizeRecord<Session>"));
+  assert.ok(admission.includes("assertPersistableRecord(snapshot, task)"));
+  assert.ok(admission.includes("assertPersistableRecord(snapshot, session)");
+  assert.ok(!admission.includes('repository.get("pask"'));
+  assert.ok(!admission.includes('repository.get("session"'));
+  assert.ok(!admission.includes("repository.insert("));
+  assert.ok(!admission.includes("repository.replace("));
+});
+''')
           PY
           git diff --check
-      - name: Build and behavioral liveness
+      - name: Build and focused regressions
         shell: bash
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
           npm run build
-          curl -fsSL "https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/${FIXTURE_REF}/scripts/phase5-admission-liveness-test.mjs" -o ./phase5-admission-liveness-test.mjs
-          node ./phase5-admission-liveness-test.mjs
-          rm -f ./phase5-admission-liveness-test.mjs
-      - name: Targeted and cumulative regressions
+          node --test \
+            dist/test/final-cert-objective-admission-atomicity.test.js \
+            dist/test/final-cert-restart-backlog-serialization.test.js \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/active-work-expiry-fencing.test.js \
+            dist/test/job2-self-execution.test.js \
+            dist/test/permanent-continuation-http.test.js \
+            dist/test/permanent-continuation-multiprocess.test.js
+      - name: Cumulative Phase 1-7 regressions
         shell: bash
         run: |
           set -euo pipefail
-          node --test dist/test/phase5-fly-restart-lease-retry.test.js dist/test/production-collaboration-restart-recovery.test.js dist/test/active-work-restart-edge.test.js dist/test/active-work-expiry-fencing.test.js dist/test/phase5-collaborative-convergence.test.js dist/test/job2-self-execution.test.js dist/test/local-hf-worker-isolation.test.js
-          node --test dist/test/phase0-control-recovery.test.js dist/test/phase0-engineering-readiness.test.js dist/test/phase1-core-runtime.test.js dist/test/phase1-acceptance-policy.test.js dist/test/fly-phase1-acceptance-policy.test.js dist/test/phase2-skill-execution.test.js dist/test/phase3-cognitive-components.test.js dist/test/phase3-local-hf-adapter.test.js dist/test/production-phase3-cognition.test.js dist/test/phase4-multistep-autonomy.test.js dist/test/phase5-collaborative-convergence.test.js dist/test/production-collaboration-restart-recovery.test.js dist/test/phase5-fly-restart-lease-retry.test.js dist/test/phase6-capability-integration.test.js dist/test/phase7-local-hf-feature-head.test.js dist/test/phase7-model-improvement.test.js dist/test/production-model-improvement.test.js dist/test/job2-production-convergence.test.js dist/test/permanent-continuation-http.test.js dist/test/permanent-continuation-multiprocess.test.js
+          node --test \
+            dist/test/phase0-control-recovery.test.js \
+            dist/test/phase0-engineering-readiness.test.js \
+            dist/test/phase1-core-runtime.test.js \
+            dist/test/phase1-acceptance-policy.test.js \
+            dist/test/phase2-skill-execution.test.js \
+            dist/test/phase3-cognitive-components.test.js \
+            dist/test/phase3-local-hf-adapter.test.js \
+            dist/test/production-phase3-cognition.test.js \
+            dist/test/phase4-multistep-autonomy.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/phase6-capability-integration.test.js \
+            dist/test/phase7-local-hf-feature-head.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/production-model-improvement.test.js \
+            dist/test/job2-production-convergence.test.js
       - name: Commit tested repair
         shell: bash
         run: |
@@ -85,9 +228,9 @@ jobs:
           test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_SHA"
           git config user.name sentient-final-cert-convergence
           git config user.email sentient-final-cert-convergence@users.noreply.github.com
-          git add src/fly/self-execution.ts test/phase5-fly-restart-lease-retry.test.ts
+          git add src/application/production-state.ts test/phase5-fly-restart-lease-retry.test.ts test/final-cert-objective-admission-atomicity.test.ts
           git diff --cached --check
-          git commit -m "fix: serialize inherited restart backlog"
+          git commit -m "fix: atomically admit production objective state"
           echo "END_SHA=$(git rev-parse HEAD)"
           echo "END_TREE=$(git rev-parse 'HEAD^{tree}')"
           git push origin "HEAD:refs/heads/$TARGET_BRANCH"
