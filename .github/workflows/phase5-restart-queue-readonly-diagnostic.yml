@@ -1,0 +1,46 @@
+name: Phase5 Read Only Restart Queue
+'on':
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      objective_id: {required: true, type: string}
+permissions: {contents: read}
+jobs:
+  queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Read existing unfinished objective order only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          SHA: ${{ inputs.sha }}
+          TREE: ${{ inputs.tree }}
+          OBJECTIVE_ID: ${{ inputs.objective_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          health="$(curl -fsS --max-time 10 https://sentient-validation-runner.fly.dev/healthz)"
+          [[ "$health" == *"$SHA"* && "$health" == *"$TREE"* ]]
+          echo "PHASE5_EXACT_IDENTITY=PASS"
+          cat >/tmp/q.mjs <<'NODE'
+          import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!db) throw Error("DB_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString:db});
+          try {
+            const tasks=await repo.list("task");
+            const a=tasks.filter(x=>x.kind==="task"&&(x.status==="pending"||x.status==="running")&&x.metadata?.contract==="sentient-fly-objective-runner/v1");
+            const id=process.env.PHASE5_OBJECTIVE_ID;
+            console.log("PHASE5_ACTIVE_RUNNER_TASK_COUNT="+a.length);
+            console.log("PHASE5_TARGET_QUEUE_INDEX="+a.findIndex(x=>x.id===id));
+            console.log("PHASE5_FIRST_ACTIVE_TASK_AGE_MS="+(a.length?(Date.now()-Date.parse(a[0].updatedAt)):0));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally { await repo.close(); }
+          NODE
+          b64="$(base64 -w0 /tmp/q.mjs)"
+          flyctl ssh console -a sentient-validation-runner -C "sh -lc 'cd /app && echo $b64 | base64 -d >/app/q.mjs && PHASE5_OBJECTIVE_ID=$OBJECTIVE_ID node /app/q.mjs; rc=\$?; rm -f /app/q.mjs; exit \$rc'"
