@@ -48,31 +48,6 @@ jobs:
             console.log(`PHASE5_LOCK_DIAG_GET_MS=${Date.now()-getStarted}`);
             console.log(`PHASE5_LOCK_DIAG_GET_MISSING=${missing===undefined}`);
 
-            const stats=await pool.query(`
-              SELECT
-                count() FILTER (WHERE pid <> pg_backend_pid())::int AS other_sessions,
-                count() FILTER (
-                  WHERE pid <> pg_backend_pid()
-                    AND xact_start IS NOT NULL
-                    AND xact_start < now() - interval '5 seconds'
-                )::int AS long_transactions,
-                count(*) FILTER (
-                  WHERE pid <> pg_backend_pid()
-                    AND wait_event_type = 'Lock'
-                )::int AS lock_waiters,
-                COALESCE(
-                  floor(EXTRACT(EPOCH FROM (now() - min(xact_start))) * 1000),
-                  0
-                )::bigint AS oldest_transaction_age_ms
-              FROM pg_stat_activity
-              WHERE datname=current_database()
-            `);
-            const row=stats.rows[0]??{};
-            console.log(`PHASE5_LOCK_DIAG_OTHER_SESSIONS=${Number(row.other_sessions??0)}`);
-            console.log(`PHASE5_LOCK_DIAG_LONG_TRANSACTIONS=${Number(row.long_transactions??0)}`);
-            console.log(`PHASE5_LOCK_DIAG_LOCK_WAITERS=${Number(row.lock_waiters??0)}`);
-            console.log(`PHASE5_LOCK_DIAG_OLDEST_TRANSACTION_AGE_MS=${Number(row.oldest_transaction_age_ms??0)}`);
-
             const client=await pool.connect();
             try {
               await client.query("BEGIN");
@@ -82,8 +57,8 @@ jobs:
               try {
                 await client.query(
                   `SELECT generation FROM sentient_durable_state
-                  WHERE state_key = $1
-                  FOR UPDATE NOWAIT`,
+                   WHERE state_key = $1
+                   FOR UPDATE NOWAIT`,
                   ["canonical"],
                 );
                 available=true;
@@ -98,12 +73,11 @@ jobs:
               client.release();
             }
             console.log("SECRET_VALUES_EXPOSED=false");
-            console.log("PHASE1_DURABLE_STATE_LOCK_DIAGNOSTIC=COMPLETE");
+            console.log("PHASE5_DURABLE_STATE_LOCK_DIAGNOSTIC=COMPLETE");
           } finally {
             await repo.close().catch(()=>undefined);
             await pool.end().catch(()=>undefined);
           }
           NODE
           B64="$(base64 -w0 /tmp/phase5-lock.mjs)"
-          flyctl ssh console -a "$APP" -C \
-            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-lock.mjs && node /app/phase5-lock.mjs; rc=\$?; rm -f /app/phase5-lock.mjs; exit \$rc'"
+          flyctl ssh console -a "$APP" -C             "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-lock.mjs && node /app/phase5-lock.mjs; rc=\$?; rm -f /app/phase5-lock.mjs; exit \$rc'"
