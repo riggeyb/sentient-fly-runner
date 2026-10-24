@@ -1,0 +1,97 @@
+name: Phase5 Behavioral Isolation Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply exact shared Phase5 repair ephemerally
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.sha }}"
+          curl -fsSL https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/3578bb600e0fb71511cb7067bcdf8db26cbcb2ad/scripts/phase5-restart-repair.py -o /tmp/phase5-repair.py
+          python3 /tmp/phase5-repair.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/application/production-collaboration.ts")
+          s=p.read_text()
+          a="await repository.completeSpawnChild(execution.id, result);"
+          b="await repository.completeSpawnChild({ executionId: execution.id, endedAt, result });"
+          c="snapshot.lineage"
+          d="snapshot.records.lineage"
+          assert s.count(a)==1, s.count(a)
+          assert s.count(c)==1, s.count(c)
+          p.write_text(s.replace(a,b,1).replace(c,d,1))
+
+          t=Path("test/production-collaboration-restart-recovery.test.ts")
+          q=t.read_text()
+          old1='return { records: { executions: [runningExecution()] }, lineage: [] };'
+          new1='return { records: { executions: [runningExecution()], lineage: [] } };'
+          assert q.count(old1)==1, q.count(old1)
+          q=q.replace(old1,new1,1)
+          old2='async completeSpawnChild(_id: string, result: unknown) {\n      settled = result;\n      return { execution: runningExecution(), result };\n    },'
+          new2='async completeSpawnChild(input: { result: unknown }) {\n      settled = input.result;\n      return { execution: runningExecution(), result: input.result };\n    },'
+          assert q.count(old2)==1, q.count(old2)
+          q=q.replace(old2,new2,1)
+          old3='async spawnSnapshot() { return { records: { executions: [] }, lineage: [] }; },'
+          new3='async spawnSnapshot() { return { records: { executions: [], lineage: [] } }; },'
+          assert q.count(old3)==1, q.count(old3)
+          q=q.replace(old3,new3,1)
+          t.write_text(q)
+          PY
+          git diff --check
+      - name: Install and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Isolate behavioral regressions
+        shell: bash
+        run: |
+          set +e
+          overall=0
+          run_one() {
+            f="$1"
+            echo "::group::TEST $f"
+            node --test "$f"
+            rc=$?
+            echo "TEST_FILE=$f RC=$rc"
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then overall=1; fi
+          }
+          run_one dist/test/production-collaboration-restart-recovery.test.js
+          run_one dist/test/active-work-restart-edge.test.js
+          run_one dist/test/active-work-expiry-fencing.test.js
+          run_one dist/test/phase5-collaborative-convergence.test.js
+          run_one dist/test/job2-production-convergence.test.js
+          run_one dist/test/phase4-multistep-autonomy.test.js
+          run_one dist/test/permanent-continuation-http.test.js
+          run_one dist/test/phase1-core-runtime.test.js
+          run_one dist/test/phase1-acceptance-policy.test.js
+          run_one dist/test/production-phase3-cognition.test.js
+          run_one dist/test/phase0-control-recovery.test.js
+          run_one dist/test/phase0-engineering-readiness.test.js
+          echo "PHASE5_BEHAVIORAL_ISOLATION_COMPLETE=true"
+          echo "SECRET_VALUES_EXPOSED=false"
+          exit "$overall"
