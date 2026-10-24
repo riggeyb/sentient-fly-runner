@@ -2,16 +2,10 @@ name: Sentient Phase 5 Durable Backlog Diagnostic
 "on":
   workflow_dispatch:
     inputs:
-      sha:
-        required: true
-        type: string
-      tree:
-        required: true
-        type: string
-
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
 permissions:
   contents: read
-
 jobs:
   diagnose:
     runs-on: ubuntu-latest
@@ -23,69 +17,42 @@ jobs:
       EXPECTED_TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Wake exact runtime and count sanitized durable backlog
+      - name: Count sanitized durable backog
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
           ok=false
           for _ in $(seq 1 120); do
             h="$(curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/healthz || true)"
-            if [ -n "$h" ] && grep -Fq "$EXPECTED_SHA" <<<"$h" && grep -Fq "$EXPECTED_TREE" <<<"$h"; then
-              ok=true
-              break
-            fi
+            if [ -n "$h" ] && grep -Fq "$EXPECTED_SHA" <<<"$h" && grep -Fq "$EXPECTED_TREE" <<<"$h"; then ok=true; break; fi
             sleep 2
           done
           test "$ok" = true
-          echo "PHASE5_BACKLOG_IDENTITY=PASS"
-
           cat >/tmp/phase5-backlog.mjs <<'NODE'
           import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
           const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
           const repo=new PostgresSpawnObjectiveRepository({connectionString});
-          const tally=(rows,key)=>rows.reduce((acc,row)=>{
-            const value=String(row?.[key]??"missing");
-            acc[value]=(acc[value]??0)+1;
-            return acc;
-          },{});
           try {
             const started=Date.now();
             const snap=await repo.snapshot();
             console.log(`PHASE5_BACKLOG_SNAPSHOT_MS=${Date.now()-started}`);
-            const tasks=(snap.records?.tasks??[]);
-            const managed=tasks.filter(task=>task?.metadata?.contract==="sentient-fly-objective-runner/v1");
-            const active=managed.filter(task=>task.status==="pending"||task.status==="running");
+            const tasks=snap.records?.tasks??[];
+            const managed=tasks.filter(t=>t?.metadata?.contract==="sentient-fly-objective-runner/v1");
+            const active=managed.filter(t=>t.status==="pending"||t.status==="running");
             console.log(`PHASE5_BACKLOG_TASK_TOTAL=${tasks.length}`);
             console.log(`PHASE5_BACKLOG_RUNNER_TASK_TOTAL=${managed.length}`);
             console.log(`PHASE5_BACKLOG_RUNNER_ACTIVE_TOTAL=${active.length}`);
-            console.log(`PHASE5_BACKLOG_RUNNNER_STATUS_COUNTS=${JSON.stringify(tally(managed,"status"))}`);
-            const ages=active.map(task=>Date.now()-Date.parse(String(task.updatedAt))).filter(Number.isFinite);
-            console.log(`PHASE5_BACKLOG_OLDEST_ACTIVE_AGE_MS=${ages.length?Math.max(...ages):0}`);
-
-            const works=(snap.collaborationActiveWork?.records??[]);
+            const works=snap.collaborationActiveWork?.records??[];
+            const activeWorks=works.filter(w=>w.status==="ACTIVE");
             console.log(`PHASE5_BACKLOG_ACTIVE_WORK_TOTAL=${works.length}`);
-            console.log(`PHASE5_BACKLOG_ACTIVE_WORK_STATUS_COUNTS=${JSON.stringify(tally(works,"status"))}`);
-
-            const executions=(snap.spawn?.records?.executions??[]);
-            const nonterminal=executions.filter(row=>row?.identity?.status==="reserved"||row?.identity?.status==="running");
-            const unreconciled=nonterminal.filter(row=>row.reservationReconciled===false);
-            console.log(`PHASE5_BACKLOG_SPAWN_EXECUTION_TOTAL=${executions.length}`);
+            console.log(`PHASE5_BACKLOG_ACTIVE_WORK_ACTIVE=${activeWorks.length}`);
+            const execs=snap.spawn?.records?.executions??[];
+            const nonterminal=execs.filter(e=>["reserved","running"].includes(e?.identity?.status));
+            console.log(`PHASE5_BACKLOG_SPAWN_EXECUTION_TOTAL=${execs.length}`);
             console.log(`PHASE5_BACKLOG_SPAWN_NONTERMINAL_TOTAL=${nonterminal.length}`);
-            console.log(`PHASE5_BACKLOG_SPAWN_UNRECONCILED_NONTERMINAL=${unreconciled.length}`);
-            console.log(`PHASE5_BACKLOG_SPAWN_STATUS_COUNTS=${JSON.stringify(nonterminal.reduce((acc,row)=>{
-              const value=String(row?.identity?.status??"missing");
-              acc[value]=(acc[value]??0)+1;
-              return acc;
-            },{}))}`);
             console.log("SECRET_VALUES_EXPOSED=false");
-            console.log("PHASE5_DURABLE_BACKLOG_DIAGNOSTIC=COMPLETE");
-          } finally {
-            await repo.close().catch(()=>undefined);
-          }
+          } finally { await repo.close().catch(()=>undefined); }
           NODE
           B64="$(base64 -w0 /tmp/phase5-backlog.mjs)"
-          flyctl ssh console -a "$APP" -C \
-            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-backog.mjs && node /app/phase5-backlog.mjs; rc=\$?; rm -f /app/phase5-backlog.mjs; exit \$rc'"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-backlog.mjs && node /app/phase5-backlog.mjs; rc=\$?; rm -f /app/phase5-backlog.mjs; exit \$rc'"
