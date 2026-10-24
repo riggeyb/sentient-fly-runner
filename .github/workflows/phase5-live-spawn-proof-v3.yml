@@ -33,7 +33,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           text = Path("/tmp/shared-proof.yml").read_text()
-          marker = "        run: |\n"
+          marker = "        run: |\\n"
           if text.count(marker) != 1:
               raise SystemExit(f"RUN_BLOCK_COUNT_INVALID:{text.count(marker)}")
           block = text.split(marker, 1)[1]
@@ -46,14 +46,52 @@ jobs:
               if not line.startswith("          "):
                   break
               out.append(line[10:])
-          script = "\n".join(out) + "\n"
+          script = "\\n".join(out) + "\\n"
           script = script.replace("PHASE1_", "PHASE5_")
           script = script.replace("AbortSignal.timeout(10000)", "AbortSignal.timeout(120000)")
-          script = script.replace("jq -er '.workId' <<\"$ARM_JSON\"", "jq -er '.workId' <<<\"$ARM_JSON\"")
+          script = script.replace("jq -er '.workId' <<\\\"$ARM_JSON\\\"", "jq -er '.workId' <<<\\\"$ARM_JSON\\\"")
+          script = script.replace("jq -er '.requestId' <<\\\"$ARM_JSON\\\"", "jq -er '.requestId' <<<\\\"$ARM_JSON\\\"")
+          script = script.replace(
+              "await new Promise(resolve=>setTimeout(resolve,100));",
+              "await new Promise(resolve=>setTimeout(resolve,2000));",
+          )
+          before = """B64="$(base64 -w0 /tmp/arm.mjs)"
+set +e
+OUT="$(flyctl ssh console"""
+          after = """B64="$(base64 -w0 /tmp/arm.mjs)"
+keepalive() {
+  while true; do
+    curl -fsS --max-time 5 https://sentient-validation-runner.fly.dev/readyz >/dev/null 2>&1 || true
+    sleep 5
+  done
+}
+keepalive &
+KEEPALIVE_PID=$!
+trap 'kill "$KEEPALIVE_PID" >/dev/null 2>&1 || true' EXIT
+set +e
+OUT="$(flyctl ssh console"""
+          if script.count(before) != 1:
+              raise SystemExit(f"KEEPALIVE_START_ANCHOR_INVALID:{script.count(before)}")
+          script = script.replace(before, after, 1)
+          before = """RC=$?
+set -e
+printf '%s\\n' "$OUT" """
+          after = """RC=$?
+set -e
+kill "$KEEPALIVE_PID" >/dev/null 2>&1 || true
+wait "$KEEPALIVE_PID" >/dev/null 2>&1 || true
+trap - EXIT
+printf '%s\\n' "$OUT" """
+          if script.count(before) != 1:
+              raise SystemExit(f"KEEPALIVE_STOP_ANCHOR_INVALID:{script.count(before)}")
+          script = script.replace(before, after, 1)
           checks = {
               "no_phase1": "PHASE1_" not in script,
               "arm_timeout": "AbortSignal.timeout(120000)" in script,
-              "arm_json_here_string": "jq -er '.workId' <<<\"$ARM_JSON\"" in script,
+              "work_id_here_string": "jq -er '.workId' <<<\\\"$ARM_JSON\\\"" in script,
+              "request_id_here_string": "jq -er '.requestId' <<<\\\"$ARM_JSON\\\"" in script,
+              "interrupt_flush": "setTimeout(resolve,2000)" in script,
+              "http_keepalive": "KEEPALIVE_PID=$!" in script,
               "new_promise": "await new Promise" in script,
               "new_error": 'throw new Error("PHASE5_AUTOMATIC_RECOVERY_NOT_TERMINAL")' in script,
               "session_binding": "PHASE5_SESSION_ID=$SESSION" in script,
