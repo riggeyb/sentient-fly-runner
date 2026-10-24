@@ -1,18 +1,19 @@
 name: Phase0 Invoke Governor Recovery Exact
 on:
   workflow_dispatch:
-
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
 permissions:
   contents: read
-
 jobs:
   recover:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      S: e6802ab60edc9994677632cca612befae5c0b2e3
-      T: 6a5de2c43ae2f5bb22055234a75694782cafd4b7
+      S: ${{ inputs.sha }}
+      T: ${{ inputs.tree }}
       R: SENTIENT_GOVERNOR_RECOVERY_V1
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
@@ -20,6 +21,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$S" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$T" =~ ^[0-9a-f]{40}$ ]]
           app=sentient-governor-recovery-root
           id="$(flyctl machines list -a "$app" --json | jq -r '.[0].id')"
           flyctl machine start "$id" -a "$app" >/dev/null || true
@@ -34,7 +37,8 @@ jobs:
           const token=String(process.env.SENTIENT_GOVERNOR_RECOVERY_API_TOKEN??"").trim();
           if(!token) process.exit(20);
           const q=await fetch("http://127.0.0.1:8080/v1/recovery/governor",{
-            method:"POST",headers:{authorization:"Bearer "+token,"content-type":"application/json"},
+            method:"POST",
+            headers:{authorization:"Bearer "+token,"content-type":"application/json"},
             body:JSON.stringify({repository:"riggeyb/sentient",sha,tree,recoveryPolicyRevision:revision}),
             signal:AbortSignal.timeout(1100000)
           });
