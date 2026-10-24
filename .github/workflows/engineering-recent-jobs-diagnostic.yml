@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APP="sentient-validation-runner"
+          APP="sentient-deployment-governor"
           [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
           cat >/tmp/recent-jobs.mjs <<'NODE'
           import pg from "/app/node_modules/pg/lib/index.js";
@@ -38,7 +38,7 @@ jobs:
                      worker_machine_id,created_at,started_at,completed_at,error_code
               from sentient_deployment_governor.engineering_jobs
               where expected_head=$1
-                and created_at > now() - interval '15 minutes'
+                and created_at > now() - interval '30 minutes'
               order by created_at desc
               limit 10`,[head]);
             console.log("RECENT_ENGINEERING_JOBS="+JSON.stringify(r.rows));
@@ -46,4 +46,4 @@ jobs:
           NODE
           B64="$(base64 -w0 /tmp/recent-jobs.mjs)"
           flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/recent-jobs.mjs && EXPECTED_HEAD=$EXPECTED_HEAD node /app/recent-jobs.mjs; rc=\$?; rm -f /app/recent-jobs.mjs; exit \$rc'"
-          echo "SECRET_VALUES_EXPOSEd=false"
+          echo "SECRET_VALUES_EXPOSED=false"
