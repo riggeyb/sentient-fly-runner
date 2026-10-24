@@ -1,0 +1,33 @@
+name: Sentient Final Exact Live Gate
+'on':
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Verify frozen live identity and production readiness within existing VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/cert.mjs <<'NODE'
+          const sha="79c023ea0ae2ec55c36c175759b72ee36413d561";
+          const tree="7cbabedaf2ac5440a83c2aff38ab2e592de29419";
+          const read=async p=>{const r=await fetch("http://127.0.0.1:8080/"+p,{signal:AbortSignal.timeout(20000)});return {code:r.status,body:await r.json()};};
+          const h=await read("healthz"),r=await read("readyz");
+          const hi=h.body.application?.identity?.source,ri=r.body.identity?.source;
+          if(h.code!==200||r.code!==200||hi?.sha!==sha||hi?.tree!==tree||ri?.sha!==sha||ri?.tree!==tree||r.body.ready!==true)throw Error("FROZEN_LIVE_GATE_FAILED");
+          if(r.body.authorityOwner!=="SENTIENT_RUNTIME"||r.body.modelOutputIsNeverAuthority!==true)throw Error("AUTHORITY_GATE_FAILED");
+          const names=(r.body.bindings??[]).filter(x=>x.requiredForReadiness&&x.availability==="AVAILABLE").map(x=>x.name);
+          if(!names.includes("COGNITION")||!names.includes("PHASE3_HF_COGNITION"))throw Error("COGNITION_NOT_READY");
+          console.log("LIVE_RUNTIME_SHA="+ri.sha);
+          console.log("LIVE_RUNTIME_TREE="+ri.tree);
+          for(const k of ["LIVE_SHA_MATCH","LIVE_TREE_MATCH","LIVE_HEALTHZ","LIVE_READYZ","LOCAL_HF_COGNITION_LIVE"])console.log(k+"=PASS");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          b64="$(base64 -w0 /tmp/cert.mjs)"
+          flyctl ssh console -a sentient-validation-runner -C "sh -lc 'echo $b64 | base64 -d >/app/cert.mjs && node /app/cert.mjs; rc=\$?; rm -f /app/cert.mjs; exit \$rc'"
