@@ -20,7 +20,7 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: true
-      - name: Fence and patch V4 only
+      - name: Patch and syntax-check V4 arm script
         env:
           EXPECTED_HEAD: ${{ inputs.expected_head }}
         shell: bash
@@ -29,25 +29,24 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           python3 - <<'PY'
           from pathlib import Path
-          p = Path(".github/workflows/phase5live-spawn-proof-v4.yml")
+          p = Path(".github/workflows/phase5-live-spawn-proof-v4.yml")
           s = p.read_text()
-          a = '            for(let i=0;i<1200;i++){'
-          b = '            let armed=false;\n            for(let i=0;i<1200;i++){'
-          c = '                  process.exitCode=0;\u 0a00                  return;'.replace('\u0a00','')
-          d = '                  armed=true;\u 0a00                  break;'.replace('\u0a00','')
-          e = '            throw new Error("PHASE5_INTERRUPT_WINDOW_NOT_OBSERVED");'
-          f = '            if(!armed) throw new Error("PHASE5_INTERRUPT_WINDOW_NOT_OBSERVED");'
-          for old in (a, c, e):
-              if s.count(old) != 1:
-                  raise SystemExit(f"anchor mismatch for {old!r}: {s.count(old)}")
-          s = s.replace(a, b, 1).replace(c, d, 1).replace(e, f, 1)
-          p.write_text(s)
+          old_loop = '            for(let i=0;i<1200;i++){'
+          new_loop = '            let armed=false;\n            for(let i=0;i<1200;i++){'
+          old_exit = '                  process.exitCode=0;\n                  return;'
+          new_exit = '                  armed=true;\n                  break;'
+          old_throw = '            throw new Error("PHASE5_INTERRUPT_WINDOW_NOT_OBSERVED");'
+          new_throw = '            if(!armed) throw new Error("PHASE5_INTERRUPT_WINDOW_NOT_OBSERVED");'
+          for old in (old_loop, old_exit, old_throw):
+              assert s.count(old) == 1, (old, s.count(old))
+          p.write_text(s.replace(old_loop,new_loop,1).replace(old_exit,new_exit,1).replace(old_throw,new_throw,1))
           PY
           git diff --check
           python3 - <<'PY'
           from pathlib import Path
           s = Path(".github/workflows/phase5-live-spawn-proof-v4.yml").read_text()
-          start = s.index("          cat >/tmp/arm.mjs <<'NODE'\n") + len("          cat >/tmp/arm.mjs <<'NODE'\n")
+          marker = "          cat >/tmp/arm.mjs <<'NODE'\n"
+          start = s.index(marker) + len(marker)
           end = s.index("\n          NODE", start)
           Path("/tmp/arm.mjs").write_text(s[start:end] + "\n")
           PY
@@ -62,7 +61,7 @@ jobs:
           test "$(git rev-parse origin/main)" = "$EXPECTED_HEAD"
           git config user.name "sentient-phase5-convergence"
           git config user.email "sentient-phase5-convergence@users.noreply.github.com"
-          git add .github/workflows/phase5live-spawn-proof-v4.yml
+          git add .github/workflows/phase5-live-spawn-proof-v4.yml
           git diff --cached --check
           git diff --cached --quiet && { echo NO_CHANGE; exit 1; }
           git commit -m "ops: fix Phase5 V4 arm module control flow"
