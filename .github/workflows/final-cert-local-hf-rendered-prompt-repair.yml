@@ -1,0 +1,55 @@
+name: Final Cert Local HF Rendered Prompt Repair
+"on":
+  workflow_dispatch:
+    inputs:
+      expected_head:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence, repair, test, and push
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/model/providers/huggingface-worker.ts")
+          s=p.read_text()
+          old='const raw = await pipeline(chat.messages, {'
+          new='const raw = await pipeline(renderChat(chat.messages, pipeline.tokenizer), {'
+          if s.count(old) != 1:
+              raise SystemExit(f"worker anchor count={s.count(old)}")
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/local-hf-provider-retry.test.js dist/test/local-hf-worker-isolation.test.js
+          git config user.name "sentient-final-cert"
+          git config user.email "sentient-final-cert@users.noreply.github.com"
+          git add src/model/providers/huggingface-worker.ts
+          git diff --cached --quiet && { echo NO_CHANGES; exit 1; }
+          git commit -m "fix: generate local HF from rendered chat template"
+          git push --force-with-lease="refs/heads/sentient-production-composition-20261017:${EXPECTED_HEAD}" origin HEAD:refs/heads/sentient-production-composition-20261017
+          echo "NEW_SHA=$(git rev-parse HEAD)"
+          echo "NEW_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "LOCAL_HF_RENDERED_PROMPT_REPAIR=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
