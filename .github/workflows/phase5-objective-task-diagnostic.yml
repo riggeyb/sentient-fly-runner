@@ -1,0 +1,54 @@
+name: Sentient Phase 5 Objective Task Diagnostic
+"on":
+  workflow_dispatch:
+    inputs:
+      objective_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect sanitized durable objective task
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          OBJECTIVE_ID: ${{ inputs.objective_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          cat >/tmp/phase5-task.mjs <<'NODE'
+          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const objectiveId=String(process.env.PHASE5_OBJECTIVE_ID??"").trim();
+          const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString});
+          try {
+            const task=await repo.get("task",objectiveId);
+            if(!task || task.kind!=="task") throw new Error("PHASE5_TASK_MISSING");
+            const md=(task.metadata && typeof task.metadata==="object" && !Array.isArray(task.metadata)) ? task.metadata : {};
+            const result=(md.result && typeof md.result==="object" && !Array.isArray(md.result)) ? md.result : {};
+            const body=(result.body && typeof result.body==="object" && !Array.isArray(result.body)) ? result.body : {};
+            const appResult=(body.result && typeof body.result==="object" && !Array.isArray(body.result)) ? body.result : {};
+            const err=typeof md.error==="string" ? md.error.replace(/[\r\n]/g," ").slice(0,500) : null;
+            console.log("PHASE5_TASK_STATUS="+String(task.status));
+            console.log("PHASE5_TASK_UPDATED_AT="+String(task.updatedAt));
+            console.log("PHASE5_TASK_CONTRACT="+String(md.contract??"none"));
+            console.log("PHASE5_TASK_ERROR="+String(err??"none"));
+            console.log("PHASE5_TASK_RESULT_PRESENT="+String(md.result!==null && md.result!==undefined));
+            console.log("PHASE5_TASK_HTTP_STATUS="+String(result.httpStatus??"none"));
+            console.log("PHASE5_TASK_APP_STATUS="+String(appResult.status??"none"));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally {
+            await repo.close();
+          }
+          NODE
+          B64="$(base64 -w0 /tmp/phase5-task.mjs)"
+          flyctl ssh console -a "$APP" -C             "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-task.mjs && PHASE5_OBJECTIVE_ID=$OBJECTIVE_ID node /app/phase5-task.mjs; rc=\$?; rm -f /app/phase5-task.mjs; exit \$rc'"
+          echo "RESULT=PASS"
