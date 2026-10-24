@@ -1,0 +1,72 @@
+name: Final Cert Phase1 Cognition Diagnostic
+'on':
+  workflow_dispatch:
+    inputs:
+      sha:
+        type: string
+        required: true
+      tree:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Exercise exact deployed Phase1 local HF cognition
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          ready=false
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          cat >/tmp/phase1-cog.mjs <<'NODE'
+          import { LIGE_HF_MODEL_V1
+           , LOCAL_HF_MODEL_REVISION_V1, LOCAL_HF_PROVIDER_V1, LocalHuggingFaceRuntimeV1, LocalHuggingFacePhase1CognitionV1 } from "./dist/src/model/providers/huggingface.js";
+          import { deriveTaskRequirementsV1 } from "./dist/src/phase1/core-runtime.js";
+          const runtime=new LocalHuggingFaceRuntimeV1();
+          const cognition=new LocalHuggingFacePhase1CognitionV1(runtime);
+          const requirements=deriveTaskRequirementsV1({
+            requestId:"diagnostic-request",sessionId:"session-diagnostic",taskId:"phase1-cognition-diagnostic",
+            userRequest:"Return a short bounded candidate answer that characterizes this safe certification fixture."
+          });
+          const started=Date.now();
+          try {
+            await cognition.initialize();
+            const result=await cognition.run(requirements);
+            const md=(result && typeof result==="object" && !Array.isArray(result) && result.metadata && typeof result.metadata==="object")?result.metadata:{};
+            console.log("PHASE1_COGNITION_DIAG="+JSON.stringify({
+              ok:result?.ok===true,provider:result?.provider??null,model:result?.model??null,
+              revision:md.modelRevision??null,code:result?.code??null,retryable:result?.retryable??null,
+              message:typeof result?.message==="string"?result.message.replace(/[\r\n]/g," ").slice(0,500):null,
+              latencyMs:result?.latencyMs??Date.now()-started,transport:md.transport??null,
+              expectedProvider:LOCAL_HF_PROVIDER_V1,expectedModel:LOCAL_HF_MODEL_V1,expectedRevision:LOCAL_HF_MODEL_REVISION_V1
+            }));
+            console.log("SECRET_VALUES_EXPOSED=false");
+            if(result?.ok!==true)process.exitCode=1;
+          } catch(error) {
+            const message=error instanceof Error?error.message:String(error);
+            console.log("PHASE1_COGNITION_DIAG="+JSON.stringify({ok:false,code:"diagnostic_threw",message:message.replace(/[\p\n]/g," ").slice(0,500),latencyMs:Date.now()-started}));
+            console.log("SECRET_VALUES_EXPOSED=false");
+            process.exitCode=1;
+          } finally { await cognition.close().catch(()=>undefined); }
+          NODE
+          B64="$(base64 -w0 /tmp/phase1-cog.mjs)"
+          timeout 720s flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/tmp/phase1-cog-${GITHUB_RUN_ID}.mjs; node /tmp/phase1-cog-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/phase1-cog-${GITHUB_RUN_ID}.mjs; exit \$rc'"
