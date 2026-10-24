@@ -1,0 +1,72 @@
+name: Sentient Phase 5 Objective Submit Reason Probe
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe objective submit reason
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready="$(curl -fsS --max-time 10 https://sentient-validation-runner.fly.dev/readyz)"
+          grep -Fq "$EXPECTED_SHA" <<<"$ready"
+          grep -Fq "$EXPECTED_TREE" <<<"$ready"
+          grep -Fq '"ready":true' <<<"$ready"
+          echo "PHASE5_SUBMIT_REASON_IDENTITY=PASS"
+          OBJ="phase5-submit-reason-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cat >/tmp/probe.mjs <<'NODE'
+          const objectiveId=String(process.env.PHASE5_PROBE_OBJECTIVE_ID??"").trim();
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          if(!objectiveId||!token) throw new Error("PHASE5_PROBE_BINDING_MISSING");
+          const clean=(v)=>typeof v==="string"?v.replace(/[\r\n]/g," ").slice(0,500):"none";
+          const started=Date.now();
+          try {
+            const response=await fetch("http://127.0.0.1:8080/v1/objectives",{
+              method:"POST",
+              headers:{authorization:"Bearer "+token,"content-type":"application/json",accept:"application/json"},
+              body:JSON.stringify({
+                request:"Return the exact text ENQUEUE_BOUNDARY_OK.",
+                objectiveId,
+                sessionId:"session-"+objectiveId,
+                mode:"ordinary",
+                privacy:"public_fixture"
+              }),
+              signal:AbortSignal.timeout(45000)
+            });
+            const raw=await response.text();
+            let body={};
+            try { body=JSON.parse(raw); } catch {}
+            console.log("PHASE5_PROBE_OBJECTIVE_ID="+objectiveId);
+            console.log("PHASE5_PROBE_POST_STATUS="+response.status);
+            console.log("PHASE5_PROBE_POST_ELAPSED_MS="+(Date.now()-started));
+            console.log("PHASE5_PROBE_POST_ERROR="+clean(body.error));
+            console.log("PHASE5_PROBE_POST_REASON="+clean(body.reason));
+          } catch(error) {
+            console.log("PHASE5_PROBE_OBJECTIVE_ID="+objectiveId);
+            console.log("PHASE5_PROBE_POST_ELAPSED_MS="+(Date.now()-started));
+            console.log("PHASE5_PROBE_FETCH_ERROR="+clean(String(error?.name??"Error")+":"+String(error?.message??error)));
+          }
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B64="$(base64 -w0 /tmp/probe.mjs)"
+          flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/app/probe.mjs && PHASE5_PROBE_OBJECTIVE_ID=$OBJ node /app/probe.mjs; rc=\$?; rm -f /app/probe.mjs; exit \$rc'"
