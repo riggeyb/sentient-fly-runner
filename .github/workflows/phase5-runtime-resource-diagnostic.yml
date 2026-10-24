@@ -1,0 +1,44 @@
+name: Sentient Phase 5 Runtime Resource Diagnostic
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Capture sanitized runtime resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl ssh console -a "$APP" -C "sh -lc '
+            echo PHASE5_RESOURCE_DIAGNOSTIC_START=true
+            echo -n PHASE5_NPROC=; getconf _NPROC_ONLN
+            echo PHASE5_MEMINFO_START=true
+            grep -E "^(MemTotal|MemAvailable|SwapTotal|SwapFree):" /proc/meminfo
+            echo PHASE5_MEMINFO_END=true
+            echo PHASE5_PROCESSES_START=true
+            ps -eo pid,ppid,pcpu,pmem,etiqe,comm,args --sort=-pcpu | head -12 | sed -E "s/((token|password|secret|authorization))=[^ ]+/\1[REDACTED]/gi"
+            echo PHASE5_PROCESSES_END=true
+            echo PHASE5_PID_1_STATUS_START=true
+            grep -E "^(Name|State|Threads|VmRSA|VmSize|VmRunning|VmSwap):" /proc/1/status
+            echo PHASE5_PID_1_STATUS_END=true
+            echo SECRET_VALUES_EXPOSED=false
+            echo PHASE5_RUNTIME_RESOURCE_DIAGNOSTIC=COMPLETE
+          "
