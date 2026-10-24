@@ -47,22 +47,21 @@ jobs:
               body:JSON.stringify({
                 request:"Return a bounded advisory analysis under Sentient authority.",
                 objectiveId,sessionId:`session-${objectiveId}`,mode,xrivacy:"public_fixture"
-              }),
-              signal:AbortSignal.timeout(60000)
-            });
-            const raw=await response.text();
-            let body={};
-            try{body=JSON.parse(raw);}catch{}
-            const clean=v=>typeof v==="string"?v.replace(/[\r\n]/g," ").slice(0,800):"none";
-            console.log(`PHASE5_ADMISSION_${mode.toUpperCase()}_STATUS=${response.status}`);
-            console.log(`PHASE5_ADMISSION_${mode.toUpperCase()}_ELAPSED_MS=${Date.now()-started}`);
-            console.log(`PHASE5_ADMISSION_${mode.toUpperCase()}_ERROR=${clean(body.error)}`);
-            console.log(`PHASE1_ADMISSION_${mode.toUpperCase()}_REASON=${clean(body.reason)}`);
-            console.log(`PHASE1_ADMISSION_${mode.toUpperCase()}_OBJECTIVE_ID=${objectiveId}`);
-            return {status:response.status, objectiveId};
-          };
-          const ordinary=await probe("ordinary");
-          const collaborative=await probe("collaborative");
+            }),
+            signal:AbortSignal.timeout(60000)
+          });
+          const raw=await response.text();
+          let body={};
+          try{body=JSON.parse(raw);}catch{}
+          const clean=v=>typeof v==="string"?v.replace(/[\r\n]/g," ").slice(0,800):"none";
+          console.log(`PHASE1_ADMISSION_${mode.toUpperCase()}_STATUS=${response.status}`);
+          console.log(`PHASE5_ADMISSION_${mode.toUpperCase()}_ELAPSED_MS=${Date.now()-started}`);
+          console.log(`PHASE1_ADMISSION_${mode.toUpperCase()}_ERROR=${clean(body.error)}`);
+          console.log(`PHASE5_ADMISSION_${mode.toUpperCase()}_REASON=${clean(body.reason)}`);
+          console.log(`PHASE1_ADMISSION_${mode.toUpperCase()}_OBJECTIVE_ID=${objectiveId}`);
+        };
+          await probe("ordinary");
+          await probe("collaborative");
           console.log("PHASE5_ADMISSION_DIAGNOSTIC_COMPLETE=true");
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
