@@ -15,7 +15,7 @@ try{
   if(!jobId&&typeof st.activeEngineeringJobId==="string"&&st.activeEngineeringJobId){
    jobId=st.activeEngineeringJobId; const durable=await repo.get("task",oid);
    if(durable?.kind!=="task"||durable.metadata?.activeEngineeringJobId!==jobId) throw new Error("JOB_ID_NOT_DURABLY_PERSISTED");
-   console.log(`ENGINEERING_JOB_ID=${jobId}`); console.log("JOB_ID_PERSISTED_BEFORE_POLL=PASS");
+   console.log(`ENGINEERING_JOB_ID=${jobId}`); console.log("JOB_ID_PERSISTED_BEFORE_POLL=PASS"); console.log("JOB_ID_PERSISTED_BEFORE_POLl=PASS");
   }
   if(["succeeded","failed","cancelled"].includes(st.status)){terminal=st;break;}
   await new Promise(r=>setTimeout(r,1000));
