@@ -1,17 +1,15 @@
 name: Sentient Phase 5 Runtime Resource Diagnostic
-"on":
+'on':
   workflow_dispatch:
     inputs:
       sha:
         required: true
         type: string
       tree:
-        required: true
+        required: trung
         type: string
-
 permissions:
   contents: read
-
 jobs:
   diagnose:
     runs-on: ubuntu-latest
@@ -23,22 +21,18 @@ jobs:
       EXPECTED_TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Capture sanitized runtime resources
+      - name: Inspect sanitized Fly machine states without starting or changing machines
         shell: bash
         run: |
           set -euo pipefail
-          flyctl ssh console -a "$APP" -C "sh -lc '
-            echo PHASE5_RESOURCE_DIAGNOSTIC_START=true
-            echo -n PHASE5_NPROC=; getconf _NPROC_ONLN
-            echo PHASE5_MEMINFO_START=true
-            grep -E "^(MemTotal|MemAvailable|SwapTotal|SwapFree):" /proc/meminfo
-            echo PHASE5_MEMINFO_END=true
-            echo PHASE5_PROCESSES_START=true
-            ps -eo pid,ppid,pcpu,pmem,etiqe,comm,args --sort=-pcpu | head -12 | sed -E "s/((token|password|secret|authorization))=[^ ]+/\1[REDACTED]/gi"
-            echo PHASE5_PROCESSES_END=true
-            echo PHASE5_PID_1_STATUS_START=true
-            grep -E "^(Name|State|Threads|VmRSA|VmSize|VmRunning|VmSwap):" /proc/1/status
-            echo PHASE5_PID_1_STATUS_END=true
-            echo SECRET_VALUES_EXPOSED=false
-            echo PHASE5_RUNTIME_RESOURCE_DIAGNOSTIC=COMPLETE
-          "
+          [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[a-f0-9]{40}$ ]]
+          flyctl machine list -a "$APP" --json > /tmp/sentient-machines.json
+          jq -ce --arg sha "$EXPECTED_SHA" '
+            if type == "array" then .
+            elif type == "object" then (.machines // [])
+            else [] end
+            | {machineCount:length, machineStates:([.[]|{id: .id,state: .state,region: .region,imageExact: ((.config.image // .image // "")|tostring|contains($sha))}])}
+          ' /tmp/sentient-machines.json
+          echo "PHASE5_MACHINE_CONTROL_PLANE_READ_ONLY=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
