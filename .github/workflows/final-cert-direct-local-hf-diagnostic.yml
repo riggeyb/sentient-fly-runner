@@ -1,0 +1,68 @@
+name: Final Cert Direct Local HF Diagnostic
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: 3a0d39ed877c6321c181c7f75e2fd6f7de085564
+      EXPECTED_TREE: 8ef9f17c38bebe267a45f9aaeec799250a93bca1
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Probe exact local HF cognition without durable objective mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
+          state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
+          if [ "$state" != started ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+          ident="$(timeout 45s flyctl ssh console -a "$APP" -C 'sh -lc '\''printf "%s\n%s\n" "$SENTIENT_RUNTIME_SHA" "$SENTIENT_RUNTIME_TREE"'\''')"
+          grep -Fxq "$EXPECTED_SHA" <<<"$ident"
+          grep -Fxq "$EXPECTED_TREE" <<<"$ident"
+          cat >/tmp/hf-direct.mjs <<'NODE'
+          import {
+            LocalHuggingFaceRuntimeV1,
+            LocalHuggingFacePhase1CognitionV1
+          } from "/app/dist/src/model/providers/huggingface.js";
+          import {deriveTaskRequirementsV1} from "/app/dist/src/phase1/core-runtime.js";
+
+          const runtime = new LocalHuggingFaceRuntimeV1();
+          const cognition = new LocalHuggingFacePhase1CognitionV1(runtime);
+          const requirements = deriveTaskRequirementsV1({
+            requestId:"final-cert-direct-hf",
+            sessionId:"final-cert-direct-hf-session",
+            taskId:"final-cert-direct-hf-task",
+            userRequest:"Explain in one concise sentence why exact source identity matters for a trustworthy runtime."
+          });
+          try {
+            const started = Date.now();
+            await cognition.initialize();
+            console.log("DIRECT_HF_INITIALIZE=PASS");
+            const value = await cognition.run(requirements);
+            const row = value && typeof value === "object" ? value : {};
+            console.log("DIRECT_HF_OK="+String(row.ok === true));
+            console.log("DIRECT_HF_PROVIDER="+String(row.provider ?? "none"));
+            console.log("DIRECT_HF_MODEL="+String(row.model ?? "none"));
+            console.log("DIRECT_HF_CODE="+String(row.code ?? "none"));
+            console.log("DIRECT_HF_MESSAGE="+String(row.message ?? "none").replace(/[\r\n]/g," ").slice(0,500));
+            console.log("DIRECT_HF_RETRYABLE="+String(row.retryable ?? "none"));
+            console.log("DIRECT_HF_LATENCY_MS="+String(row.latencyMs ?? (Date.now()-started)));
+            console.log("DIRECT_HF_OUTPUT_TOKENS="+String(row.usage?.outputTokens ?? "none"));
+            console.log("DIRECT_HF_MODEL_REVISION="+String(row.metadata?.modelRevision ?? "none"));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } catch (error) {
+            console.log("DIRECT_HF_THROW="+String(error instanceof Error ? error.message : error).replace(/[\r\n]/g," ".slice(0,500));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally {
+            await cognition.close().catch(()=>undefined);
+          }
+          NODE
+          b64="$(base64 -w0 /tmp/hf-direct.mjs)"
+          timeout 480s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/hf-direct.mjs && node /tmp/hf-direct.mjs; rc=\$?; rm -f /tmp/hf-direct.mjs; exit \$rc'"
