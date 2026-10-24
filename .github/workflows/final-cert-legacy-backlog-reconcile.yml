@@ -31,9 +31,9 @@ jobs:
           state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
           if [ "$state" != started ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
           ident="$(flyctl ssh console -a "$APP" -C 'sh -lc '"'"' printf "%s\n%s\n" "$SENTIENT_RUNTIME_SHA" "$SENTIENT_RUNTIME_TREE"'"'"'')"
-          grep -Fxq "$EXPECTED_SHA" <<<"$dent"
-          grep -Fxq "$EXPECTED_TREE" <<<"$dent"
-          echo LEGACY_RECONCILE_IDENTITY=PASS
+          grep -Fxq "$EXPECTED_SHA" <<<"$ident"
+          grep -Fxq "$EXPECTED_TREE" <<<"$ident"
+          echo LEGAACY_RECONCILE_IDENTITY=PASS
 
           cat >/tmp/reconcile.mjs <<'NODE'
           import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
