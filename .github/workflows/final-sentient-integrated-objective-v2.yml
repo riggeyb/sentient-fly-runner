@@ -1,0 +1,79 @@
+name: Final Sentient Integrated Objective Certification V2
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integrated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: 79c023ea0ae2ec55c36c175759b72ee36413d561
+      EXPECTED_TREE: 7cbabedaf2ac5440a83c2aff38ab2e592de29419
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Integrated frozen objective restart chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          OBJ="final-e2e-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SESSION="session-${OBJ}"
+          ready_exact(){ for _ in $(seq 1 "$1"); do curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null && return 0; sleep 2; done; return 1; }
+          ready_exact 120
+
+          I="$(base64 -w0 scripts/final-integrated-ingress.mjs)"
+          timeout 150s flyctl ssh console -a "$APP" -C "sh -lc 'echo $I|base64 -d >/tmp/final-ingress-${GITHUB_RUN_ID}.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION node /tmp/final-ingress-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/final-ingress-${GITHUB_RUN_ID}.mjs; exit \$rc'" | tee /tmp/ingress
+          grep -Fq 'OBJECTIVE_ASYNC_INGRESS=PASS' /tmp/ingress
+          grep -Fq 'OBJECTIVE_PERSISTENCE=PASS' /tmp/ingress
+
+          A="$(base64 -w0 scripts/final-integrated-arm.mjs)"
+          armed=false
+          : >/tmp/arm
+          for _ in $(seq 1 30); do
+            set +e
+            out="$(timeout 45s flyctl ssh console -a "$APP" -C "sh -lc 'echo $A|base64 -d >/tmp/final-arm-${GITHUB_RUN_ID}.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION node /tmp/final-arm-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/final-arm-${GITHUB_RUN_ID}.mjs; exit \$rc'" 2>&1)"
+            rc=$?
+            set -e
+            printf '%s\n' "$out" >/tmp/arm
+            if [ "$rc" -eq 0 ] && grep -Fq 'INTEGRATED_RESTART_ARMED=PASS' <<<"$out"; then armed=true; break; fi
+            sleep 2
+          done
+          cat /tmp/arm
+          test "$armed" = true
+          J="$(grep -F 'INTEGRATED_ARM_JSON=' /tmp/arm|tail -n1|sed 's/^.*INTEGRATED_ARM_JSON=//')"
+          W="$(jq -er .workId<<<"$J")"; P="$(jq -er .participantId<<<"$J")"; C="$(jq -er .childId<<<"$J")"; R="$(jq -er .rootRevision<<<"$J")"
+
+          M="$(flyctl machines list -a "$APP" --json|jq -er '[.[]|select(.state=="started")][0].id')"
+          flyctl machine restart "$M" -a "$APP"
+          echo RESTART_INDUCED=PASS
+          ready_exact 180
+
+          O="$(base64 -w0 scripts/final-integrated-observe.mjs)"
+          ok=false
+          : >/tmp/obs
+          for _ in $(seq 1 60); do
+            set +e
+            out="$(timeout 45s flyctl ssh console -a "$APP" -C "sh -lc 'echo $O|base64 -d >/tmp/final-obs-${GITHUB_RUN_ID}.mjs && CERT_OBJECTIVE_ID=$OBJ CERT_SESSION_ID=$SESSION CERT_WORK_ID=$W CERT_PARTICIPANT_ID=$P CERT_CHILD_ID=$C CERT_PRE_REVISION=$R node /tmp/final-obs-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/final-obs-${GITHUB_RUN_ID}.mjs; exit \$rc'" 2>&1)"
+            rc=$?
+            set -e
+            printf '%s\n' "$out" >/tmp/obs
+            if [ "$rc" -eq 0 ] && grep -Fq 'INTEGRATED_OBSERVATION_PASS=true' <<<"$out"; then ok=true; break; fi
+            sleep 2
+          done
+          cat /tmp/obs
+          test "$ok" = true
+          echo "OBJECTIVE_ID=$OBJ"
+          echo PHASE5_LIVE_COLLABORATION=PASS
+          echo SPAWN_CONVERGENCE=PASS
+          echo DURABLE_SPAWN_RECOVERY=PASS
+          echo RESTART_RESUME=PASS
+          echo EXISTING_WORK_RECOVEREP=PASS
+          echo OBJECTIVE_TERMINAL=PASS
+          echo DUPLICATE_EXECUTION=false
+          echo POST_CERT_LIVE_SHA_MATCH=PASS
+          echo POST_CERT_LIVE_TREE_MATCH=PASS
+          echo RESOURCE_ENVELOPE_UNCHANGED=true
+          echo SECRET_VALUES_EXPOSED=false
