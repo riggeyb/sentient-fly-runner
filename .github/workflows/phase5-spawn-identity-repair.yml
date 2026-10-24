@@ -1,0 +1,181 @@
+name: Sentient Phase 5 Spawn Identity Repair
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Fence exact canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "e6802ab60edc9994677632cca612befae5c0b2e3"
+          echo "CANONICAL_FENCE=PASS"
+
+      - name: Apply minimal durable Spawn identity repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/objective-continuation/postgres-spawn-repository.ts")
+          text = source.read_text()
+
+          import_anchor = 'import type {\n  ChildExecutionResultV1,'
+          if 'import { canonicalJson } from "../retrieval/digest.js";' not in text:
+              if import_anchor not in text:
+                  raise SystemExit("IMPORT_ANCHOR_MISSING")
+              text = text.replace(
+                  import_anchor,
+                  'import { canonicalJson } from "../retrieval/digest.js";\n' + import_anchor,
+                  1,
+              )
+
+          old = '''function fixedIdentity(identity: SpawnExecutionRecordV1["identity"]): string {
+            const { status: _status, endedAt: _endedAt, ...fixed } = identity;
+            return JSON.stringify(fixed);
+          }'''
+          new = '''export function immutableSpawnExecutionIdentityKeyV1(
+            identity: SpawnExecutionRecordV1["identity"],
+          ): string {
+            const { status: _status, endedAt: _endedAt, ...fixed } = identity;
+            return canonicalJson(fixed);
+          }'''
+          if old not in text:
+              raise SystemExit("FIXED_IDENTITY_ANCHOR_MISSING")
+          text = text.replace(old, new, 1)
+
+          comparison = 'fixedIdentity(result.identity) !== fixedIdentity(execution.identity)'
+          replacement = (
+              'immutableSpawnExecutionIdentityKeyV1(result.identity) !== '
+              'immutableSpawnExecutionIdentityKeyV1(execution.identity)'
+          )
+          if comparison not in text:
+              raise SystemExit("IDENTITY_COMPARISON_ANCHOR_MISSING")
+          text = text.replace(comparison, replacement, 1)
+          source.write_text(text)
+
+          test = Path("test/spawn-immutable-identity.test.ts")
+          test.write_text('''import assert from "node:assert/strict";
+          import test from "node:test";
+
+          import { immutableSpawnExecutionIdentityKeyV1 } from "../src/objective-continuation/postgres-spawn-repository.js";
+          import type { SentientExecutionIdentityV1 } from "../src/spawn/execution-contracts.js";
+
+          const base: SentientExecutionIdentityV1 = {
+            taskId: "task-1",
+            executionId: "exec-1",
+            parentExecutionId: "root-1",
+            depth: 1,
+            role: "independent-analysis",
+            targetId: "local-hf",
+            backendId: "huggingface-local-zero-cost",
+            provider: "huggingface-local",
+            model: "model-1",
+            targetRevision: "rev-1",
+            sentientCode: { sha: "abc123", version: "v1" },
+            requestDigest: "req",
+            packageDigest: "pkg",
+            skillSetDigest: "skills",
+            contextDigest: "ctx",
+            startedAt: "2026-10-24T00:00:00.000Z",
+            endedAt: null,
+            status: "running",
+          };
+
+          test("immutable Spawn identity comparison survives jsonb-style key reordering", () => {
+            const reordered: SentientExecutionIdentityV1 = {
+              status: "running",
+              endedAt: null,
+              startedAt: base.startedAt,
+              contextDigest: base.contextDigest,
+              skillSetDigest: base.skillSetDigest,
+              packageDigest: base.packageDigest,
+              requestDigest: base.requestDigest,
+              sentientCode: { version: base.sentientCode.version, sha: base.sentientCode.sha },
+              targetRevision: base.targetRevision,
+              model: base.model,
+              provider: base.provider,
+              backendId: base.backendId,
+              targetId: base.targetId,
+              role: base.role,
+              depth: base.depth,
+              parentExecutionId: base.parentExecutionId,
+              executionId: base.executionId,
+              taskId: base.taskId,
+            };
+            assert.equal(
+              immutableSpawnExecutionIdentityKeyV1(base),
+              immutableSpawnExecutionIdentityKeyV1(reordered),
+            );
+          });
+
+          test("Spawn completion status and endedAt are intentionally mutable identity fields", () => {
+            const terminal: SentientExecutionIdentityV1 = {
+              ...base,
+              status: "succeeded",
+              endedAt: "2026-10-24T00:00:01.000Z",
+            };
+            assert.equal(
+              immutableSpawnExecutionIdentityKeyV1(base),
+              immutableSpawnExecutionIdentityKeyV1(terminal),
+            );
+          });
+
+          test("true immutable Spawn identity mutation still changes the comparison key", () => {
+            const mutated: SentientExecutionIdentityV1 = { ...base, model: "different-model" };
+            assert.notEqual(
+              immutableSpawnExecutionIdentityKeyV1(base),
+              immutableSpawnExecutionIdentityKeyV1(mutated),
+            );
+          });
+          ''')
+          PY
+
+          mapfile -t changed < <(git diff --name-only | sort)
+          printf 'CHANGED_FILE=%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = "src/objective-continuation/postgres-spawn-repository.ts"
+          test "${changed[1]}" = "test/spawn-immutable-identity.test.ts"
+
+      - name: Build and focused Phase 5 regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/spawn-immutable-identity.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js \
+            dist/test/phase5-collaborative-convergence.test.js
+          echo "PHASE5_IDENTITY_REGRESSION=PASS"
+          echo "PHASE5_RESTART_REGRESSION=PASS"
+
+      - name: Commit tested repair to shared canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "e6802ab60edc9994677632cca612befae5c0b2e3"
+          git config user.name "sentient-phase5-convergence"
+          git config user.email "sentient-phase5-convergence@users.noreply.github.com"
+          git add src/objective-continuation/postgres-spawn-repository.ts test/spawn-immutable-identity.test.ts
+          git commit -m "fix: canonicalize durable Spawn identity comparison"
+          git push origin HEAD:sentient-production-composition-20261017
+          echo "NEW_SHA=$(git rev-parse HEAD)"
+          echo "NEW_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "PUBLIC_RUNNER_USED=true"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "NETLIFY_USAGE=0"
+          echo "SECRET_VALUES_EXPOSED=false"
