@@ -73,7 +73,7 @@ jobs:
           }
           if(b.status!=="succeeded") throw new Error("CERT13_OBJECTIVE_NOT_SUCCEEDED:"+String(b.status));
           const turn=b?.result?.body?.result??{}, sub=turn.subordinate??{}, p3=turn.phase3Assessment??{};
-          if(turn.status!=="RESPONDED"||turn?.state?.authoritativeOwner!=="SENTIENT"||turn?.authority?.owner!=="SENTIENT || sub.accepted!==true) throw new Error("CERT13_AUTHORITY_FAILED");
+          if(turn.status!=="RESPONDED"||turn?.state?.authoritativeOwner!=="SENTIENT"||turn?.authority?.owner!=="SENTIENT" || sub.accepted!==true) throw new Error("CERT13_AUTHORITY_FAILED");
           if(sub.provider!=="huggingface-local"||sub.model!=="onnx-community/SmolLM2-135M-Instruct-ONNX"||sub.revision!=="b8a5c0f183b78c55955a5364f610c36668b5e681"||sub.acceptancePolicyId!=="sentient-fly-phase1-acceptance-policy/v1") throw new Error("CERT13_MODEL_IDENTITY_FAILED");
           if(p3.status!=="ASSESSED"||p3.transport!=="LOCAL"||p3.authoritative!==false||p3.authorityOwner!=="SENTIENT_RUNTIME" ||!p3.modelId) throw new Error("CERT13_PHASE3_FAILED");
           const req=deriveTaskRequirementsV1({requestId:`policy:${cert}`,sessionId:`policy-session:${cert}`,taskId:`policy-task:${cert}`,userRequest:"Evaluate a syntactically valid subordinate proposal."});
