@@ -11,8 +11,8 @@ jobs:
     timeout-minutes: 25
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      S: a6eb540a33fcb509d7aa3e833096d5d6a88d7167
-      T: 07f1d6a0c7990706e06fedd9005b72d925b82d71
+      S: e6802ab60edc9994677632cca612befae5c0b2e3
+      T: 6a5de2c43ae2f5bb22055234a75694782cafd4b7
       R: SENTIENT_GOVERNOR_RECOVERY_V1
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
