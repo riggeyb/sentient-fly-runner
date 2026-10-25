@@ -65,6 +65,9 @@ jobs:
             echo "BUILD=PASS"
           else
             echo "BUILD=FAIL"
+            error_count="$(grep -oE 'error TS[0-9]+' /tmp/build.log | wc -l | tr -d ' ')"
+            echo "TSC_ERROR_COUNT=$error_count"
+            grep -oE 'error TS[0-9]+' /tmp/build.log | sed 's/error //' | sort | uniq -c | awk '{print "TSC_CODE_"$2"="$1}'
             echo "PRIVATE_SOURCE_DIAGNOSTICS_EXPOSED=false"
             exit 1
           fi
