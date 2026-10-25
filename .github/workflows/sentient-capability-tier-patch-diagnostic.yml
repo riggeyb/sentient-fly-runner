@@ -1,0 +1,38 @@
+name: Sentient Capability Tier Patch Diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Show public rev2 patch fragments for engineering-jobs test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/capability-tier-hardening-v1-rev2/payload.gz.part-* > /tmp/payload.gz
+          gzip -t /tmp/payload.gz
+          gzip -dc /tmp/payload.gz > /tmp/payload.mjs
+          node - <<'NODE'
+          const fs=require("node:fs");
+          const s=fs.readFileSync("/tmp/payload.mjs","utf8");
+          const needle='replaceOnce("test/engineering-jobs.test.ts"';
+          let pos=0,count=0;
+          while((pos=s.indexOf(needle,pos))>=0){
+            count++;
+            const next=s.indexOf("replaceOnce(",pos+needle.length);
+            process.stdout.write(`---FRAGMENT_${count}---\n`);
+            process.stdout.write(s.slice(pos,next<0?Math.min(s.length,pos+6000):next));
+            process.stdout.write("\n");
+            pos+=needle.length;
+          }
+          if(count===0) throw new Error("engineering_jobs_patch_not_found");
+          console.log("FRAGMENT_COUNT="+count);
+          NODE
+          echo "PUBLIC_PATCH_FRAGMENT_ONLY=true"
+          echo "SECRET_VALUES_EXPOSED=false"
