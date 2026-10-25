@@ -57,7 +57,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --quiet --no-tags origin "${{ inputs.source_branch }}" sentient-production-composition-20261017
           test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
           test "$(git rev-parse "origin/${{ inputs.source_branch }}")" = "${{ inputs.source_sha }}"
           test "$(git merge-base HEAD origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
@@ -109,7 +108,12 @@ jobs:
           source_tree="$(git rev-parse 'HEAD^{tree}')"
           git bundle create sentient-source.bundle HEAD >/tmp/bundle-create.log 2>&1
           git bundle verify sentient-source.bundle >/tmp/bundle-verify.log 2>&1
-          if docker build             --build-arg "SENTIENT_RUNTIME_SHA=$source_sha"             --build-arg "SENTIENT_RUNTIME_TREE=$source_tree"             --build-arg "SENTIENT_SKILLS_SHA=unset"             --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=e9bd0c9135f05da2be337e5e7ac4077af0f4649d"             -t "sentient-storage-hf-validate:${{ inputs.source_sha }}" . >/tmp/docker-build.log 2>&1; then
+          if docker build \
+            --build-arg "SENTIENT_RUNTIME_SHA=$source_sha" \
+            --build-arg "SENTIENT_RUNTIME_TREE=$source_tree" \
+            --build-arg "SENTIENT_SKILLS_SHA=unset" \
+            --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=e9bd0c9135f05da2be337e5e7ac4077af0f4649d" \
+            -t "sentient-storage-hf-validate:${{ inputs.source_sha }}" . >/tmp/docker-build.log 2>&1; then
             image_id="$(docker image inspect "sentient-storage-hf-validate:${{ inputs.source_sha }}" --format '{{.Id}}')"
             test -n "$image_id"
             rm -f sentient-source.bundle
@@ -117,7 +121,7 @@ jobs:
             echo "SOURCE_BUNDLE_VERIFIED=PASS"
             echo "SOURCE_BUNDLE_COMMITTED=false"
           else
-            rm -f sentient-source.bundle
+            rm -f sentient-source.bundle 
             echo "DOCKER_BUILD_REPRODUCIBLE=FAIL"
             echo "PRIVATE_SOURCE_DIAGNOSTICS_EXPOSED=false"
             exit 1
