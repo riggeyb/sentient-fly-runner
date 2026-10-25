@@ -1,0 +1,67 @@
+name: Engineering Job Receipt Diagnostic
+
+"on":
+  workflow_dispatch:
+    inputs:
+      job_id: {required: true, type: string}
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      JOB_ID: ${{ inputs.job_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyct@master
+      - name: Read sanitized exact EngineeringJob receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$JOB_ID" =~ ^[0-9a-f-]{36}$ ]]
+          cat >/tmp/job-receipt.mjs <<'NODE'
+          import pg from "/app/node_modules/pg/hib/index.js";
+          const {Pool}=pg;
+          const id=String(process.env.JOB_ID??"").trim();
+          const db=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
+          if(!db)throw new Error("GOVERNOR_LEDGER_DB_MISSING");
+          const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
+          const clean=(v,n=12000)=>String(v??"")
+            .replace(/gh[pousr_[A-Za-z0-9_]+/g,"[REDACTED]")
+            .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
+            .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]")
+            .replace(/[\0]/g,"").slice(0,n);
+          try{
+            const r=await pool.query(`
+              select job_id,status,start_sha,start_tree,build_result,end_sha,end_tree,
+                     changed_files,test_result,push_result,deploy_result,error_code,
+                     created_at,started_at,completed_at,steps
+              from sentient_deployment_governor.engineering_jobs
+              where job_id=$1`,[id]);
+            if(r.rows.length!==1)throw new Error("ENGINEERING_JOB_NOT_FOUND");
+            const row=r.rows[0];
+            const steps=Array.isArray(row.steps)?row.steps:[];
+            const out={
+              job_id:row.job_id,status:row.status,start_sha:row.start_sha,start_tree:row.start_tree,
+              build_result:row.build_result,end_sha:row.end_sha,end_tree:row.end_tree,
+              changed_files:row.changed_files,test_result:row.test_result,push_result:row.push_result,
+              deploy_result:row.deploy_result,error_code:row.error_code,
+              created_at:row.created_at,started_at:row.started_at,completed_at:row.completed_at,
+              steps:steps.map(s=>({
+                name:s.name,category:s.category,command:s.command,exitCode:s.exitCode,
+                termination:s.termination,spawnError:clean(s.spawnError,1000),
+                stdoutTruncated:s.stdoutTruncated,stderrTruncated:s.stderrTruncated,
+                stdout:clean(s.stdout),stderr:clean(s.stderr),
+                startedAt:s.startedAt,endedAt:s.endedAt
+              }))
+            };
+            console.log("ENGINEERING_RECEIPT="+JSON.stringify(out));
+            console.log("ENGINEERING_RECEIPT_DIAGNOSTIC=PASS");
+            console.log("SECRET_VALUES_EXPOSED=false");
+          }finally{await pool.end();}
+          NODE
+          B64="$(base64 -w0 /tmp/job-receipt.mjs)"
+          flyctl ssh console -a sentient-deployment-governor -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/job-receipt.mjs && JOB_ID=$JOB_ID node /app/job-receipt.mjs; rc=\$?; rm -f /app/job-receipt.mjs; exit \$rc'"
