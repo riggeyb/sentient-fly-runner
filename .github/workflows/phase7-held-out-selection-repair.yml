@@ -1,0 +1,203 @@
+name: Sentient Phase7 Held-Out Selection Repair
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fence and apply Phase7 held-out selection repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "4fe2ad60442e876f1931386ad6438b9d82487346"
+          test "$(git rev-parse 'HEAD^{tree}')" = "fc15a79f126bcc046e5f30569c6e3d47df217775"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/phase7/production-lineage.ts")
+          s = p.read_text()
+          old = '''export function resolvePhase7HeldOutExamplesV1(snapshot:StateSnapshot,excluded:ReadonlySet<string>):readonly Phase7ResolvedExampleV1[]{
+           const byRun=new Map<string,Experience[]>();
+           for(const e of snapshot.records.experiences){
+            if(!e.modelRunId||excluded.has(e.modelRunId)||(e.outcome!=="success"&&e.outcome!=="failure"))continue;
+            const list=byRun.get(e.modelRunId)??[];list.push(e);byRun.set(e.modelRunId,list);
+           }
+           const out:Phase7ResolvedExampleV1[]=[];
+           for(const [runId,experiences] of [...byRun.entries()].sort(([a],[b])=>a.localeCompare(b))){
+            const run=snapshot.records.modelRuns.find(x=>x.id===runId),outcome=experiences[0]!.outcome;
+            if(!run||experiences.some(x=>x.outcome!==outcome)||(outcome==="success"&&run.status!=="succeeded")||
+               (outcome==="failure"&&run.status!=="failed"))continue;
+            const verification=snapshot.records.verifications.filter(x=>validVerification(snapshot,x,runId))
+              .sort((a,b)=>a.id.localeCompare(b.id))[0];
+            if(!verification)continue;
+            out.push(Object.freeze({runId,text:experienceText(experiences),label:outcome==="success"?"POSITIVE":"NEGATIVE",
+             evidenceRefs:Object.freeze([...verification.evidenceIds]),verificationRef:verification.id}));
+            if(out.length>=MAX_HELD_OUT_EXAMPLES)break;
+           }
+           return Object.freeze(out);
+          }'''
+          new = '''export function resolvePhase7HeldOutExamplesV1(
+           snapshot:StateSnapshot,
+           excluded:ReadonlySet<string>,
+           sessionId?:string,
+          ):readonly Phase7ResolvedExampleV1[]{
+           const byRun=new Map<string,Experience[]>();
+           for(const e of snapshot.records.experiences){
+            if(!e.modelRunId||excluded.has(e.modelRunId)||(e.outcome!=="success"&&e.outcome!=="failure"))continue;
+            const run=snapshot.records.modelRuns.find(x=>x.id===e.modelRunId);
+            if(sessionId!==undefined&&run?.sessionId!==sessionId)continue;
+            const list=byRun.get(e.modelRunId)??[];list.push(e);byRun.set(e.modelRunId,list);
+           }
+           const eligible:Phase7ResolvedExampleV1[]=[];
+           for(const [runId,experiences] of [...byRun.entries()].sort(([a],[b])=>a.localeCompare(b))){
+            const run=snapshot.records.modelRuns.find(x=>x.id===runId),outcome=experiences[0]!.outcome;
+            if(!run||experiences.some(x=>x.outcome!==outcome)||(outcome==="success"&&run.status!=="succeeded")||
+               (outcome==="failure"&&run.status!=="failed"))continue;
+            const verification=snapshot.records.verifications.filter(x=>validVerification(snapshot,x,runId))
+              .sort((a,b)=>a.id.localeCompare(b.id))[0];
+            if(!verification)continue;
+            eligible.push(Object.freeze({runId,text:experienceText(experiences),label:outcome==="success"?"POSITIVE":"NEGATIVE",
+             evidenceRefs:Object.freeze([...verification.evidenceIds]),verificationRef:verification.id}));
+           }
+           const selected=eligible.slice(0,MAX_HELD_OUT_EXAMPLES);
+           if(eligible.length>MAX_HELD_OUT_EXAMPLES&&!phase7ExamplesHaveBothLabelsV1(selected)&&phase7ExamplesHaveBothLabelsV1(eligible)){
+            const missingLabel=selected.some(x=>x.label==="POSITIVE")?"NEGATIVE":"POSITIVE";
+            const replacement=eligible.find(x=>x.label===missingLabel);
+            if(replacement)selected[selected.length-1]=replacement;
+           }
+           selected.sort((a,b)=>a.runId.localeCompare(b.runId));
+           return Object.freeze(selected);
+          }'''
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path("src/application/production-model-improvement.ts")
+          s = p.read_text()
+          old = '''  const heldOut=resolvePhase7HeldOutExamplesV1(snapshot,trainingRunIds).filter(
+           x=>snapshot.records.modelRuns.some(run=>run.id===x.runId&&run.sessionId===learning.episode.sessionId),
+          );'''
+          new = '''  const heldOut=resolvePhase7HeldOutExamplesV1(snapshot,trainingRunIds,learning.episode.sessionId);'''
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new, 1))
+
+          Path("test/phase7-held-out-selection.test.ts").write_text('''import assert from "node:assert/strict";
+          import test from "node:test";
+
+          import {
+            phase7ExamplesHaveBothLabelsV1,
+            resolvePhase7HeldOutExamplesV1,
+          } from "../src/phase7/production-lineage.js";
+
+          type Snapshot = Parameters<typeof resolvePhase7HeldOutExamplesV1>[0];
+
+          function snapshotWith(targetPositiveCount: number, includeTargetNegative: boolean): Snapshot {
+            const modelRuns: Record<string, unknown>[] = [];
+            const experiences: Record<string, unknown>[] = [];
+            const verifications: Record<string, unknown>[] = [];
+            const evidence: Record<string, unknown>[] = [];
+            const add = (runId: string, sessionId: string, label: "POSITIVE" | "NEGATIVE") => {
+              const succeeded = label === "POSITIVE";
+              const evidenceId = `evidence:${runId}`;
+              modelRuns.push({ id: runId, sessionId, status: succeeded ? "succeeded" : "failed" });
+              experiences.push({
+                id: `experience:${runId}`,
+                modelRunId: runId,
+                outcome: succeeded ? "success" : "failure",
+                summary: succeeded ? "positive verified outcome" : "negative verified outcome",
+              });
+              evidence.push({ id: evidenceId });
+              verifications.push({
+                id: `verification:${runId}`,
+                status: "passed",
+                deterministic: true,
+                evidenceIds: [evidenceId],
+                provenance: { actor: "system", modelRunId: runId },
+              });
+            };
+
+            for (let i = 0; i < 40; i += 1) {
+              add(`000-global-${String(i).padStart(2, "0")}`, "other-session", "POSITIVE");
+            }
+            for (let i = 0; i < targetPositiveCount; i += 1) {
+              add(`100-target-positive-${String(i).padStart(2, "0")}`, "target-session", "POSITIVE");
+            }
+            if (includeTargetNegative) add("999-target-negative", "target-session", "NEGATIVE");
+
+            return { records: { modelRuns, experiences, verifications, evidence } } as unknown as Snapshot;
+          }
+
+          test("Phase 7 filters to lesson session before bounding and preserves both labels", () => {
+            const heldOut = resolvePhase7HeldOutExamplesV1(snapshotWith(40, true), new Set(), "target-session");
+            assert.equal(heldOut.length, 32);
+            assert.equal(heldOut.every((example) => example.runId.includes("target")), true);
+            assert.equal(phase7ExamplesHaveBothLabelsV1(heldOut), true);
+            assert.equal(heldOut.some((example) => example.runId === "999-target-negative"), true);
+          });
+
+          test("Phase 7 still fails label coverage when a verified label is genuinely absent", () => {
+            const heldOut = resolvePhase7HeldOutExamplesV1(snapshotWith(40, false), new Set(), "target-session");
+            assert.equal(heldOut.length, 32);
+            assert.equal(heldOut.every((example) => example.label === "POSITIVE"), true);
+            assert.equal(phase7ExamplesHaveBothLabelsV1(heldOut), false);
+          });
+          ''')
+          PY
+          git add -N test/phase7-held-out-selection.test.ts
+          mapfile -t changed < <(git diff --name-only | sort)
+          printf 'CHANGED_FILE=%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 3
+          test "${changed[0]}" = "src/application/production-model-improvement.ts"
+          test "${changed[1]}" = "src/phase7/production-lineage.ts"
+          test "${changed[2]}" = "test/phase7-held-out-selection.test.ts"
+          git diff --check
+          echo "PHASE7_HELD_OUT_REPAIR_APPLIED=PASS"
+
+      - name: Build and focused Phase7 regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/phase7-held-out-selection.test.js \
+            dist/test/production-model-improvement.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/phase7-local-hf-feature-head.test.js
+          echo "PHASE7_FOCUSED_REGRESSIONS=PASS"
+
+      - name: Commit tested repair to shared canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "4fe2ad60442e876f1931386ad6438b9d82487346"
+          git fetch origin sentient-production-composition-20261017
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "4fe2ad60442e876f1931386ad6438b9d82487346"
+          git config user.name "sentient-phase7-convergence"
+          git config user.email "sentient-phase7-convergence@users.noreply.github.com"
+          git add src/application/production-model-improvement.ts src/phase7/production-lineage.ts test/phase7-held-out-selection.test.ts
+          git commit -m "fix: bound Phase7 holdout within lesson session"
+          git push origin HEAD:sentient-production-composition-20261017
+          echo "NEW_SHA=$(git rev-parse HEAD)"
+          echo "NEW_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "PUBLIC_RUNNER_USED=true"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "NETLIFY_USAGE=0"
+          echo "SECRET_VALUES_EXPOSED=false"
