@@ -1,0 +1,48 @@
+name: Sentient Capability Tier Spawn Semantic Diagnostic
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect failing Spawn tier test semantics without source output
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/capability-tier-hardening-v1-rev2/payload.gz.part-* > /tmp/payload.gz
+          gzip -t /tmp/payload.gz
+          gzip -dc /tmp/payload.gz > /tmp/payload.mjs
+          node - <<'NODE'
+          const fs=require("node:fs");
+          const s=fs.readFileSync("/tmp/payload.mjs","utf8");
+          const title="Spawn child cannot exceed parent capability tier even when path scope would otherwise allow it";
+          const p=s.indexOf(title);
+          if(p<0) throw new Error("target_test_not_found");
+          const start=Math.max(0,s.lastIndexOf("test(",p));
+          let end=s.indexOf("\ntest(",p+title.length);
+          if(end<0) end=Math.min(s.length,p+9000);
+          const b=s.slice(start,end);
+          const checks={
+            TARGET_TEST_FOUND:true,
+            PARENT_MAX_TIER_1:/maxCapabilityTier\s*:\s*1/.test(b),
+            REQUEST_HAS_WRITE_PATH:/writePaths\s*:\s*\[[^\]]*[^\s\]]/.test(b),
+            REQUEST_HAS_TIER2_TOKEN:/(source_mutation|source_write|engineering_job|commit|push)/.test(b),
+            EXPECTS_TIER_ESCALATION:/capability_tier_escalation/.test(b),
+            EXPECTS_DENY:/decision\s*,\s*["']deny["']/.test(b)||/decision\s*===?\s*["']deny["']/.test(b),
+          };
+          for(const [k,v] of Object.entries(checks)) console.log(`${k}=${v}`);
+          const auth=s.indexOf("function requestedSpawnCapabilityTierV1");
+          if(auth<0) throw new Error("tier_function_not_found");
+          const frag=s.slice(auth,Math.min(s.length,auth+2600));
+          console.log("REQUEST_TIER_USES_WRITE_PATHS="+/repositoryWritePaths:\s*request\.scopes\.repositories\.flatMap\(\(scope\) => scope\.writePaths\)/.test(frag));
+          console.log("PARENT_TIER_PREFERS_EXPLICIT_MAX="+/if \(grant\.maxCapabilityTier !== undefined\) return grant\.maxCapabilityTier/.test(frag));
+          console.log("SPAWN_TIER_COMPARISON_PRESENT="+/requestedSpawnCapabilityTierV1\(request\) <= effectiveGrantCapabilityTierV1\(parent\)/.test(frag));
+          console.log("PRIVATE_SOURCE_PRINTED=false");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
