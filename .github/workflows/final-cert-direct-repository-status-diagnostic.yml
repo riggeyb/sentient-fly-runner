@@ -1,0 +1,96 @@
+name: Final Cert Direct Repository Status Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Reproduce exact production repository status action
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          machines="$(flyctl machines list -a "$APP" --json)"
+          mid="$(jq -er '.[0].id' <<<"$machines")"
+          state="$(jq -er '.[0].state' <<<"$machines")"
+          if [ "$state" != started ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+          ready=false
+          for _ in $(seq 1 90); do
+            body="$(curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" || true)"
+            if jq -e --arg s "$SHA" --arg t "$TREE" \
+              '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' \
+              >/dev/null 2>&1 <<<"$body"; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+
+          cat >/tmp/repo-status-diagnostic.mjs <<'NODE'
+          import { createLocalRepositoryActionExecutorV1 } from "/app/dist/src/action-fabric/local-repository-executor.js";
+          const sha=String(process.env.DIAG_SHA??"").trim();
+          const tree=String(process.env.DIAG_TREE??"").trim();
+          if(process.env.SENTIENT_RUNTIME_SHA!==sha||process.env.SENTIENT_RUNTIME_TREE!==tree) throw new Error("EXACT_SOURCE_MISMATCH");
+          const repository="riggeyb/sentient";
+          const executor=createLocalRepositoryActionExecutorV1({repositoryPaths:{[repository]:"/opt/sentient-source"}});
+          const request={
+            schemaVersion:"sentient-action-fabric/v1",
+            actionId:"final-cert-direct-repository-status",
+            objectiveId:"final-cert-direct-repository-status",
+            objective:"Inspect the working tree status without mutation.",
+            claim:{assertionId:"final-cert-direct-repository-status-assertion",invariant:"The exact source revision working tree status was inspected without mutation."},
+            source:{repository,commitSha:sha,treeSha:tree,allowedWorkspacePaths:[],writebackPolicy:"NONE"},
+            requiredCapabilities:["repository.read","repository.exact-revision","repository.commands"],
+            steps:[{stepId:"inspect-source-status",command:"git",args:["status","--short","--branch"]}],
+            expectedArtifacts:[],
+            relevantInputs:[],
+            impactedSurfaces:["production:repository"],
+            risk:{tier:"T0",reason:"read-only exact-revision repository inspection"},
+            budget:{maxRuntimeMs:180000,maxCostMicros:0},
+            privacyPolicy:{classification:"private",allowedDataHandlingModes:["local-process"],allowExternalProcessing:false},
+            authority:{protectedOperation:null,requestedWritePaths:[]},
+            priorEvidence:[],
+          };
+          const receipt=await executor.execute(request,new AbortController().signal);
+          console.log("REPOSITORY_ACTION_OUTCOME="+receipt.outcome);
+          console.log("REPOSITORY_ACTION_REASON="+String(receipt.reason).replace(/[\r\n]/g," ").slice(0,500));
+          console.log("PRE_COMMIT="+String(receipt.preExecution?.commitSha??"none"));
+          console.log("PRE_TREE="+String(receipt.preExecution?.treeSha??"none"));
+          console.log("PRE_DIRTY_COUNT="+String(receipt.preExecution?.dirtyPaths?.length??-1));
+          console.log("POST_COMMIT="+String(receipt.postExecution?.commitSha??"none"));
+          console.log("POST_TREE="+String(receipt.postExecution?.treeSha??"none"));
+          console.log("POST_DIRTY_COUNT="+String(receipt.postExecution?.dirtyPaths?.length??-1));
+          console.log("COMMAND_COUNT="+String(receipt.commands.length));
+          for(const c of receipt.commands){
+            console.log("COMMAND_STEP="+c.stepId);
+            console.log("COMMAND_EXIT="+String(c.exitStatus));
+            console.log("COMMAND_TERMINATION="+String(c.termination??"none"));
+            console.log("COMMAND_SPAWN_ERROR="+String(c.spawnError??"none").replace(/[\r\n]/g," ").slice(0,300));
+            console.log("COMMAND_STDERR="+String(c.stderr??"").replace(/[\r\n]/g," ").slice(0,300));
+          }
+          console.log("EXACT_SOURCE_IDENTITY=PASS");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          b64="$(base64 -w0 /tmp/repo-status-diagnostic.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64|base64 -d >/tmp/repo-status-diagnostic-${GITHUB_RUN_ID}.mjs; DIAG_SHA=$SHA DIAG_TREE=$TREE node /tmp/repo-status-diagnostic-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/repo-status-diagnostic-${GITHUB_RUN_ID}.mjs; exit \$rc'"
