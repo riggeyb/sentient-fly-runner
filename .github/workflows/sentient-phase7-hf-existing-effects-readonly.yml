@@ -65,10 +65,21 @@ jobs:
           test -f scripts/sentient-phase7-hf-existing-effects-readonly.mjs
           b64="$(base64 -w0 scripts/sentient-phase7-hf-existing-effects-readonly.mjs)"
           cmd="printf '%s' '$b64' | base64 -d >/tmp/effects.mjs && node /tmp/effects.mjs; rc=\$?; rm -f /tmp/effects.mjs; exit \$rc"
-          set +e
-          output="$(flyctl ssh console -a "$APP" -s "${{ steps.fence.outputs.machine_id }}" -C "$cmd" 2>&1)"
-          rc=$?
-          set -e
+          output=""
+          rc=1
+          for attempt in $(seq 1 12); do
+            set +e
+            output="$(flyctl ssh console -a "$APP" -s "${{ steps.fence.outputs.machine_id }}" -C "$cmd" 2>&1)"
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              break
+            fi
+            if ! grep -Fq "tunnel unavailable" <<<"$output"; then
+              break
+            fi
+            sleep 2
+          done
           printf '%s\n' "$output"
           test "$rc" -eq 0
           for marker in \
