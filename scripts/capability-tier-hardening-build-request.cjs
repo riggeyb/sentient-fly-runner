@@ -13,7 +13,7 @@ const brittle=`replaceOnce("test/engineering-jobs.test.ts",
 \`     repo:VALID.repo, branch:VALID.branch, expectedHead:VALID.expectedHead, objective:VALID.objective,
       authorityReceipt:null, status:"QUEUED", startSha:null,
 \`);`;
-const tolerant=`replaceOnce("test/engineering-jobs.test.ts",\n\`     status:"QUEUED", startSha:null,\`,\n\`      authorityReceipt:null, status:"QUEUED", startSha:null,\`);`;
+const tolerant=`replaceOnce("test/engineering-jobs.test.ts",\n\`     status:"QUEUUED", startSha:null,\`,\n\`     authorityReceipt:null, status:"QUEUED", startSha:null,\`);`;
 const first=patchText.indexOf(brittle);
 if(first<0 || patchText.indexOf(brittle,first+1)>=0) throw new Error("EXPECTED_SINGLE_BRITTLE_ENGINEERING_FIXTURE_PATCH");
 patchText=patchText.slice(0,first)+tolerant+patchText.slice(first+brittle.length);
@@ -44,7 +44,7 @@ commands.push(
     name:"assemble-verify-patch",
     category:"inspect",
     command:"node",
-    args:["-e","const f=require('fs'),c=require('crypto');const n=Number(process.argv[1]),want=process.argv[2];const p=Buffer.concat(Array.from({length:n},(_,i)=>f.readFileSync('/tmp/capability-tier-hardening.mjs.part-'+i));const got=c.createHash('sha256').update(p).digest('hex');if(got!==want)throw new Error('capability_patch_source_digest_mismatch');f.writeFileSync('/tmp/capability-tier-hardening.mjs',p)",String(chunks.length),patchSha],
+    args:["-e","const f=require('fs'),c=require('crypto');const n=Number(process.argv[1]),want=process.argv[2];const p=Buffer.concat(Array.from({length:n},(_,i)=>f.readFileSync('/tmp/capability-tier-hardening.mjs.part-'+i)));const got=c.createHash('sha256').update(p).digest('hex');if(got!==want)throw new Error('capability_patch_source_digest_mismatch');f.writeFileSync('/tmp/capability-tier-hardening.mjs',p)",String(chunks.length),patchSha],
     timeoutMs:30000,
   },
   {name:"apply-patch",category:"edit",command:"node",args:["/tmp/capability-tier-hardening.mjs"],timeoutMs:60000},
