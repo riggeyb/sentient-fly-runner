@@ -59,7 +59,9 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
           test "$(git rev-parse "origin/${{ inputs.source_branch }}")" = "${{ inputs.source_sha }}"
-          test "$(git merge-base HEAD origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
+          canonical_sha="$(git rev-parse origin/sentient-production-composition-20261017)"
+          test "$canonical_sha" = "b11c0ed524c0a9723cbf2a292689c1cc53228e28"
+          test "$(git merge-base HEAD origin/sentient-production-composition-20261017)" = "$canonical_sha"
           test -z "$(git ls-files 'node_modules/**')"
           test -z "$(git ls-files 'dist/**')"
           test -f .gitignore
@@ -67,6 +69,7 @@ jobs:
           grep -Fxq 'node_modules/' .gitignore
           grep -Fxq 'dist/' .gitignore
           echo "SOURCE_IDENTITY_FENCE=PASS"
+          echo "CANONICAL_BASE_SHA=$canonical_sha"
           echo "SOURCE_SHA=$(git rev-parse HEAD)"
           echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo "NODE_MODULES_TRACKING_REMOVED=PASS"
@@ -121,7 +124,7 @@ jobs:
             echo "SOURCE_BUNDLE_VERIFIED=PASS"
             echo "SOURCE_BUNDLE_COMMITTED=false"
           else
-            rm -f sentient-source.bundle 
+            rm -f sentient-source.bundle
             echo "DOCKER_BUILD_REPRODUCIBLE=FAIL"
             echo "PRIVATE_SOURCE_DIAGNOSTICS_EXPOSED=false"
             exit 1
