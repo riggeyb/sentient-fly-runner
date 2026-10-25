@@ -1,15 +1,11 @@
 name: Sentient Capability Tier Bootstrap
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: sentient-capability-tier-bootstrap
   cancel-in-progress: false
-
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
@@ -17,8 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: dfa6420f7598de8add3634b19660f656b2a36f3b
-
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Reconstruct and validate bounded EngineeringJob request
         shell: bash
         run: |
@@ -31,25 +29,25 @@ jobs:
             .branch == "sentient-production-composition-20261017" and
             .expectedHead == "5ce976089532a86ac262a2760367318b6f4b72a5" and
             (.objective | contains("SENTIENT_CAPABILITY_TIER_AND_AUTHORITY_ENFORCEMENT_V1")) and
-            (.commands | type == "array" and length >= 3 and length <= 8) and
+            (.commands | type == "array" and length >= 3 and length <= 32) and
             (all(.commands[]; (.category == "inspect" or .category == "edit" or .category == "build" or .category == "test" or .category == "shell"))) and
             (all(.commands[]; (.args | type == "array" and length <= 64))) and
             (all(.commands[].args[]; (type == "string" and length <= 8192))) and
+            (all(.commands[]; (.timeoutMs >= 1000 and .timeoutMs <= 600000))) and
+            (.timeoutMs >= 5000 and .timeoutMs <= 1800000) and
+            ([.commands[].timeoutMs] | add <= .timeoutMs) and
             (.commands[-1].category == "test") and
-            (.timeoutMs <= 600000) and
             (.commitMessage | contains("capability"))
           ' /tmp/capability-tier-request.json >/dev/null
           echo "BOOTSTRAP_REQUEST_VALIDATED=true"
           echo "EXPECTED_HEAD=5ce976089532a86ac262a2760367318b6f4b72a5"
           echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
           echo "SECRET_VALUES_EXPOSED=false"
-
       - name: Create exact bounded EngineeringJob through existing operator
         env:
-          SENTIENT_OPS_BEARER_TOKEN: ${{ secrets.SENTIENT_OPS_BEARER_TOKEN }}
-          SENTIENT_MCP_CONNECT_ID: ${{ secrets.SENTIENT_MCP_CONNECT_ID }}
+          MCP_CLIENT_TOKEN: ${{ secrets.MCP_CLIENT_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          ARGS="$(cat /tmp/capability-tier-request.json)"
-          node operator.mjs engineering_create "$ARGS"
+          args="$(cat /tmp/capability-tier-request.json)"
+          OPERATION=engineering_create ARGUMENTS="$args" node operator.mjs
