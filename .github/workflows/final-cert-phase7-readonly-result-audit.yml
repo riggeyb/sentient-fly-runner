@@ -45,13 +45,14 @@ jobs:
           await repo.initialize();
           try {
             const snap=await repo.snapshot(), proof=process.env.FINAL_PHASE7_PROOF_ID;
-            const memories=snap.records.memories.filter(x=>x.metadata?.phase7LiveProofId===proof && x.metadata?.phase7Artifact==='model_improvement_v1');
             const lessons=snap.records.lessons.filter(x=>x.metadata?.phase7LiveProofId===proof);
+            const lessonIds=new Set(lessons.map(x=>x.id));
+            const memories=snap.records.memories.filter(x=>x.metadata?.phase7Artifact==='model_improvement_v1' && x.derivedFromLessonIds?.some(id=>lessonIds.has(id)));
             console.log('PHASE7_READONLY_ARTIFACTS='+memories.length);
             console.log('PHASE7_READONLY_LESSONS='+lessons.length);
             for (const m of memories) {
               const a=JSON.parse(m.content??'{}');
-              console.log('PHASE7_READONLY_RESULT='+JSON.stringify({memoryId:m.id,lessonId:a.lessonId,decision:a.result?.decision,reason:a.result?.reason,checkpointPresent:!!a.result?.candidateCheckpointRef,score:a.result?.candidateScore,baseline:a.result?.baselineScore,datasetId:a.datasetId,candidateId:a.candidateId,heldOutCount:a.heldOutRunIds?.length,heldOutDisjoint:a.evaluationEligibility?.heldOutDisjoint,bothLabels:a.evaluationEligibility?.bothLabels}));
+              console.log('PHASE7_READONLY_RESULT='+JSON.stringify({memoryId:m.id,lessonId:a.lessonId,decision:a.result?.decision,reason:a.result?.reason,checkpointPresent:!!a.result?.candidateCheckpointRef,score:a.result?.candidateScore,baseline:a.result?.baselineScore,datasetId:a.datasetId,candidateId:a.candidateId,heldOutCount:a.heldOutRunIds?.length,heldOutDisjoint:a.evaluationEligibility?.bothLabels}));
             }
           } finally {await repo.close();}
           NODE
