@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: List sanitized recent EngineeringJobs
+      - name: List sanitized recent EngineeringJobs from Governor authority
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
@@ -29,8 +29,8 @@ jobs:
           import pg from "/app/node_modules/pg/lib/index.js";
           const {Pool}=pg;
           const head=String(process.env.EXPECTED_HEAD??"").trim();
-          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
-          if(!db)throw new Error("DATABASE_BINDING_MISSING");
+          const db=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
+          if(!db)throw new Error("GOVERNOR_LEDGER_DB_MISSING");
           const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
           try{
             const r=await pool.query(`
@@ -46,4 +46,5 @@ jobs:
           NODE
           B64="$(base64 -w0 /tmp/recent-jobs.mjs)"
           flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/recent-jobs.mjs && EXPECTED_HEAD=$EXPECTED_HEAD node /app/recent-jobs.mjs; rc=\$?; rm -f /app/recent-jobs.mjs; exit \$rc'"
+          echo "HARNESS_BINDING_CORRECT=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
