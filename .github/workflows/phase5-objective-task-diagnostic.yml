@@ -2,12 +2,8 @@ name: Sentient Phase 5 Objective Task Diagnostic
 "on":
   workflow_dispatch:
     inputs:
-      objective_id:
-        required: true
-        type: string
-permissions:
-  contents: read
-
+      objective_id: {required: true, type: string}
+permissions: {contents: read}
 jobs:
   diagnose:
     runs-on: ubuntu-latest
@@ -21,74 +17,52 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APP="sentient-validation-runner"
+          APP=sentient-validation-runner
           [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
           mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
           state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
-          if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
-          ready=false
-          for _ in $(seq 1 90); do
-            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/dev/null 2>&1; then ready=true; break; fi
-            sleep 2
-          done
-          test "$ready" = true
-          cat >/tmp/phase5-task.mjs <<'NODE'
-          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
-          import { BoundedSentientPhase1AcceptancePolicyV1 } from "/app/dist/src/phase1/bounded-acceptance-policy.js";
-          import { deriveTaskRequirementsV1 } from "/app/dist/src/phase1/core-runtime.js";
-          const objectiveId=String(process.env.PHASE5_OBJECTIVE_ID??"").trim();
-          const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
-          if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
-          const repo=new PostgresSpawnObjectiveRepository({connectionString});
-          try {
-            const task=await repo.get("task",objectiveId);
-            if(!task || task.kind!=="task") throw new Error("PHASE5_TASK_MISSING");
-            const md=(task.metadata && typeof task.metadata==="object" && !Array.isArray(task.metadata)) ? task.metadata : {};
-            const result=(md.result && typeof md.result==="object" && !Array.isArray(md.result)) ? md.result : {};
-            const body=(result.body && typeof result.body==="object" && !Array.isArray(result.body)) ? result.body : {};
-            const appResult=(body.result && typeof body.result==="object" && !Array.isArray(body.result)) ? body.result : {};
-            const subordinate=(appResult.subordinate && typeof appResult.subordinate==="object" && !Array.isArray(appResult.subordinate)) ? appResult.subordinate : {};
-            const phase3=(appResult.phase3Assessment && typeof appResult.phase3Assessment==="object" && !Array.isArray(appResult.phase3Assessment)) ? appResult.phase3Assessment : {};
-            const err=typeof md.error==="string" ? md.error.replace(/[\r\n]/g," ").slice(0,500) : null;
-            console.log("PHASE5_TASK_STATUS="+String(task.status));
-            console.log("PHASE5_TASK_UPDATED_AT="+String(task.updatedAt));
-            console.log("PHASE5_TASK_CONTRACT="+String(md.contract??"none"));
-            console.log("PHASE5_TASK_ERROR="+String(err??"none"));
-            console.log("PHASE5_TASK_RESULT_PRESENT="+String(md.result!==null && md.result!==undefined));
-            console.log("PHASE5_TASK_HTTP_STATUS="+String(result.httpStatus??"none"));
-            console.log("PHASE5_TASK_APP_STATUS="+String(appResult.status??"none"));
-            console.log("PHASE1_STATE_OWNER="+String(appResult.state?.authoritativeOwner??"none"));
-            console.log("PHASE1_AUTHORITY_OWNER="+String(appResult.authority?.owner??"none"));
-            console.log("PHASE1_SUBORDINATE_ACCEPTED="+String(subordinate.acceped??"none"));
-            console.log("PHASE1_SUBORDINATE_PROVIDER=b+String(subordinate.provider??"none"));
-            console.log("PHASE1_SUBORDINATE_MODEL="+String(subordinate.model??"none"));
-            console.log("PHASE1_SUBORDINATE_REVISION="+String(subordinate.revision??"none"));
-            console.log("PHASE1_ACCEPTANCE_POLICY_ID="+String(subordinate.acceptancePolicyId??"none"));
-            console.log("PHASE3_STATUS=b+String(phase3.status??"none"));
-            console.log("PHASE3_TRANSPORT="+String(phase3.transport??"none"));
-            console.log("PHASE3_AUTHORITATIVE="+String(phase3.authoritative??"none"));
-            console.log("PHASE3_AUTHORITY_OWNER="+String(phase3.authorityOwner??"none"));
-            console.log("PHASE3_MODEL_ID_PRESENT="+String(Boolean(phase3.modelId)));
-            if(task.status!=="succeeded" || result.httpStatus!==200 || appResult.status!=="RESPONDED") throw new Error("CERT13_DURABLE_RESULT_INVALID");
-            if(appResult.state?.authoritativeOwner!=="SENTIENT" || appResult.authority?.owner!=="SENTIENT" || subordinate.accepted!==true) throw new Error("CERT13_DURABLE_AUTHORITY_INVALID");
-            if(subordinate.provider!=="huggingface-local" || subordinate.model!=="onnx-community/SmolLM2-135M-Instruct-ONNX" || subordinate.revision!=="b8a5c0f183b78c55955a5364f610c36668b5e681" || subordinate.acceptancePolicyId!=="sentient-fly-phase1-acceptance-policy/v1") throw new Error("CERT13_DURABLE_MODEL_IDENTITY_INVALID");
-            if(phase3.status!=="ASSESSED" || phase3.transport!=="LOCAL" || phase3.authoritative!==false || phase3.authorityOwner!=="SENTIENT_RUNTIME" || !phase3.modelId) throw new Error("CERT13_DURABLE_PHASE3_INVALID");
-            const req=deriveTaskRequirementsV1({requestId:`policy:${objectiveId}`,sessionId:`policy-session:${objectiveId}`,taskId:`policy-task:${objectiveId}`,userRequest:"Evaluate a syntactically valid subordinate proposal."});
-            const policy=new BoundedSentientPhase1AcceptancePolicyV1({policyId:"sentient-fly-phase1-acceptance-policy/v1",maxProposalChars:8000});
-            const dec=await policy.evaluate(req,{text:"x".repeat(8001),provider:subordinate.provider,model:subordinate.model,revision:subordinate.revision});
-            if(dec.accepted!==false || !String(dec.reason).includes("8000")) throw new Error("CERT13_POLICY_REJECTION_INVALID");
-            console.log("OBJECTIVE_ASYNC_INGRESS=PASS");
-            console.log("OBJECTIVE_PERSISTENCE=PASS");
-            console.log("PHASE1_LIVE_AUTHORITY=PASS");
-            console.log("MODEL_REMAINS_SUBORDINATE=PASS");
-            console.log("PHASE1_VALID_PROPOSAL_CONSTRAINED=PASS");
-            console.log("LOCAL_HF_COGNITION_LIVE=PASS");
-            console.log("PHASE3_LIVE_COGNITION=PASS");
+          [ "$state" = started ] || flyctl machine start "$mid" -a "$APP" >/dev/null
+          for _ in $(seq 1 90); do curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/dev/null 2>&1 && break; sleep 2; done
+          cat >/tmp/cert13.mjs <<'NODE'
+          import {PostgresSpawnObjectiveRepository} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          import {BoundedSentientPhase1AcceptancePolicyV1} from "/app/dist/src/phase1/bounded-acceptance-policy.js";
+          import {deriveTaskRequirementsV1} from "/app/dist/src/phase1/core-runtime.js";
+          const id=String(process.env.OID??"").trim();
+          const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!cs)throw new Error("DB_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString:cs});
+          try{
+            const task=await repo.get("task",id);
+            if(!task||task.kind!=="task")throw new Error("TASK_MISSING");
+            const md=task.metadata??{}, result=md.result??{}, body=result.body??{}, app=body.result??{};
+            const sub=app.subordinate??{}, p3=app.phase3Assessment??{};
+            console.log("TASK_STATUS="+String(task.status));
+            console.log("HTTP_STATUS="+String(result.httpStatus??"none"));
+            console.log("APP_STATUS="+String(app.status??"none"));
+            console.log("STATE_OWNER="+String(app.state?.authoritativeOwner??"none"));
+            console.log("AUTHORITY_OWNER="+String(app.authority?.owner??"none"));
+            console.log("SUB_ACCEPTED="+String(sub.accepted??"none"));
+            console.log("SUB_PROVIDER="+String(sub.provider??"none"));
+            console.log("SUB_MODEL="+String(sub.model??"none"));
+            console.log("SUB_REVISION="+String(sub.revision??"none"));
+            console.log("SUB_POLICY="+String(sub.acceptancePolicyId??"none"));
+            console.log("P3_STATUS="+String(p3.status??"none"));
+            console.log("P3_TRANSPORT="+String(p3.transport??"none"));
+            console.log("P3_AUTHORITATIVE="+String(p3.authoritative??"none"));
+            console.log("P3_OWNER="+String(p3.authorityOwner??"none"));
+            console.log("P3_MODEL_PRESENT="+String(Boolean(p3.modelId)));
+            if(task.status!=="succeeded"||result.httpStatus!==200||app.status!=="RESPONDED")throw new Error("DURABLE_RESULT_INVALID");
+            if(app.state?.authoritativeOwner!=="SENTIENT"||app.authority?.owner!=="SENTIENT"||sub.accepted!==true)throw new Error("DURABLE_AUTHORITY_INVALID");
+            if(sub.provider!=="huggingface-local"||sub.model!=="onnx-community/SmolLM2-135M-Instruct-ONNX"||sub.revision!=="b8a5c0f183b78c55955a5364f610c36668b5e681"||sub.acceptancePolicyId!=="sentient-fly-phase1-acceptance-policy/v1")throw new Error("DURABLE_MODEL_IDENTITY_INVALID");
+            if(p3.status!=="ASSESSED"||p3.transport!=="LOCAL"||p3.authoritative!==false||p3.authorityOwner!=="SENTIENT_RUNTIME"||!p3.modelId)throw new Error("DURABLE_PHASE3_INVALID");
+            const req=deriveTaskRequirementsV1({requestId:`policy:${id}`,sessionId:`policy-session:${id}`,taskId:`policy-task:${id}`,userRequest:"Evaluate a syntactically valid subordinate proposal."});
+            const pol=new BoundedSentientPhase1AcceptancePolicyV1({policyId:"sentient-fly-phase1-acceptance-policy/v1",maxProposalChars:8000});
+            const dec=await pol.evaluate(req,{text:"x".repeat(8001),provider:sub.provider,model:sub.model,revision:sub.revision});
+            if(dec.accepted!==false||!String(dec.reason).includes("8000"))throw new Error("POLICY_REJECTION_INVALID");
+            for(const x of ["OBJECTIVE_ASYNC_INGRESS","OBJECTIVE_PERSISTENCE","PHASE1_LIVE_AUTHORITY","MODEL_REMAINS_SUBORDINATE","PHASE1_VALID_PROPOSAL_CONSTRAINED","LOCAL_HF_COGNITION_LIVE","PHASE3_LIVE_COGNITION"])console.log(x+"=PASS");
             console.log("SECRET_VALUES_EXPOSED=false");
-          } finally {
-            await repo.close();
-          }
+          }finally{await repo.close()}
           NODE
-          B64="$(base64 -w0 /tmp/phase5-task.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase5-task.mjs && PHASE5_OBJECTIVE_ID=$OBJECTIVE_ID node /app/phase5-task.mjs; rc=\$?; rm -f /app/phase5-task.mjs; exit \$rc'"
-          echo "RESULT=PASS"
+          B64="$(base64 -w0 /tmp/cert13.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/cert13.mjs && OID=$OBJECTIVE_ID node /app/cert13.mjs; rc=\$?; rm -f /app/cert13.mjs; exit \$rc'"
+          echo RESULT=PASS
