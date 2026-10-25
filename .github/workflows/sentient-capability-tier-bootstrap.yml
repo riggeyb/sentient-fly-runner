@@ -37,7 +37,7 @@ jobs:
              r.timeoutMs>1800000 ||
              r.commands.at(-1)?.category!=="test") throw Error("REV8_REQUEST_INVALID");
           const names=new Set(r.commands.map(c=>c.name));
-          for(const required of ["prebuild","apply","compat-phase0","compat-job2","compat-spawn-tier-fixture","postbuild","authority-tests","governor-tests","diff-check"]) {
+          for(const required of ["prebuild","apply","compat-phase0","compat-job2","compat-valid-spawn-tier-fixture","postbuild","authority-tests","governor-tests","diff-check"]) {
             if(!names.has(required)) throw Error("REV8_REQUIRED_STEP_MISSING:"+required);
           }
           const forbidden=/deploy|resize|gpu|paid|secret|resource[-_ ]?increase/i;
