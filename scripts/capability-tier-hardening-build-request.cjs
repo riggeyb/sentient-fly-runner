@@ -13,7 +13,7 @@ const brittle=`replaceOnce("test/engineering-jobs.test.ts",
 \`     repo:VALID.repo, branch:VALID.branch, expectedHead:VALID.expectedHead, objective:VALID.objective,
       authorityReceipt:null, status:"QUEUED", startSha:null,
 \`);`;
-const tolerant=`replaceOnce("test/engineering-jobs.test.ts",\n\`     status:"QUEUUED", startSha:null,\`,\n\`     authorityReceipt:null, status:"QUEUED", startSha:null,\`);`;
+const tolerant=`replaceOnce("test/engineering-jobs.test.ts",\n\`     status:"QUEUED", startSha:null,\`,\n\`      authorityReceipt:null, status:"QUEUED", startSha:null,\`);`;
 const first=patchText.indexOf(brittle);
 if(first<0 || patchText.indexOf(brittle,first+1)>=0) throw new Error("EXPECTED_SINGLE_BRITTLE_ENGINEERING_FIXTURE_PATCH");
 patchText=patchText.slice(0,first)+tolerant+patchText.slice(first+brittle.length);
