@@ -1,5 +1,5 @@
 name: Final Cert Objective Failure Detail
-on:
+"on":
   workflow_dispatch:
     inputs:
       objective_id:
@@ -47,11 +47,24 @@ jobs:
           if(!id||!db) throw new Error("CERT_DETAIL_BINDING_MISSING");
           const repo=new Repo({connectionString:db});
           const clean=(v,n=1000)=>String(v??"").replace(/[\r\n\0]/g," ").slice(0,n);
-         ÛÛœÝØÜXJ‹L
-OOžÂˆYŠŠ\™]\›ˆ–Ý[˜Ø]YHŽÂˆYŠOO[[\[ÙˆOOH˜›ÛÛX[ˆŸ\[ÙˆOOH›[X™\ˆŠ\™]\›ˆŽÂˆYŠ\[ÙˆOOHœÝš[™ÈŠ\™]\›ˆÛX[ŠŠNÂˆYŠ\œ˜^Kš\Ð\œ˜^JŠJ\™]\›ˆ‹œÛXÙJ
-K›X\
-OœØÜXŠ
-ÌJJNÂˆYŠ]Ÿ\[ÙˆˆOOH›Øš™XÝŠ\™]\›ˆÛX[ŠŠNÂˆ6öç7Bó×·Ó°¢f÷"†6öç7B¶²Ç…Òöbö&¦V7BæVçG&–W2‡b’—°¢õ¶µÓÒò‡Fö¶VçÇ6V7&WGÇ77v÷&GÆ7&VFVçF–ÇÆWF†÷&—¦F–öçÆ6öö¶–WÆFF&6WÇW&Â’ö’çFW7B†²“ò%µ$TD5DTEÒ#§67'V"‡‚ÆB³“°¢Ð¢&WGW&âó°¢Ó°¢G'—°¢6öç7BF6³Öv—B&WòævWB‚'F6²"Æ–B“°¢–b‡F6³òæ¶–æBÓÒ'F6²"’F‡&÷ræWrW'&÷"‚$4U%EôDUD”ÅõD4µôÔ•54”är"“°¢½¹ÍÐµô¡Ñ…Í¬¹µ•Ñ…‘…Ñ„˜™ÑåÁ•½˜Ñ…Í¬¹µ•Ñ…‘…Ñ„ôôô‰½‰©•Ðˆ˜˜…ÉÉ…ä¹¥ÍÉÉ…ä¡Ñ…Í¬¹µ•Ñ…‘…Ñ„¤¤ýÑ…Í¬¹µ•Ñ…‘…Ñ„éíôì(€€€€€€€€€€€½¹ÍÐÉ½½Ðõ…Ý…¥ÐÉ•Á¼¹•Ñ=‰©•Ñ¥Ù•½¹Ñ¥¹Õ…Ñ¥½¸¡¥¤ì(€€€€€€€€€€€const detail={
+          const scrub=(v,d=0)=>{
+            if(d>6)return "[truncated]";
+            if(v===null||typeof v==="boolean"||typeof v==="number")return v;
+            if(typeof v==="string")return clean(v);
+            if(Array.isArray(v))return v.slice(0,40).map(x=>scrub(x,d+1));
+            if(!v||typeof v!=="object")return clean(v);
+            const o={};
+            for(const [k,x] of Object.entries(v)){
+              o[k]=/(token|secret|password|credential|authorization|cookie|database|url)/i.test(k)?"[REDACTED]":scrub(x,d+1);
+            }
+            return o;
+          };
+          try{
+            const task=await repo.get("task",id);
+            if(task?.kind!=="task") throw new Error("CERT_DETAIL_TASK_MISSING");
+            const md=(task.metadata&&typeof task.metadata==="object"&&!Array.isArray(task.metadata))?task.metadata:{};
+            const root=await repo.getObjectiveContinuation(id);
+            const detail={
               taskStatus:task.status,
               taskError:md.error??null,
               result:md.result??null,
@@ -59,7 +72,7 @@ K›X\
               rootTerminal:root?.terminal??null,
               dependencies:(root?.evidenceDependencies??[]).map(d=>({id:d.id,status:d.status,subjectIdentity:d.subjectIdentity,evidenceId:d.evidenceId??null}))
             };
-            console.log("CERT_DETAIL="+JSON.stringify(scrub(detail)));
+            console.log("CERT_DETÁIL="+JSON.stringify(scrub(detail)));
             console.log("SECRET_VALUES_EXPOSED=false");
           } finally { await repo.close().catch(()=>undefined); }
           NODE
