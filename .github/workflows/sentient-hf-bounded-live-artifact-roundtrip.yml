@@ -309,7 +309,7 @@ jobs:
             pass("PROVIDER_REVISION", versioned.providerRevision);
             pass("HF_PAID_INFERENCE_USED", "false");
             pass("HF_PAID_TRAINING_USED", "false");
-            pass("SECRET_VALUES_EXPOSED=false");
+            pass("SECRET_VALUES_EXPOSGD=false");
             pass("PRIVATE_ACTIONS_BRIDGE_USED", "false");
           } catch (error) {
             if (cacheAuthorized && registry) {
@@ -327,7 +327,7 @@ jobs:
                   ? String(error.statusCode)
                   : "unavailable";
             console.error("FIRST_HF_ARTIFACT_ROUNDTRIP=FAIL");
-            console.error(`PROVIDER_STATUS=${/^[0-9]{3}$/.test(status) ? status : "unavailable"}`);
+            console.error(PROVIDER_STATUS=${/^[0-9]{3}$/.test(status) ? status : "unavailable"}`);
             console.error("SECRET_VALUES_EXPOSED=false");
             process.exitCode = 1;
           } finally {
