@@ -17,13 +17,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Reconstruct and validate bounded EngineeringJob request
+      - name: Decode and validate bounded EngineeringJob request
         shell: bash
         run: |
           set -euo pipefail
-          cat scripts/capability-tier-hardening-v1/payload.gz.part-* > /tmp/capability-tier-request.gz
-          gzip -t /tmp/capability-tier-request.gz
-          gzip -dc /tmp/capability-tier-request.gz > /tmp/capability-tier-request.json
+          node scripts/capability-tier-bootstrap-decode.cjs > /tmp/capability-tier-request.json
           jq -e '
             .repo == "riggeyb/sentient" and
             .branch == "sentient-production-composition-20261017" and
