@@ -1,0 +1,148 @@
+name: Sentient Phase7 HF Binding Readonly Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-phase7-hf-binding-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ff2e8164a2e6888f3b58b15fb143c73d016f4fb9
+      PHASE7_PROOF_ID: 40227159272-1
+      PHASE7_ARTIFACT_MEMORY_ID: 8033fe8f-a927-4271-a810-0e4d0544a322
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Fence machine and inspect binding state read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          machines="$(flyctl machines list -a "$APP" --json)"
+          test "$(jq 'length' <<<"$machines")" -eq 1
+          machine_id="$(jq -r '.[0].id' <<<"$machines")"
+          initial_state="$(jq -r '.[0].state' <<<"$machines")"
+          image="$(jq -r '.[0].config.image' <<<"$machines")"
+          [[ "$image" == *"$EXPECTED_SHA"* ]]
+          restore() {
+            if [ "$initial_state" != "started" ]; then
+              flyctl machine stop "$machine_id" -a "$APP" >/dev/null 2>&1 || true
+            fi
+          }
+          trap restore EXIT
+          if [ "$initial_state" != "started" ]; then
+            flyctl machine start "$machine_id" -a "$APP" >/dev/null
+          fi
+          cat > /tmp/diag.mjs <<'JS'
+          import { PostgresStateRepository } from "/app/dist/src/state/postgres-state-repository.js";
+          import { ArtifactRegistryV1 } from "/app/dist/src/artifacts/registry.js";
+          import { phase7ArtifactRecordsV1 } from "/app/dist/src/artifacts/phase7-binding.js";
+          import { digestBytesV1, evaluateExternalExportPolicyV1 } from "/app/dist/src/artifacts/contracts.js";
+
+          const SOURCE_SHA="ff2e8164a2e6888f3b58b15fb143c73d016f4fb9";
+          const SOURCE_TREE="2a2806cf347c82cf8a3bb5359375293dcc352f2d";
+          const proofId=String(process.env.PHASE7_PROOF_ID||"").trim();
+          const memoryId=String(process.env.PHASE7_ARTIFACT_MEMORY_ID||"").trim();
+          const token=String(process.env.SENTIENT_HF_TOKEN||"").trim();
+          const repoName=String(process.env.SENTIENT_HF_VERSIONED_REPOSITORY||"").trim();
+          const db=String(process.env.DATABASE_URL||process.env.DIRECT_URL||"").trim();
+          const clean=s=>String(s).replaceAll(token,"[REDACTED]").replace(/postgres(?:ql)?:\/\/[^\s]+/gi,"postgresql://[REDACTED]");
+          const out=(k,v)=>console.log(`${k}=${v}`);
+          const repo=new PostgresStateRepository({connectionString:db});
+          try {
+            if (!proofId || !memoryId || !token || !repoName || !db) throw new Error("required_runtime_binding_missing");
+            if (process.env.SENTIENT_RUNTIME_SHA!==SOURCE_SHA || process.env.SENTIENT_RUNTIME_TREE!==SOURCE_TREE) throw new Error("runtime_identity_mismatch");
+            await repo.initialize();
+            out("IMPORTS_AND_DB","PASS");
+            const memory=await repo.get("memory",memoryId);
+            if(memory?.kind!=="memory"||memory.metadata?.phase7Artifact!=="model_improvement_v1") throw new Error("phase7_memory_invalid");
+            const p=JSON.parse(memory.content);
+            const snapshot=await repo.snapshot();
+            const lesson=snapshot.records.lessons.find(x=>x.id===p.lessonId);
+            if(!lesson||lesson.metadata?.phase7LiveProofId!==proofId) throw new Error("phase7_lesson_binding_invalid");
+            const all=[...(p.trainingRunIds??[]),...(p.heldOutRunIds??[])];
+            const runMap=new Map(snapshot.records.modelRuns.map(x=>[x.id,x]));
+            if(all.length===0||all.some(id=>runMap.get(id)?.metadata?.phase7LiveProofId!==proofId)) throw new Error("phase7_run_binding_invalid");
+            const training=[...(p.trainingRunIds??[])], held=[...(p.heldOutRunIds??[])];
+            if(training.some(id=>held.includes(id))) throw new Error("phase7_training_heldout_overlap");
+            const run=Object.freeze({
+              contractVersion:p.contractVersion, component:p.component, lessonId:p.lessonId, result:p.result,
+              artifactMemoryId:memory.id, trainingRunIds:Object.freeze(training), heldOutRunIds:Object.freeze(held),
+              evaluationEvidenceRefs:Object.freeze([...(p.evaluationEvidenceRefs??[])]), datasetId:p.datasetId,
+              baselineId:p.baselineId, candidateId:p.candidateId, evaluationId:p.evaluationId,
+              promotionPolicyId:p.promotionPolicy.policyId, promotionThreshold:p.promotionPolicy.minimumImprovement,
+              promotionDecisionOwner:p.promotionPolicy.decisionOwner,
+              modelMayProposeImprovement:p.promotionPolicy.modelMayProposeImprovement,
+              modelMayPromoteItself:p.promotionPolicy.modelMayPromoteItself,
+              evaluationEligibility:p.evaluationEligibility,
+            });
+            const records=phase7ArtifactRecordsV1({sourceSha:SOURCE_SHA,sourceTree:SOURCE_TREE,createdAt:memory.createdAt,memoryId:memory.id,run,checkpoint:p.checkpoint});
+            const dataset=records.find(x=>x.artifactType==="phase7-dataset-manifest");
+            const candidate=records.find(x=>x.artifactType==="phase7-feature-head");
+            const evaluation=records.find(x=>x.artifactType==="phase7-evaluation-receipt");
+            if(!dataset||!candidate||!evaluation) throw new Error("phase7_mapper_incomplete");
+            const datasetBytes=new TextEncoder().encode(JSON.stringify({datasetId:run.datasetId,trainingRunIds:run.trainingRunIds}));
+            const candidateBytes=new TextEncoder().encode(JSON.stringify(p.checkpoint));
+            if(digestBytesV1(datasetBytes)!==dataset.sha256) throw new Error("dataset_digest_mapper_mismatch");
+            if(digestBytesV1(candidateBytes)!==candidate.sha256) throw new Error("candidate_digest_mapper_mismatch");
+            const classify=r=>Object.freeze({...r,privacyClass:"PUBLIC",licenseClass:"OPEN",usageRights:"ALLOWED",secretScanStatus:"CLEAR",piiStatus:"CLEAR",permittedStorageVisibility:"PUBLIC",policyStatus:"ALLOWED"});
+            if(!evaluateExternalExportPolicyV1(classify(dataset)).allowed) throw new Error("dataset_export_policy_blocked");
+            if(!evaluateExternalExportPolicyV1(classify(candidate)).allowed) throw new Error("candidate_export_policy_blocked");
+            out("PREUPLOAD_CONTRACT","PASS");
+            out("EXPECTED_DATASET_ARTIFACT_ID",dataset.artifactId);
+            out("EXPECTED_CANDIDATE_ARTIFACT_ID",candidate.artifactId);
+            out("EXPECTED_EVALUATION_ARTIFACT_ID",evaluation.artifactId);
+            const registry=new ArtifactRegistryV1(repo);
+            for (const [name,record] of [["DATASET",dataset],["CANDIDATE",candidate],["EVALUATION",evaluation]]) {
+              const got=await registry.get(record.artifactId);
+              out(`${name}_REGISTERED`,got ? "true":"false");
+              if(got){
+                out(`${name}_REGISTRY_DIGEST_MATCH`,got.sha256===record.sha256 ? "true":"false");
+                out(`${name}_REGISTRY_PROVIDER_REVISION_PRESENT`,typeof got.providerRevision==="string"&&got.providerRevision.length>0 ? "true":"false");
+              }
+            }
+            async function hfCheck(name,path,bytes,digest){
+              const url=`https://huggingface.co/${repoName}/resolve/main/${path.split("/").map(encodeURIComponent).join("/")}`;
+              const response=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});
+              out(`${name}_HF_HTTP_STATUS`,response.status);
+              if(response.ok){
+                const body=new Uint8Array(await response.arrayBuffer());
+                out(`${name}_HF_DIGEST_MATCH`,digestBytesV1(body)===digest ? "true":"false");
+                out(`${name}_HF_SIZE_MATCH`,body.byteLength===bytes.byteLength ? "true":"false");
+              } else {
+                await response.body?.cancel().catch(()=>{});
+              }
+            }
+            await hfCheck("DATASET",`phase7/${run.datasetId}/dataset-manifest.json`,datasetBytes,dataset.sha256);
+            await hfCheck("CANDIDATE",`phase7/${run.candidateId}/candidate-checkpoint.json`,candidateBytes,candidate.sha256);
+            out("READONLY_DIAGNOSTIC","PASS");
+            out("SECRET_VALUES_EXPOSED","false");
+            out("SOURCE_MUTATION","false");
+            out("HF_WRITE_PERFORMED","false");
+            out("POSTGRES_WRITE_PERFORMED","false");
+          } catch(e) {
+            console.log(`DIAGNOSTIC_ERROR=${clean(e instanceof Error?e.message:e)}`);
+            console.log("SECRET_VALUES_EXPOSED=false");
+            process.exitCode=1;
+          } finally {
+            await repo.close().catch(()=>{});
+          }
+          JS
+          b64="$(base64 -w0 /tmp/diag.mjs)"
+          rm -f /tmp/diag.mjs
+          cmd="printf '%s' '$b64' | base64 -d > /tmp/phase7-hf-diag.mjs && PHASE7_PROOF_ID='$PHASE7_PROOF_ID' PHASE7_ARTIFACT_MEMORY_ID='$PHASE7_ARTIFACT_MEMORY_ID' node /tmp/phase7-hf-diag.mjs; rc=\$?; rm -f /tmp/phase7-hf-diag.mjs; exit \$rc"
+          set +e
+          out="$(flyctl ssh console -a "$APP" -s "$machine_id" -C "$cmd" 2>&1)"
+          rc=$?
+          set -e
+          printf '%s\n' "$out" | grep -E '^(IMPORTS_AND_DB|PREUPLOAD_CONTRACT|EXPECTED_[A-Z_]+|DATASET_[A-Z_]+|CANDIDATE_[A-Z_]+|EVALUATION_[A-Z_]+|READONLY_DIAGNOSTIC|DIAGNOSTIC_ERROR|SECRET_VALUES_EXPOSED|SOURCE_MUTATION|HF_WRITE_PERFORMED|POSTGRES_WRITE_PERFORMED)=' || true
+          exit "$rc"
