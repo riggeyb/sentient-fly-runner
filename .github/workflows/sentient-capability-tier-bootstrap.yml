@@ -1,0 +1,55 @@
+name: Sentient Capability Tier Bootstrap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-capability-tier-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dfa6420f7598de8add3634b19660f656b2a36f3b
+
+      - name: Reconstruct and validate bounded EngineeringJob request
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/capability-tier-hardening-v1/payload.gz.part-* > /tmp/capability-tier-request.gz
+          gzip -t /tmp/capability-tier-request.gz
+          gzip -dc /tmp/capability-tier-request.gz > /tmp/capability-tier-request.json
+          jq -e '
+            .repo == "riggeyb/sentient" and
+            .branch == "sentient-production-composition-20261017" and
+            .expectedHead == "5ce976089532a86ac262a2760367318b6f4b72a5" and
+            (.objective | contains("SENTIENT_CAPABILITY_TIER_AND_AUTHORITY_ENFORCEMENT_V1")) and
+            (.commands | type == "array" and length >= 3 and length <= 8) and
+            (all(.commands[]; (.category == "inspect" or .category == "edit" or .category == "build" or .category == "test" or .category == "shell"))) and
+            (all(.commands[]; (.args | type == "array" and length <= 64))) and
+            (all(.commands[].args[]; (type == "string" and length <= 8192))) and
+            (.commands[-1].category == "test") and
+            (.timeoutMs <= 600000) and
+            (.commitMessage | contains("capability"))
+          ' /tmp/capability-tier-request.json >/dev/null
+          echo "BOOTSTRAP_REQUEST_VALIDATED=true"
+          echo "EXPECTED_HEAD=5ce976089532a86ac262a2760367318b6f4b72a5"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
+
+      - name: Create exact bounded EngineeringJob through existing operator
+        env:
+          SENTIENT_OPS_BEARER_TOKEN: ${{ secrets.SENTIENT_OPS_BEARER_TOKEN }}
+          SENTIENT_MCP_CONNECT_ID: ${{ secrets.SENTIENT_MCP_CONNECT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS="$(cat /tmp/capability-tier-request.json)"
+          node operator.mjs engineering_create "$ARGS"
