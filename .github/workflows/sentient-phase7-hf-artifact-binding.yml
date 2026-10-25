@@ -1,0 +1,107 @@
+name: Sentient Phase7 HF Artifact Binding
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-phase7-hf-artifact-binding
+  cancel-in-progress: false
+
+jobs:
+  bind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ff2e8164a2e6888f3b58b15fb143c73d016f4fb9
+      EXPECTED_TREE: 2a2806cf347c82cf8a3bb5359375293dcc352f2d
+      PHASE7_PROOF_ID: 40227159272-1
+      PHASE7_ARTIFACT_MEMORY_ID: 8033fe8f-a927-4271-a810-0e4d0544a322
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Fence machine and exact production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          machines="$(flyctl machines list -a "$APP" --json)"
+          test "$(jq 'length' <<<"$machines")" -eq 1
+          machine_id="$(jq -r '.[0].id' <<<"$machines")"
+          initial_state="$(jq -r '.[0].state' <<<"$machines")"
+          image="$(jq -r '.[0].config.image' <<<"$machines")"
+          test -n "$machine_id"
+          [[ "$image" == *"$EXPECTED_SHA"* ]]
+          echo "MACHINE_ID=$machine_id" >> "$GITHUB_ENV"
+          echo "INITIAL_STATE=$initial_state" >> "$GITHUB_ENV"
+          echo "SOURCE_FENCE=PASS"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+
+      - name: Execute same-cycle HF binding inside production machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          restore() {
+            if [ "$INITIAL_STATE" != "started" ]; then
+              flyctl machine stop "$MACHINE_ID" -a "$APP" >/dev/null 2>&1 || true
+            fi
+          }
+          trap restore EXIT
+          if [ "$INITIAL_STATE" != "started" ]; then
+            flyctl machine start "$MACHINE_ID" -a "$APP" >/dev/null
+          fi
+          b64="$(base64 -w0 scripts/sentient-hf-phase7-bind.mjs)"
+          cmd="printf '%s' '$b64' | base64 -d > /tmp/sentient-hf-phase7-bind.mjs && PHASE7_PROOF_ID='$PHASE7_PROOF_ID' PHASE7_ARTIFACT_MEMORY_ID='$PHASE7_ARTIFACT_MEMORY_ID' node /tmp/sentient-hf-phase7-bind.mjs; rc=\$?; rm -f /tmp/sentient-hf-phase7-bind.mjs; exit \$rc"
+          set +e
+          out="$(flyctl ssh console -a "$APP" -s "$MACHINE_ID" -C "$cmd" 2>&1)"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            printf '%s\n' "$out" | grep -E '^(PHASE7_HF_BINDING_ERROR|SECRET_VALUES_EXPOSED)=' || true
+            exit "$rc"
+          fi
+          printf '%s\n' "$out" | grep -E '^(BASELINE_ID|DATASET_ID|CANDIDATE_ID|EVALUATION_ID|PROMOTION_DECISION|DATASET_DIGEST|CANDIDATE_DIGEST|DATASET_PROVIDER_REVISION|CANDIDATE_PROVIDER_REVISION|FIRST_HF_LEARNING_CYCLE|TRAINING_HELDOUT_DISJOINT|DATASET_DIGEST_VERIFIED|CANDIDATE_DIGEST_VERIFIED|HF_ARTIFACT_BINDING|MODEL_MAY_PROMOTE_ITSELF|SENTIENT_OWNS_PROMOTION_DECISION|HF_PAID_INFERENCE_USED|HF_PAID_TRAINING_USED|SECRET_VALUES_EXPOSED|PRIVATE_ACTIONS_BRIDGE_USED)='
+          grep -q '^BASELINE_ID=phase7-baseline:sha256:60d0b2e760f8a7e69d832f9bfdd62c7836df2df4b4f103705e58317ddab7782c$' <<<"$out"
+          grep -q '^DATASET_ID=phase7-dataset:sha256:6d6b8900fb568ac4fd62c35a06be9f98ce1f80a8c0895de05977028459df14f1$' <<<"$out"
+          grep -q '^CANDIDATE_ID=phase7-candidate:sha256:06e555edbb4fbc5411a5a50c3bdad4dc44ae7518cfc95c1af1b5568c380261e0$' <<<"$out"
+          grep -q '^EVALUATION_ID=phase7-evaluation:sha256:f835a37b3d19e33b22822a6a111cf7adad5df15b43111704046b26d36dac180c$' <<<"$out"
+          grep -q '^PROMOTION_DECISION=PROMOTED$' <<<"$out"
+          for marker in \
+            FIRST_HF_LEARNING_CYCLE=PASS \
+            TRAINING_HELDOUT_DISJOINT=true \
+            DATASET_DIGEST_VERIFIED=true \
+            CANDIDATE_DIGEST_VERIFIED=true \
+            HF_ARTIFACT_BINDING=PASS \
+            MODEL_MAY_PROMOTE_ITSELF=false \
+            SENTIENT_OWNS_PROMOTION_DECISION=true \
+            HF_PAID_INFERENCE_USED=false \
+            HF_PAID_TRAINING_USED=false \
+            SECRET_VALUES_EXPOSED=false \
+            PRIVATE_ACTIONS_BRIDGE_USED=false
+          do
+            grep -q "^${marker}$" <<<"$out"
+          done
+          echo "PHASE7_HF_BINDING_RECEIPT=PASS"
+
+      - name: Verify machine state restoration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${MACHINE_ID:-}" ]; then
+            state="$(flyctl machines list -a "$APP" --json | jq -r --arg id "$MACHINE_ID" '.[]|select(.id==$id)|.state')"
+            if [ "$INITIAL_STATE" = "started" ]; then
+              test "$state" = "started"
+            else
+              test "$state" != "started"
+            fi
+          fi
+          echo "MACHINE_STATE_RESTORED=true"
+          echo "SOURCE_MUTATION=false"
+          echo "PRODUCTION_SOURCE_DEPLOYED=false"
