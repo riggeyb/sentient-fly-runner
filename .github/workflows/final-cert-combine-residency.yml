@@ -1,0 +1,82 @@
+name: Final Cert Combine Residency With Canonical
+"on":
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        type: string
+      expected_head:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  combine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+      TARGET_BRANCH: ${{ inputs.branch }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Cherry-pick exact tested residency commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          for c in \
+            97c566f32b3b70802752c2c03777727f4be7fa20 \
+            d887b0bddcad8783eb9fffeb4882fdf122cdcf92 \
+            0c23d2c89e73def84b543dc668a8b94a5763d05b \
+            2eb78cced621de5b2301b5eee080d8d1f6b3166b
+          do
+            git fetch origin "$c"
+            git cherry-pick "$c"
+          done
+          git diff "$EXPECTED_HEAD" HEAD -- fly.toml --exit-code
+          echo "RESOURCE_ENVELOPE_UNCHANGED=true"
+      - name: Build and focused combined regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/fly-objective-residency.test.js \
+            dist/test/job2-self-execution.test.js \
+            dist/test/permanent-continuation-http.test.js \
+            dist/test/phase5-fly-restart-lease-retry.test.js \
+            dist/test/phase4-multistep-autonomy.test.js
+          echo COMBINED_FOCUSED_REGRESSIONS=PASS
+      - name: Push exact combined branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          echo "COMBINED_SHA=$(git rev-parse HEAD)"
+          echo "COMBINED_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "SECRET_VALUES_EXPOSED=false"
