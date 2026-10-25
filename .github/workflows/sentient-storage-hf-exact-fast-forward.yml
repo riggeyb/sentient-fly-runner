@@ -7,6 +7,10 @@ on:
         description: Exact canonical SHA before landing
         required: true
         type: string
+      target_branch:
+        description: Exact validated private source branch containing target_sha
+        required: true
+        type: string
       target_sha:
         description: Exact validated source SHA to land
         required: true
@@ -39,19 +43,23 @@ jobs:
       - name: Fence canonical candidate ancestry and certified tag
         env:
           EXPECTED_BASE_SHA: ${{ inputs.expected_base_sha }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
           TARGET_SHA: ${{ inputs.target_sha }}
           TARGET_TREE: ${{ inputs.target_tree }}
         shell: bash
         run: |
           set -euo pipefail
+          git check-ref-format --branch "$TARGET_BRANCH" >/dev/null
+          test "$TARGET_BRANCH" != "sentient-production-composition-20261017"
           test "$(git rev-parse HEAD)" = "$EXPECTED_BASE_SHA"
-          git fetch origin storage-hf-buildout-20261025:refs/remotes/origin/storage-hf-buildout-20261025
-          test "$(git rev-parse origin/storage-hf-buildout-20261025)" = "$TARGET_SHA"
+          git fetch origin "$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH"
+          test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$TARGET_SHA"
           test "$(git rev-parse "$TARGET_SHA^{tree}")" = "$TARGET_TREE"
           test "$(git rev-parse 'sentient-certified-2026-10-25^{}')" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
-          git merge-base  --is-ancestor "$EXPECTED_BASE_SHA" "$TARGET_SHA"
+          git merge-base --is-ancestor "$EXPECTED_BASE_SHA" "$TARGET_SHA"
           test "$(git rev-list --count "$EXPECTED_BASE_SHA..$TARGET_SHA")" -gt 0
           echo "CANONICAL_FENCE=PASS"
+          echo "CANDIDATE_BRANCH_FENCE=PASS"
           echo "CANDIDATE_FENCE=PASS"
           echo "CERTIFIED_TAG_PRESERVED=PASS"
           echo "FAST_FORWARD_ANCESTRY=PASS"
