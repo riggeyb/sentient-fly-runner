@@ -1,0 +1,50 @@
+name: Final Cert Promote Exact Tested Descendant
+"on":
+  workflow_dispatch:
+    inputs:
+      expected_head:
+        required: true
+        type: string
+      target_sha:
+        required: true
+        type: string
+      target_tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+      TARGET_SHA: ${{ inputs.target_sha }}
+      TARGET_TREE: ${{ inputs.target_tree }}
+      CANONICAL_BRANCH: sentient-production-composition-20261017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHEB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Fence and fast-forward exact tested descendant
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_TREE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git fetch origin "$TARGET_SHA"
+          test "$(git rev-parse "${TARGET_SHA}^{tree}")" = "$TARGET_TREE"
+          git merge-base --is-ancestor "$EXPECTED_HEAD" "$TARGET_SHA"
+          git diff --exit-code "$EXPECTED_HEAD" "$TARGET_SHA" -- fly.toml
+          git switch --detach "$TARGET_SHA"
+          git push --force-with-lease="refs/heads/${CANONICAL_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:refs/heads/${CANONICAL_BRANCH}"
+          echo "PROMOTED_SHA=$(git rev-parse HEAD)"
+          echo "PROMOTED_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "RESOURCE_ENVELOPE_UNCHANGED=true"
+          echo "SECRET_VALUES_EXPOSED=false"
