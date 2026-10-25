@@ -1,0 +1,2 @@
+const repairedTest = readFileSync(testPath, "utf8").replaceAll("\\`", "`");
+writeFileSync(testPath, repairedTest);
