@@ -21,10 +21,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/capability-tier-hardening-rev4-build-request.cjs > /tmp/request.json
+          base="https://raw.githubusercontent.com/riggeyb/sentient-fly-runner/def8360c8d745ab93d6d2a68712d630e92f6fc31/scripts/capability-tier-hardening-v1-rev3"
+          curl -fsSL "$base/payload.gz.part-00" -o /tmp/rev4-p0
+          curl -fsSL "$base/payload.gz.part-01" -o /tmp/rev4-p1
+          REV4_PAYLOAD_P0=/tmp/rev4-p0 REV4_PAYLOAD_P1=/tmp/rev4-p1 node scripts/capability-tier-hardening-rev4-build-request.cjs > /tmp/request.json
           node -e 'const fs=require("fs");const r=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));if(r.repo!=="riggeyb/sentient"||r.branch!=="sentient-production-composition-20261017"||r.expectedHead!=="5ce976089532a86ac262a2760367318b6f4b72a5"||!Array.isArray(r.commands)||r.commands.length<3||r.commands.length>32||r.commands.some(c=>!Array.isArray(c.args)||c.args.length>64||c.args.some(a=>typeof a!=="string"||a.length>8192)||c.timeoutMs<1000||c.timeoutMs>600000)||r.commands.reduce((n,c)=>n+c.timeoutMs,0)>r.timeoutMs||r.timeoutMs>1800000||r.commands.at(-1)?.category!=="test")throw Error("BOOTSTRAP_REQUEST_INVALID");'
           echo "BOOTSTRAP_REQUEST_VALIDATED=true"
-          echo "REV4_NETWORK_EXPANSION=false"
+          echo "PINNED_REV3_GZIP_SHA256=2477671742050bbe9f682815c28063a42adc30665818a09e0c04994648f3e86e"
+          echo "PINNED_REV3_SOURCE_SHA256=a8af4b447f5dc8a2a1bc66e15769c3dc67a5132a61b6481d2fa971c84d2cf977"
+          echo "BOUND_WORKER_NETWORK_EXPANSION=false"
           echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
           echo "SECRET_VALUES_EXPOSED=false"
       - name: Create exact bounded EngineeringJob through existing operator
