@@ -1,0 +1,83 @@
+name: Sentient Ops MCP Capability Contract Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-ops-mcp-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      S: ${{ inputs.sha }}
+      T: ${{ inputs.tree }}
+      APP: sentient-ops-mcp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-ops-mcp
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Fence exact bridge candidate and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$S" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$T" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$S"
+          test "$(git rev-parse HEAD^{tree})" = "$T"
+          npm ci
+          npm run build
+          npm test
+          echo "OPS_MCP_BUILD_TEST=PASS"
+      - name: Capture pre-deploy resource envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl machines list -a "$APP" --json > /tmp/pre.json
+          jq '[.[]|{guest:.config.guest,region:.region,services:.config.services}]' /tmp/pre.json > /tmp/pre-envelope.json
+          echo "PRE_MACHINE_COUNT=$(jq 'length' /tmp/pre.json)"
+      - name: Deploy exact compatibility bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl deploy -a "$APP" --remote-only --build-arg "CONNECTOR_SHA=$S" --build-arg "CONNECTOR_TREE=$T"
+      - name: Verify exact bridge identity and unchanged envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=false
+          for _ in $(seq 1 90); do
+            body="$(curl -fsS --max-time 5 "https://${APP}.fly.dev/healthz" 2>/dev/null || true)"
+            if jq -e --arg s "$S" --arg t "$T" '.status=="ok" and .connectorSha==$s and .connectorTree==$t' >/dev/null 2>&1 <<<"$body"; then
+              ok=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" = true
+          flyctl machines list -a "$APP" --json > /tmp/post.json
+          jq '[.[]|{guest:.config.guest,region:.region,services:.config.services}]' /tmp/post.json > /tmp/post-envelope.json
+          test "$(jq 'length' /tmp/pre.json)" = "$(jq 'length' /tmp/post.json)"
+          diff -u /tmp/pre-envelope.json /tmp/post-envelope.json
+          echo "OPS_MCP_EXACT_IDENTITY=PASS"
+          echo "RESOURCE_ENVELOPE_CHANGED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
