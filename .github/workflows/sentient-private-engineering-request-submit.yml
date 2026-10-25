@@ -4,23 +4,18 @@ name: Sentient Private Engineering Request Submit
   workflow_dispatch:
     inputs:
       issue_number:
-        description: Private riggeyb/sentient issue containing encoded EngineeringJob request
         required: true
         type: string
       request_sha256:
-        description: SHA-256 of decoded request JSON
         required: true
         type: string
       expected_head:
-        description: Exact authorized source head
         required: true
         type: string
       expected_tree:
-        description: Exact authorized source tree
         required: true
         type: string
       objective_id:
-        description: Exact objective identity
         required: true
         type: string
 
@@ -46,7 +41,7 @@ jobs:
       OBJECTIVE_ID: ${{ inputs.objective_id }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Fetch and bind private request without logging payload
+      - name: Verify private request and submit through resident Governor
         shell: bash
         run: |
           set -euo pipefail
@@ -57,80 +52,54 @@ jobs:
           [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:/-]{1,200}$ ]]
           test -n "$SOURCE_GITHUB_TOKEN"
 
-          code="$(curl -sS -o /tmp/private-issue.json -w '%{http_code}' \
+          code="$(curl -sS -o /tmp/issue.json -w '%{http_code}' \
             -H "Authorization: Bearer $SOURCE_GITHUB_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/riggeyb/sentient/issues/$ISSUE_NUMBER")"
-          test "$code" = "200"
+          test "$code" = 200
 
           node > /tmp/request.gz.b64 <<'NODE'
-          const fs=require("node:fs");
-          const {gunzipSync}=require("node:zlib");
-          const {createHash}=require("node:crypto");
-          const issue=JSON.parse(fs.readFileSync("/tmp/private-issue.json","utf8"));
-          const body=typeof issue?.body==="string"?issue.body:"";
-          const m=body.match(/REQUEST_BASE64_BEGIN\s+([A-Za-z0-9+/=\s]+?)\s+REQUEST_BASE64_END/);
-          if(!m)throw new Error("PRIVATE_REQUEST_PAYLOAD_MISSING");
-          const compressed=Buffer.from(m[1].replace(/\s+/g,""),"base64");
-          const bytes=gunzipSync(compressed);
-          const digest=createHash("sha256").update(bytes).digest("hex");
-          if(digest!==process.env.REQUEST_SHA256)throw new Error("PRIVATE_REQUEST_DIGEST_MISMATCH");
-          const request=JSON.parse(bytes.toString("utf8"));
-          if(request.repo!=="riggeyb/sentient")throw new Error("PRIVATE_REQUEST_REPO_MISMATCH");
-          if(request.branch!=="sentient-production-composition-20261017")throw new Error("PRIVATE_REQUEST_BRANCH_MISMATCH");
-          if(request.expectedHead!==process.env.EXPECTED_HEAD)throw new Error("PRIVATE_REQUEST_HEAD_MISMATCH");
-          if(request.expectedTree!==process.env.EXPECTED_TREE)throw new Error("PRIVATE_REQUEST_TREE_MISMATCH");
-          if(request.objectiveId!==process.env.OBJECTIVE_ID)throw new Error("PRIVATE_REQUEST_OBJECTIVE_MISMATCH");
-          if(request.policyVersion!=="sentient-capability-tier/v1")throw new Error("PRIVATE_REQUEST_POLICY_MISMATCH");
-          if(!Array.isArray(request.authorizedPaths)||request.authorizedPaths.length<1||request.authorizedPaths.length>16)throw new Error("PRIVATE_REQUEST_SCOPE_INVALID");
-          if( Array.isArray(request.commands)!==true||request.commands.length<1||request.commands.at(-1)?.category!=="test")throw new Error("PRIVATE_REQUEST_FINAL_TEST_REQUIRED");
-          process.stdout.write(compressed.toString("base64"));
+          const fs=require("node:fs"),z=require("node:zlib"),c=require("node:crypto");
+          const issue=JSON.parse(fs.readFileSync("/tmp/issue.json","utf8"));
+          const m=String(issue.body??"").match(/REQUEST_BASE64_BEGIN\s+([A-Za-z0-9+/=\s]+?)\s+REQUEST_BASE64_END/);
+          if(!m)throw Error("PRIVATE_REQUEST_PAYLOAD_MISSING");
+          const gz=Buffer.from(m[1].replace(/\s+/g,""),"base64"), bytes=z.gunzipSync(gz);
+          if(c.createHash("sha256").update(bytes).digest("hex")!==process.env.REQUEST_SHA256)throw Error("PRIVATE_REQUEST_DIGEST_MISMATCH");
+          const r=JSON.parse(bytes);
+          if(r.repo!=="riggeyb/sentient"||r.branch!=="sentient-production-composition-20261017")throw Error("PRIVATE_REQUEST_TARGET_MISMATCH");
+          if(r.expectedHead!==process.env.EXPECTED_HEAD||r.expectedTree!==process.env.EXPECTED_TREE)throw Error("PRIVATE_REQUEST_SOURCE_MISMATCH");
+          if(r.objectiveId!==process.env.OBJECTIVE_ID||r.policyVersion!=="sentient-capability-tier/v1")throw Error("PRIVATE_REQUEST_AUTHORITY_MISMATCH");
+          if(!Array.isArray(r.authorizedPaths)||r.authorizedPaths.length<1||r.authorizedPaths.length>16)throw Error("PRIVATE_REQUEST_SCOPE_INVALID");
+          if(!Array.isArray(r.commands)||r.commands.length<1||r.commands.at(-1)?.category!=="test")throw Error("PRIVATE_REQUEST_FINAL_TEST_REQUIRED");
+          process.stdout.write(gz.toString("base64"));
           NODE
-          rm -f /tmp/private-issue.json
-          echo "PRIVATE_REQUEST_FETCH=PASS"
-          echo "PRIVATE_REQUEST_DIGEST=PASS"
-          echo "PRIVATE_SOURCE_PAYLOAD_EXPOSED=false"
-
-      - name: Submit digest-bound bytes through existing Governor
-        shell: bash
-        run: |
-          set -euo pipefail
-          machines="$(flyctl machines list -a "$APP" --json)"
-          machine_id="$(jq -r '[.[] | select((.config.auto_destroy // false) != true and .state == "started")] | .[0].id // empty' <<<"$machines")"
-          test -n "$machine_id"
-          payload_b64="$(cat /tmp/request.gz.b64)"
+          rm -f /tmp/issue.json
+          payload="$(cat /tmp/request.gz.b64)"
           rm -f /tmp/request.gz.b64
 
-          cat > /tmp/governor-submit.mjs <<'NODE'
-          import { createHash } from "node:crypto";
-          import { gunzipSync } from "node:zlib";
-          const expectedDigest=required("REQUEST_SHA256");
-          const expectedHead=required("EXPECTED_HEAD");
-          const expectedTree=required("EXPECTED_TREE");
-          const objectiveId=required("OBJECTIVE_ID");
-          const engineeringToken=required("SENTIENT_ENGINEERING_API_TOKEN");
-          const compressed=Buffer.from(required("REQUEST_GZIP_B64"),"base64");
-          const requestBytes=gunzipSync(compressed);
-          if(createHash("sha256").update(requestBytes).digest("hex")!==expectedDigest)fail("PRIVATE_REQUEST_DIGEST_MISMATCH");
-         ÛÛœÝ™\]Y\ÝR”ÓÓ‹œ\œÙJ™\]Y\Ýž]\ËÔÝš[™Ê]ŽŠJNÂˆYŠ™\]Y\Ýœ™\ÈOOHœšYÙÙ^X‹ÜÙ[Y[ŠY˜Z[
-”’UUWÔ‘TUQTÕÔ‘T×ÓRTÓPUÒŠNÂˆYŠ™\]Y\Ý˜œ˜[˜ÚOOHœÙ[Y[\›ÙXÝ[Û‹XÛÛ\ÜÚ][Û‹LŒŒLMÈŠY˜Z[
-”’UUWÔ‘TUQTÕÐ”SÒÓRTÓPUÒŠNÂˆYŠ™\]Y\Ý™^XÝYXYOOY^XÝYXY
-Y˜Z[
-”’UUWÔ‘TUQTÕÒPQÓRTÓPUÒŠNÂˆYŠ™\]Y\Ý™^XÝY™YHOOY^XÝY™YJY˜Z[
-”’UUWÔ‘TUQTÕÕ‘QWÓRTÓPUÒŠNÂˆYŠ™\]Y\Ý›Øš™XÝ]™RYOO[Øš™XÝ]™RY
-Y˜Z[
-”’UUWÔ‘TUQTÕÓÐ’‘PÕU‘WÓRTÓPUÒŠNÂˆYŠ™\]Y\ÝœÛXÞU™\œÚ[ÛˆOOHœÙ[Y[XØ\Xš[]K]Y\‹ÝŒHŠY˜Z[
-”’UUWÔ‘TUQTÕÔÓPÖWÓRTÓPUÒŠNÂˆYŠP\œ˜^Kš\Ð\œ˜^J™\]Y\Ý˜]]Üš^™Y]Ê_™\]Y\Ý˜]]Üš^™Y]Ë›[™Ý_™\]Y\Ý˜]]Üš^™Y]Ë›[™ÝŒMŠY˜Z[
-”’UUWÔ‘TUQTÕÔÐÓÔWÒS•SQŠNÂˆYŠP\œ˜^Kš\Ð\œ˜^J™\]Y\Ý˜ÛÛ[X[™Ê_™\]Y\Ý˜ÛÛ[X[™Ë›[™Ý_™\]Y\Ý˜ÛÛ[X[™Ë˜]
-LJOË˜Ø]YÛÜžHOOH\ÝŠY˜Z[
-”’UUWÔ‘TUQTÕÑ’SSÕTÕÔ‘TURT‘QŠNÂ‚ˆ6öç7B&W7öç6SÖv—BfWF6‚‚&‡GG¢òó#rããã£ƒƒ÷cöVæv–æVW&–ærö¦ö'2"Ç°¢ÖWF†öC¢%õ5B"À¢†VFW'3§¶WF†÷&—¦F–öã¦&V&W"G¶Væv–æVW&–æuFö¶VçÖÆ66WC¢&Æ–6F–öâö§6öâ"Â&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ'ÒÀ¢&öG“¤¥4ôâç7G&–æv–g’‡&WVW7B’À¢6–væÃ¤&÷'E6–væÂçF–ÖV÷WBƒ3ó’À¢Ò“°¢6öç7B&W7VÇCÖv—B&W7öç6Ræ§6öâ‚’æ6F6‚‚‚“Óâ‡·Ò’“°¢–b‚&W7öç6Ræö²–f–Â†Tät”äTU$”äuô5$TDUô…EEòG·&W7öç6Rç7FGW7Ö“°¢–b‡G—Vöb&W7VÇCòæ¦ö$–BÓÒ'7G&–ær'ÇÂ&W7VÇBæ¦ö$–B–f–Â‚$Tät”äTU$”äuô¤ô%ô”EôÔ•54”är"“°¢½¹Í½±”¹±½œ¡9%9I%9})=	}%ô‘í±•…¸¡É•ÍÕ±Ð¹©½‰%¥õ€¤ì(€€€€€€€€€½¹Í½±”¹±½œ¡9%9I%9}MQQULô‘í±•…¸¡É•ÍÕ±Ð¹ÍÑ…ÑÕÌüü‰Õ¹­¹½Ý¸ˆ¥õ€¤ì(€€€€€€€€€½¹Í½±”¹±½œ¡aAQ}!ô‘í•áÁ•Ñ•‘!•…‘õ€¤ì(€€€€€€€€€console.log(`EXPECTED_TREE=${expectedTree}`);
-          console.log(`OBJECTIVE_ID=${objectiveId}`);
+          machines="$(flyctl machines list -a "$APP" --json)"
+          machine="$(jq -r '[.[]|select((.config.auto_destroy//false)!=true and .state=="started")][0].id//empty' <<<"$machines")"
+          test -n "$machine"
+
+          cat >/tmp/submit.mjs <<'NODE'
+          import {createHash} from "node:crypto";
+          import {gunzipSync} from "node:zlib";
+          const need=n=>{const v=String(process.env[n]??"").trim();if(!v)throw Error(`${n}_MISSING`);return v};
+          const gz=Buffer.from(need("REQUEST_GZIP_B64"),"base64"), bytes=gunzipSync(gz);
+          if(createHash("sha256").update(bytes).digest("hex")!==need("REQUEST_SHA256"))throw Error("PRIVATE_REQUEST_DIGEST_MISMATCH");
+          const r=JSON.parse(bytes);
+          if(r.expectedHead!==need("EXPECTED_HEAD")||r.expectedTree!==need("EXPECTED_TREE")||r.objectiveId!==need("OBJECTIVE_ID"))throw Error("PRIVATE_REQUEST_BINDING_MISMATCH");
+          const response=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{method:"POST",headers:{authorization:`Bearer ${need("SENTIENT_ENGINEERING_API_TOKEN")}`,"content-type":"application/json"},body:JSON.stringify(r),signal:AbortSignal.timeout(30000)});
+          const result=await response.json().catch(()=>({}));
+          if(!response.ok)throw Error(`ENGINEERING_CREATE_HTTP_${response.status}`);
+          if(typeof result.jobId!=="string"||!result.jobId)throw Error("ENGINEERING_JOB_ID_MISSING");
+          console.log(`ENGINEERING_JOB_ID=${result.jobId}`);
+          console.log(`ENGINEERING_STATUS=${String(result.status??"unknown")}`);
           console.log("PRIVATE_REQUEST_DIGEST=PASS");
-          console.log("PRIVATE_SOURCE_PAYLOAD_EXPOSED=false");
           console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
           console.log("SECRET_VALUES_EXPOSED=false");
-          function required(name){const value=String(process.env[name]??"").trim();if(!value)fail(`${name}_MISSING`);return value}
-          function clean(value){return String(value).replace(/[\r\n\0]/g,"")}
-          function fail(message){throw new Error(clean(message).replace(/[^A-Za-z0-9_.:-]/g,"_"))}
           NODE
+          script="$(base64 -w0 /tmp/submit.mjs)"
+          rm -f /tmp/submit.mjs
+          flyctl ssh console -a "$APP" --machine "$machine" -C "sh -lc 'echo $script|base64 -d >/tmp/submit.mjs; REQUEST_GZIP_B64=$payload REQUEST_SHA256=$REQUEST_SHA256 EXPECTED_HEAD=$EXPECTED_HEAD EXPECTED_TREE=$EXPECTED_TREE OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/submit.mjs; rc=\$?; rm -f /tmp/submit.mjs; exit \$rc'"
