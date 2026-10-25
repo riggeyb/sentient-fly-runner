@@ -27,7 +27,7 @@ jobs:
         with:
           repository: riggeyb/sentient
           ref: sentient-production-composition-20261017
-          token: ${{ secrets.SENTIENT_SOURCE_GITHEB_TOKEN }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
       - name: Fence and fast-forward exact tested descendant
