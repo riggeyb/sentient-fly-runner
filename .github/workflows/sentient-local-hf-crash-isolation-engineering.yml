@@ -28,59 +28,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat scripts/local-hf-crash-isolation-edit.part-* > /tmp/local-hf-crash-isolation-edit.mjs
-          test "$(wc -c < /tmp/local-hf-crash-isolation-edit.mjs)" -eq 7322
-          printf '%s  %s\n' 'd381018d2ca7af82b12e8c3b0eef459a88900c205f17846ea516ae58e97f80bc' /tmp/local-hf-crash-isolation-edit.mjs | sha256sum -c -
+          cat scripts/local-hf-crash-isolation-edit.part-00 scripts/local-hf-crash-isolation-edit.part-01 > /tmp/local-hf-crash-isolation-edit.base.mjs
+          test "$(wc -c < /tmp/local-hf-crash-isolation-edit.base.mjs)" -eq 7322
+          printf '%s  %s\n' 'd381018d2ca7af82b12e8c3b0eef459a88900c205f17846ea516ae58e97f80bc' /tmp/local-hf-crash-isolation-edit.base.mjs | sha256sum -c -
+          test "$(wc -c < scripts/local-hf-crash-isolation-edit.part-02)" -eq 115
+          printf '%s  %s\n' '2acac4cde63408c355652393c8d2c5674729b01cfa711976f0e081f1fa1b5877' scripts/local-hf-crash-isolation-edit.part-02 | sha256sum -c -
+          cat /tmp/local-hf-crash-isolation-edit.base.mjs scripts/local-hf-crash-isolation-edit.part-02 > /tmp/local-hf-crash-isolation-edit.mjs
           node --check /tmp/local-hf-crash-isolation-edit.mjs
           node - <<'NODE' > /tmp/request.json
-          const fs=require("fs");
-          const editCode=fs.readFileSync("/tmp/local-hf-crash-isolation-edit.mjs","utf8");
-          const request={
-            repo:"riggeyb/sentient",
-            branch:"sentient-production-composition-20261017",
-            expectedHead:"7d54e0f5b77b65bc4984cd5a667084e12eb738c1",
-            expectedTree:"3f1929fead05d17b182bea29c168faeafbcc1a98",
-            objectiveId:"SENTIENT_ROUTINE_LOCAL_HF_CRASH_ISOLATION_20261025",
-            actionId:"local-hf-native-child-process-isolation-v1",
-            authorizedPaths:[
-              "src/model/providers/huggingface.ts",
-              "src/model/providers/huggingface-worker.ts",
-              "test/local-hf-worker-isolation.test.ts"
-            ],
-            authorizationIdentity:"user:SENTIENT_ROUTINE_OPERATIONAL_DEVELOPMENT_V1",
-            authorizationReason:"Repeated live Napi::Error SIGABRT crashes terminate the authoritative Sentient host while local Hugging Face ONNX inference runs inside worker_threads. Isolate the same local-zero-cost inference protocol in an OS child process so native aborts are contained and retried without changing model, authority, resources, or paid-compute policy.",
-            policyVersion:"sentient-capability-tier/v1",
-            objective:"ROUTINE_LOCAL_HF_NATIVE_CRASH_ISOLATION_V1: Replace the production local Hugging Face worker_threads boundary with an OS child-process boundary while preserving the LocalHfWorkerPortV1 request/response contract, current SmolLM2 model/revision/q4 CPU configuration, one-retry behavior, abort semantics, model non-authority, and zero-paid-compute policy. Sanitize the child environment to a narrow runtime/network allowlist so HF write secrets and unrelated credentials are not inherited. Add a real child-process regression where the first child process.abort()s during generation and the authoritative parent survives, recreates a child, and succeeds. No deployment, resource change, policy/authority mutation, model change, paid compute, certification change, or historical-state cleanup.",
-            commands:[
-              {name:"install-js-no-native-scripts",category:"shell",command:"npm",args:["ci","--ignore-scripts"],timeoutMs:300000},
-              {name:"preflight-build",category:"build",command:"npm",args:["run","build"],timeoutMs:120000},
-              {name:"preflight-local-hf-tests",category:"test",command:"node",args:["--test","dist/test/local-hf-worker-isolation.test.js","dist/test/phase3-local-hf-adapter.test.js","dist/test/production-phase3-cognition.test.js"],timeoutMs:180000},
-              {name:"implement-child-process-isolation",category:"edit",command:"node",args:["--input-type=module","-e",editCode],timeoutMs:30000},
-              {name:"build-after-change",category:"build",command:"npm",args:["run","build"],timeoutMs:120000},
-              {name:"local-hf-crash-isolation-tests",category:"test",command:"node",args:["--test","dist/test/local-hf-worker-isolation.test.js","dist/test/phase3-local-hf-adapter.test.js","dist/test/production-phase3-cognition.test.js","dist/test/dots3-presentation-only-local-hf.test.js"],timeoutMs:240000},
-              {name:"diff-check",category:"test",command:"git",args:["diff","--check"],timeoutMs:30000}
-            ],
-            commitMessage:"fix: isolate local HF native runtime in child process",
-            timeoutMs:1200000
-          };
-          process.stdout.write(JSON.stringify(request));
-          NODE
-          node - <<'NODE'
-          const fs=require("fs");
-          const x=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));
-          const paths=[
-            "src/model/providers/huggingface.ts",
-            "src/model/providers/huggingface-worker.ts",
-            "test/local-hf-worker-isolation.test.ts"
-          ];
-          if(x.expectedHead!=="7d54e0f5b77b65bc4984cd5a667084e12eb738c1") throw new Error("HEAD_MISMATCH");
-          if(x.expectedTree!=="3f1929fead05d17b182bea29c168faeafbcc1a98") throw new Error("TREE_MISMATCH");
-          if(x.policyVersion!=="sentient-capability-tier/v1") throw new Error("POLICY_MISMATCH");
-          if(JSON.stringify(x.authorizedPaths)!==JSON.stringify(paths)) throw new Error("SCOPE_MISMATCH");
-          if(!Array.isArray(x.commands)||x.commands.length!==7||x.commands.at(-1)?.category!=="test") throw new Error("COMMAND_SET_MISMATCH");
-          console.log("REQUEST_BINDING=PASS");
-          console.log("REQUEST_TIER=2");
-          console.log("DEPLOY_ON_SUCCESS=false");
+         ÛÛœÝœÏ\™\]Z\™J™œÈŠNÂˆÛÛœÝY]ÛÙOYœËœ™XYš[TÞ[˜Ê‹Ý\ÛØØ[Z‹XÜ˜\ÚZ\ÛÛ][Û‹YY]›ZœÈ‹]ŽŠNÂˆÛÛœÝ™\]Y\Ý^Âˆ™\ÎˆœšYÙÙ^X‹ÜÙ[Y[‹ˆœ˜[˜ÚˆœÙ[Y[\›ÙXÝ[Û‹XÛÛ\ÜÚ][Û‹LŒŒLMÈ‹ˆ^XÝYXYˆÙMLXÍØX˜ÍNÙXMÌLL™XÌÎÌH‹ˆ^XÝY™YNˆŒÙŒNLŽY™XYYMØŒN˜™XLŽXÌMŽ˜YXY˜˜ØÌXNN‹ˆØš™XÝ]™RYˆ”ÑS•QS•Ô“ÕUS‘WÓÐÐSÒ—ÐÔTÒÒTÓÓUSÓ—ÌŒŒLH‹ˆXÝ[Û’Yˆ›ØØ[Z‹[˜]]™KXÚ[\›ØÙ\ÜËZ\ÛÛ][Û‹]ŒH‹ˆ]]Üš^™Y]Î–ÂˆœÜ˜ËÛ[Ù[Ü›ÝšY\œËÚYÙÚ[™Ù˜XÙKÈ‹ˆœÜ˜ËÛ[Ù[Ü›ÝšY\œËÚYÙÚ[™Ù˜XÙK]ÛÜšÙ\‹È‹ˆ\ÝÛØØ[Z‹]ÛÜšÙ\‹Z\ÛÛ][Û‹\ÝÈ‚ˆKˆ]]Üš^˜][Û’Y[]Nˆ\Ù\Ž”ÑS•QS•Ô“ÕUS‘WÓÔTUSÓSÑU‘SÔQS•ÕŒH‹ˆ]]Üš^˜][Û”™X\ÛÛŽˆ”™\X]Y]™H˜\NŽ‘\œ›ÜˆÒQÐP”•Ü˜\Ú\È\›Z[˜]HH]]Üš]]]™HÙ[Y[ÜÝÚ[HØØ[YÙÚ[™È˜XÙHÓ“–[™™\™[˜ÙH[œÈ[œÚYHÛÜšÙ\—Ý™XYËˆ\ÛÛ]HHØ[YHØØ[^™\›ËXÛÜÝ[™™\™[˜ÙH›ÝØÛÛ[ˆ[ˆÔÈÚ[›ØÙ\ÜÈÛÈ˜]]™HX›ÜÈ\™HÛÛZ[™Y[™™]šYYÚ]Ý]Ú[™Ú[™È[Ù[]]Üš]K™\ÛÝ\˜Ù\ËÜˆZYXÛÛ\]HÛXÞKˆ‹ˆÛXÞU™\œÚ[ÛŽˆœÙ[Y[XØ\Xš[]K]Y\‹ÝŒH‹ˆØš™XÝ]™Nˆ”“ÕUS‘WÓÐÐSÒ—ÓUU‘WÐÔTÒÒTÓÓUSÓ—ÕŒNˆ™\XÙHH›ÙXÝ[ÛˆØØ[YÙÚ[™È˜XÙHÛÜšÙ\—Ý™XYÈ›Ý[™\žHÚ][ˆÔÈÚ[\›ØÙ\ÜÈ›Ý[™\žHÚ[H™\Ù\š[™ÈHØØ[•ÛÜšÙ\”ÜŒH™\]Y\ÝÜ™\ÜÛœÙHÛÛ˜XÝÝ\œ™[Û[ÛLˆ[Ù[Ü™]š\Ú[Û‹ÜMÔHÛÛ™šYÝ\˜][Û‹Û™K\™]žH™Z]š[Ü‹X›ÜÙ[X[XÜË[Ù[›Û‹X]]Üš]K[™™\›Ë\ZYXÛÛ\]HÛXÞKˆØ[š]^™HHÚ[[š\›Û›Y[ÈH˜\œ›ÝÈ[[YKÛ™]ÛÜšÈ[ÝÛ\ÝÛÈˆÜš]HÙXÜ™]È[™[œ™[]YÜ™Y[X[È\™H›Ý[š\š]YˆYH™X[Ú[\›ØÙ\ÜÈ™YÜ™\ÜÚ[ÛˆÚ\™HHš\œÝÚ[›ØÙ\ÜË˜X›Ü
+
+\È\š[™ÈÙ[™\˜][Ûˆ[™H]]Üš]]]™H\™[Ý\š]™\Ë™XÜ™X]\ÈHÚ[[™ÝXØÙYYËˆ›È\Þ[Y[™\ÛÝ\˜ÙHÚ[™ÙKÛXÞKØ]]Üš]H]]][Û‹[Ù[Ú[™ÙKZYÛÛ\]KÙ\YšXØ][ÛˆÚ[™ÙKÜˆ\ÝÜšXØ[\Ý]HÛX[\ˆ‹ˆÛÛ[X[™Î–ÂˆÛ˜[YNˆš[œÝ[ZœË[›Ë[˜]]™K\ØÜš\È‹Ø]YÛÜžNˆœÚ[‹ÛÛ[X[™ˆ›œH‹\™ÜÎ–È˜ÚH‹‹KZYÛ›Ü™K\ØÜš\È—K[Y[Ý]\ÎŒÌKˆÛ˜[YNˆœ™Y›YÚXZ[‹Ø]YÛÜžNˆ˜Z[‹ÛÛ[X[™ˆ›œH‹\™ÜÎ–Èœ[ˆ‹˜Z[—K[Y[Ý]\ÎŒLŒKˆÛ˜[YNˆœ™Y›YÚ[ØØ[Z‹]\ÝÈ‹Ø]YÛÜžNˆ\Ý‹ÛÛ[X[™ˆ››ÙH‹\™ÜÎ–È‹K]\Ý‹™\ÝÝ\ÝÛØØ[Z‹]ÛÜšÙ\‹Z\ÛÛ][Û‹\ÝšœÈ‹™\ÝÝ\ÝÜ\ÙLË[ØØ[Z‹XY\\‹\ÝšœÈ‹™\ÝÝ\ÝÜ›ÙXÝ[Û‹\\ÙLËXÛÙÛš][Û‹\ÝšœÈ—K[Y[Ý]\ÎŒNKˆÛ˜[YNˆš[\[Y[XÚ[\›ØÙ\ÜËZ\ÛÛ][Ûˆ‹Ø]YÛÜžNˆ™Y]‹ÛÛ[X[™ˆ››ÙH‹\™ÜÎ–È‹KZ[œ]]\O[[Ù[H‹‹YH‹Y]ÛÙWK[Y[Ý]\ÎŒÌKˆÛ˜[YNˆ˜Z[XY\‹XÚ[™ÙH‹Ø]YÛÜžNˆ˜Z[‹ÛÛ[X[™ˆ›œH‹\™ÜÎ–Èœ[ˆ‹˜Z[—K[Y[Ý]\ÎŒLŒKˆÛ˜[YNˆ›ØØ[Z‹XÜ˜\ÚZ\ÛÛ][Û‹]\ÝÈ‹Ø]YÛÜžNˆ\Ý‹ÛÛ[X[™ˆ››ÙH‹\™ÜÎ–È‹K]\Ý‹™\ÝÝ\ÝÛØØ[Z‹]ÛÜšÙ\‹Z\ÛÛ][Û‹\ÝšœÈ‹™\ÝÝ\ÝÜ\ÙLË[ØØ[Z‹XY\\‹\ÝšœÈ‹™\ÝÝ\ÝÜ›ÙXÝ[Û‹\\ÙLËXÛÙÛš][Û‹\ÝšœÈ‹™\ÝÝ\ÝÙÝÌË\™\Ù[][Û‹[Û›K[ØØ[Z‹\ÝšœÈ—K[Y[Ý]\ÎŒKˆÛ˜[YNˆ™Y™‹XÚXÚÈ‹Ø]YÛÜžNˆ\Ý‹ÛÛ[X[™ˆ™Ú]‹\™ÜÎ–È™Y™ˆ‹‹KXÚXÚÈ—K[Y[Ý]\ÎŒÌBˆKˆÛÛ[Z]Y\ÜØYÙNˆ™š^ˆ\ÛÛ]HØØ[ˆ˜]]™H[[YH[ˆÚ[›ØÙ\ÜÈ‹ˆ[Y[Ý]\ÎŒLŒˆNÂˆ›ØÙ\ÜËœÝÝ]Üš]J”ÓÓ‹œÝš[™ÚYžJ™\]Y\Ý
+JNÂˆ“ÑBˆ›ÙHH	Ó“ÑIÂˆÛÛœÝœÏ\™\]Z\™J™œÈŠNÂˆ6öç7BƒÔ¥4ôâç'6R†g2ç&VDf–ÆU7–æ2‚"÷F×÷&WVW7Bæ§6öâ"Â'WFc‚"’“°¢½¹ÍÐÁ…Ñ¡Ìõl(€€€€€€€€€€€€‰ÍÉŒ½µ½‘•°½ÁÉ½Ù¥‘•ÉÌ½¡Õ¥¹™…”¹ÑÌˆ°(€€€€€€€€€€€€‰ÍÉŒ½µ½‘•°½ÁÉ½Ù¥‘•ÉÌ½¡Õ¥¹™…”µÝ½É­•È¹ÑÌˆ°(€€€€€€€€€€€€‰Ñ•ÍÐ½±½…°µ¡˜µÝ½É­•Èµ¥Í½±…Ñ¥½¸¹Ñ•ÍÐ¹ÑÌˆ(€€€€€€€€€tì(€€€€€€€€€¥˜¡à¹•áÁ•Ñ•‘!•…„ôôˆÝÔÑ”Á˜ÕˆÜÝˆØÕ‰ŒÐäàÑÕ„ØØÜÀàÑ”ÄÉ•ˆÜÌáŒÄˆ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰!}5%M5Q ˆ¤ì(€€€€€€€€€¥˜¡à¹•áÁ•Ñ•‘QÉ•”„ôôˆÍ˜ÄäÈå™•…ÀÕÄÝˆÄàÉ‰•„ÈåŒÄØá™…•…™‰ŒÅ„äàˆ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰QI}5%M5Q ˆ¤ì(€€€€€€€€€¥˜¡à¹Á½±¥åY•ÉÍ¥½¸„ôô‰Í•¹Ñ¥•¹Ðµ…Á…‰¥±¥ÑäµÑ¥•È½ØÄˆ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰A=1%e}5%M5Q ˆ¤ì(€€€€€€€€€¥˜¡)M=8¹ÍÑÉ¥¹¥™ä¡à¹…ÕÑ¡½É¥é•‘A…Ñ¡Ì¤„ôõ)M=8¹ÍÑÉ¥¹¥™ä¡Á…Ñ¡Ì¤¤Ñ¡É½Ü¹•ÜÉÉ½È ‰M=A}5%M5Q ˆ¤ì(€€€€€€€€€¥˜ …ÉÉ…ä¹¥ÍÉÉ…ä¡à¹½µµ…¹‘Ì¥ññà¹½µµ…¹‘Ì¹±•¹Ñ „ôôÝññà¹½µµ…¹‘Ì¹…Ð ´Ä¤ü¹…Ñ•½Éä„ôô‰Ñ•ÍÐˆ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰=559}MQ}5%M5Q ˆ¤ì(€€€€€€€€€½¹Í½±”¹±½œ ‰IEUMQ}	%9%9õAMLˆ¤ì(€€€€€€€€€½¹Í½±”¹±½œ ‰IEUMQ}Q%HôÈˆ¤ì(€€€€€€€€€console.log("DEPLOY_ON_SUCCESS=false");
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
       - name: Create EngineeringJob through resident Governor
@@ -89,36 +48,8 @@ jobs:
           set -euo pipefail
           cat >/tmp/create-engineering.mjs <<'NODE'
           import { readFile } from "node:fs/promises";
-          const token=String(process.env.SENTIENT_ENGINEERING_API_TOKEN??"").trim();
-          if(!token) throw new Error("GOVERNOR_RESIDENT_ENGINEERING_CREDENTIAL_MISSING");
-          const request=JSON.parse(await readFile("/tmp/request.json","utf8"));
-          const r=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{
-            method:"POST",
-            headers:{authorization:"Bearer "+token,"content-type":"application/json"},
-            body:JSON.stringify(request),
-            signal:AbortSignal.timeout(30000)
-          });
-          const raw=await r.text();
-          let body={};
-          try{body=JSON.parse(raw)}catch{}
-          const out={HTTP_STATUS:r.status};
-          for(const k of ["contract","jobId","repo","branch","expectedHead","status","createdAt"]) if(k in body) out[k]=body[k];
-          if(body.authorityReceipt&&typeof body.authorityReceipt==="object"){
-            const a=body.authorityReceipt;
-            out.authorityReceipt={
-              actionId:a.actionId??null,
-              actionType:a.actionType??null,
-              capabilityTier:a.capabilityTier??null,
-              policyVersion:a.policyVersion??null,
-              sourceSha:a.sourceSha??null,
-              sourceTree:a.sourceTree??null,
-              authorizedScope:a.authorizedScope??null
-            };
-          }
-          console.log(JSON.stringify(out));
-          if(r.status!==202 || typeof body.jobId!=="string" || !body.jobId) process.exit(31);
-          if(body.expectedHead!==request.expectedHead) process.exit(32);
-          console.log("ENGINEERING_CREATE=PASS");
+         ÛÛœÝÚÙ[TÝš[™Ê›ØÙ\ÜË™[‹”ÑS•QS•ÑS‘ÒS‘QT’S‘×ÐTWÕÒÑSÏÈˆŠKš[J
+NÂˆYŠ]ÚÙ[ŠH›ÝÈ™]È\œ›ÜŠ‘ÓÕ‘T““Ô—Ô‘TÒQS•ÑS‘ÒS‘QT’S‘×ÐÔ‘QS•PSÓRTÔÒS‘ÈŠNÂˆÛÛœÝ™\]Y\ÝR”ÓÓ‹œ\œÙJ]ØZ]™XYš[J‹Ý\Ü™\]Y\ÝšœÛÛˆ‹]ŽŠJNÂˆ6öç7B#Öv—BfWF6‚‚&‡GG¢òó#rããã£ƒƒ÷cöVæv–æVW&–ærö¦ö'2"Ç°¢ÖWF†öC¢%õ5B"À¢†VFW'3§¶WF†÷&—¦F–öã¢$&V&W""·Fö¶VâÂ&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ'ÒÀ¢&öG“¤¥4ôâç7G&–æv–g’‡&WVW7B’À¢6–væÃ¤&÷'E6–væÂçF–ÖV÷WBƒ3¢Ò“°¢6öç7B&sÖv—B"çFW‡B‚“°¢ÆWB&öG“×·Ó°¢G'—¶&öG“Ô¥4ôâç'6R‡&r—Ö6F6‡·Ð¢6öç7B÷WC×´…EEõ5DEU3§"ç7FGW7Ó°¢f÷"†6öç7B²öb²&6öçG&7B"Â&¦ö$–B"Â'&Wò"Â&'&æ6‚"Â&W‡V7FVD†VB"Â'7FGW2"Â&7&VFVDB%Ò’–b†²–â&öG’’÷WE¶µÓÖ&öG•¶µÓ°¢–b†&öG’æWF†÷&—G•&V6V—BbgG—Vöb&öG’æWF†÷&—G•&V6V—CÓÓÒ&ö&¦V7B"—°¢6öç7BÖ&öG’æWF†÷&—G•&V6V—C°¢÷WBæWF†÷&—G•&V6V—C×°¢7F–öä–C¦æ7F–öä–CóöçVÆÂÀ¢7F–öåG—S¦æ7F–öåG—SóöçVÆÂÀ¢…Á…‰¥±¥ÑåQ¥•Èé„¹…Á…‰¥±¥ÑåQ¥•Èüý¹Õ±°°(€€€€€€€€€€€€€Á½±¥åY•ÉÍ¥½¸é„¹Á½±¥åY•ÉÍ¥½¸üý¹Õ±°°(€€€€€€€€€€€€€Í½ÕÉ•M¡„é„¹Í½ÕÉ•M¡„üý¹Õ±°°(€€€€€€€€€€€€€Í½ÕÉ•QÉ•”é„¹Í½ÕÉ•QÉ•”üý¹Õ±°°(€€€€€€€€€€€€€…ÕÑ¡½É¥é•‘M½Á”é„¹…ÕÑ¡½É¥é•‘M½Á”üý¹Õ±°(€€€€€€€€€€€ôì(€€€€€€€€€ô(€€€€€€€€€½¹Í½±”¹±½œ¡)M=8¹ÍÑÉ¥¹¥™ä¡½ÕÐ¤¤ì(€€€€€€€€€¥˜¡È¹ÍÑ…ÑÕÌ„ôôÈÀÈñðÑåÁ•½˜‰½‘ä¹©½‰%„ôô‰ÍÑÉ¥¹œˆñð€…‰½‘ä¹©½‰%¤ÁÉ½•ÍÌ¹•á¥Ð ÌÄ¤ì(€€€€€€€€€¥˜¡‰½‘ä¹•áÁ•Ñ•‘!•…„ôõÉ•ÅÕ•ÍÐ¹•áÁ•Ñ•‘!•…¤ÁÉ½•ÍÌ¹•á¥Ð ÌÈ¤ì(€€€€€€€€€console.log("ENGINEERING_CREATE=PASS");
           console.log("JOB_ID="+body.jobId);
           console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
           console.log("SECRET_VALUES_EXPOSED=false");
