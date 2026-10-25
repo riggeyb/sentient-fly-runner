@@ -1,0 +1,48 @@
+name: Final Cert V3 Recovery Ledger
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: 7a9d16554f5d145bed4d8908a61f92a946217741
+      TREE: 26450b4068afa843b4cd21b90a0e8fc155ba0409
+      OID: final-e2e-v3-40146149751-1
+      SID: session-final-e2e-v3-40146149751-1
+      WORK_ID: final-e2e-v3-40146149751-1:step-3:independent-analysis:spawn:final-e2e-v3-40146149751-1:step-3:independent-analysis:d90ee556-6362-4be1-87cc-315b33d12fae
+      OLD_PARTICIPANT: spawn:final-e2e-v3-40146149751-1:step-3:independent-analysis:d90ee556-6362-4be1-87cc-315b33d12fae
+      CHILD_ID: spawn:final-e2e-v3-40146149751-1:step-3:independent-analysis:d90ee556-6362-4be1-87cc-315b33d12fae:execution
+      PRE_REVISION: "8"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Observe same terminal objective read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          machines="$(flyctl machines list -a "$APP" --json)"
+          mid="$(jq -er '.[0].id' <<<"$machines")"
+          state="$(jq -er '.[0].state' <<<"$machines")"
+          jq -e --arg s "$SHA" 'any(.[]; ((.config.image // .image_ref.tag // "") | contains($s)))' <<<"$machines" >/dev/null
+          if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+          ready=false
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          B="$(base64 -w0 scripts/final-integrated-observe.mjs)"
+          timeout 75s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B|base64 -d >/tmp/obs-${GITHUB_RUN_ID}.mjs; CERT_OBJECTIVE_ID=$OID CERT_SESSION_ID=$SID CERT_WORK_ID=$WORK_ID CERT_PARTICIPANT_ID=$OLD_PARTICIPANT CERT_CHILD_ID=$CHILD_ID CERT_PRE_REVISION=$PRE_REVISION node /tmp/obs-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/obs-${GITHUB_RUN_ID}.mjs; exit \$rc'" | tee /tmp/out
+          grep -Fq 'INTEGRATED_OBSERVATION_PASS=true' /tmp/out
+          grep -Fq 'PHASE2_DURABLE_TOOL_EVIDENCE=true' /tmp/out
+          grep -Fq 'PHASE6_DURABLE_REPOSITORY_EVIDENCE=true' /tmp/out
+          grep -Fq 'SECRET_VALUES_EXPOSED=false' /tmp/out
