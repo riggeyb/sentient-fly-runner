@@ -1,0 +1,57 @@
+name: Sentient Operations Seal Certified Release
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sentient-certified-release-tag-2026-10-25
+  cancel-in-progress: false
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: e9bd0c9135f05da2be337e5e7ac4077af0f4649d
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Idempotently seal exact certified Git tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=e9bd0c9135f05da2be337e5e7ac4077af0f4649d
+          tree=0d5317a5434f20530d4814d748ae9fa9a7a520f3
+          tag=sentient-certified-2026-10-25
+          test "$(git rev-parse HEAD)" = "$expected"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$tree"
+          remote="$(git ls-remote --tags origin "refs/tags/${tag}" "refs/tags/${tag}^{}")"
+          if [ -n "$remote" ]; then
+            git fetch --no-tags origin "refs/tags/${tag}:refs/tags/${tag}"
+            actual="$(git rev-parse "refs/tags/${tag}^{commit}")"
+            test "$actual" = "$expected" || { echo TAG_COLLISION_DIFFERENT_COMMIT; exit 1; }
+            test "$(git cat-file -t "refs/tags/${tag}")" = tag || { echo EXISTING_TAG_NOT_ANNOTATED; exit 1; }
+            echo "CERTIFIED_TAG_EXISTING_EXACT=PASS"
+          else
+            git config user.name "Sentient Release Operator"
+            git config user.email "sentient-release-operator@users.noreply.github.com"
+            git tag -a "$tag" "$expected" -m "Certified Sentient baseline 2026-10-25
+          Source SHA: e9bd0c9135f05da2be337e5e7ac4077af0f4649d
+          Git tree: 0d5317a5434f20530d4814d748ae9fa9a7a520f3
+          FINAL_SENTIENT_PASS=PASS
+          Integrated execution: riggeyb/sentient-fly-runner Actions 40175520395
+          Phase7 promotion: Actions 40176489135
+          Live runtime: Actions 40177341450
+          Exact Governor deployment: Actions 40175281044
+          Evidence: riggeyb/sentient-fly-runner issue #6"
+            git push origin "refs/tags/${tag}"
+            echo "CERTIFIED_TAG_CREATED=PASS"
+          fi
+          echo "CERTIFIED_TAG=$tag"
+          echo "CERTIFIED_SHA=$(git rev-parse "refs/tags/${tag}^{commit}")"
+          echo "CERTIFIED_TREE=$(git rev-parse "refs/tags/${tag}^{tree}")"
+          echo "CERTIFIED_TAG_ANNOTATED=PASS"
+          echo "SOURCE_MUTATION=false"
+          echo "DEPLOYMENT_PERFORMED=false"
