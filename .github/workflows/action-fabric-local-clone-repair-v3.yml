@@ -1,0 +1,134 @@
+name: Sentient Action Fabric Local Clone Ownership Repair V3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply exact fenced repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "00a99f1b17b6c79a7e1e1c1001f26805b4f1d097"
+          test "$(git rev-parse 'HEAD^{tree}')" = "7974452b538b96c5c5eb0464561503cb6b3f2f9e"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/action-fabric/local-repository-executor.ts")
+          s = p.read_text()
+          assert 'const EXECUTOR_VERSION = "2";' in s
+          s = s.replace('const EXECUTOR_VERSION = "2";', 'const EXECUTOR_VERSION = "3";', 1)
+          marker = "export function createLocalRepositoryActionExecutorV1("
+          assert s.count(marker) == 1
+          helper = '''export function localRepositoryCloneArgsV1(
+            repositoryPath: string,
+            workspace: string,
+          ): readonly string[] {
+            return [
+              "-c",
+              `safe.directory=${repositoryPath}`,
+              "clone",
+              "--local",
+              "--no-hardlinks",
+              "--no-checkout",
+              "--",
+              repositoryPath,
+              workspace,
+            ];
+          }
+
+          '''
+          s = s.replace(marker, helper + marker, 1)
+          a = s.index("        const clone = await runGitV1(")
+          b = s.index("        const cloneInterrupted", a)
+          block = s[a:b]
+          assert '"clone"' in block and '"--local"' in block and 'repositoryPath' in block
+          replacement = '''        const clone = await runGitV1(
+            [...localRepositoryCloneArgsV1(repositoryPath, workspace)],
+            root,
+            signal,
+            remainingMs(request, startedMs),
+          );
+'''
+          s = s[:a] + replacement + s[b:]
+          p.write_text(s)
+
+          t = Path("test/production-repository-capability.test.ts")
+          ts = t.read_text()
+          needle = 'import { actionRiskIsolationCapabilityV1 } from "../src/action-fabric/policy.js";\n'
+          assert ts.count(needle) == 1
+          ts = ts.replace(needle, needle + 'import { localRepositoryCloneArgsV1 } from "../src/action-fabric/local-repository-executor.js";\n', 1)
+          marker2 = 'test("production repository capability executes only exact-revision read operations with Action Fabric evidence", async () => {'
+          assert ts.count(marker2) == 1
+          test = '''test("local repository clone trusts only the exact configured source path", () => {
+            const args = [...localRepositoryCloneArgsV1("/opt/sentient-source", "/tmp/workspace")];
+            assert.deepEqual(args, [
+              "-c",
+              "safe.directory=/opt/sentient-source",
+              "clone",
+              "--local",
+              "--no-hardlinks",
+              "--no-checkout",
+              "--",
+              "/opt/sentient-source",
+              "/tmp/workspace",
+            ]);
+            assert.equal(args.includes("safe.directory=*"), false);
+          });
+
+         '''
+          ts = ts.replace(marker2, test + marker2, 1)
+          t.write_text(ts)
+          PY
+          mapfile -t changed < <(git diff --name-only | sort)
+          printf 'CHANGED_FILE=%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = "src/action-fabric/local-repository-executor.ts"
+          test "${changed[1]}" = "test/production-repository-capability.test.ts"
+          git diff --check
+          echo "ACTION_FABRIC_LOCAL_CLONE_REPAIR_APPLIED=PASS"
+      - name: Build and focused regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/production-repository-capability.test.js \
+            dist/test/action-fabric.test.js \
+            dist/test/final-cert-phase4-executor-exception.test.js
+          echo "ACTION_FABRIC_LOCAL_CLONE_FOCUSED_REGRESSIONS=PASS"
+      - name: Commit tested repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "00a99f1b17b6c79a7e1e1c1001f26805b4f1d097"
+          git fetch origin sentient-production-composition-20261017
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "00a99f1b17b6c79a7e1e1c1001f26805b4f1d097"
+          git config user.name "sentient-action-fabric-convergence"
+          git config user.email "sentient-action-fabric-convergence@users.noreply.github.com"
+          git add src/action-fabric/local-repository-executor.ts test/production-repository-capability.ts
+          git commit -m "fix: trust exact baked source for local action clone"
+          git push origin HEAD:sentient-production-composition-20261017
+          echo "NEW_SHA=$(git rev-parse HEAD)"
+          echo "NEW_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "PUBLIC_RUNNER_USED=true"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "NETLIFY_USAGE=0"
+          echo "SECRET_VALUES_EXPOSED=false"
