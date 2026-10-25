@@ -1,14 +1,22 @@
 const fs = require("fs");
 const crypto = require("crypto");
 
-const parts = [
+const baseParts = [
   "scripts/local-hf-crash-isolation-edit.part-00",
   "scripts/local-hf-crash-isolation-edit.part-01",
 ];
-const editCode = parts.map(p => fs.readFileSync(p, "utf8")).join("");
-if (Buffer.byteLength(editCode, "utf8") !== 7322) throw new Error("EDIT_SIZE_MISMATCH");
-const editDigest = crypto.createHash("sha256").update(editCode, "utf8").digest("hex");
-if (editDigest !== "d381018d2ca7af82b12e8c3b0eef459a88900c205f17846ea516ae58e97f80bc") throw new Error("EDIT_DIGEST_MISMATCH");
+const baseEditCode = baseParts.map(p => fs.readFileSync(p, "utf8")).join("");
+if (Buffer.byteLength(baseEditCode, "utf8") !== 7322) throw new Error("BASE_EDIT_SIZE_MISMATCH");
+const baseDigest = crypto.createHash("sha256").update(baseEditCode, "utf8").digest("hex");
+if (baseDigest !== "d381018d2ca7af82b12e8c3b0eef459a88900c205f17846ea516ae58e97f80bc") throw new Error("BASE_EDIT_DIGEST_MISMATCH");
+
+const fixturePatchPath = "scripts/local-hf-crash-isolation-edit.part-02";
+const fixturePatch = fs.readFileSync(fixturePatchPath, "utf8");
+if (Buffer.byteLength(fixturePatch, "utf8") !== 115) throw new Error("FIXTURE_PATCH_SIZE_MISMATCH");
+const fixturePatchDigest = crypto.createHash("sha256").update(fixturePatch, "utf8").digest("hex");
+if (fixturePatchDigest !== "2acac4cde63408c355652393c8d2c5674729b01cfa711976f0e081f1fa1b5877") throw new Error("FIXTURE_PATCH_DIGEST_MISMATCH");
+
+const editCode = baseEditCode + fixturePatch;
 
 const request = {
   repo: "riggeyb/sentient",
@@ -35,7 +43,7 @@ const request = {
     { name: "local-hf-crash-isolation-tests", category: "test", command: "node", args: ["--test", "dist/test/local-hf-worker-isolation.test.js", "dist/test/phase3-local-hf-adapter.test.js", "dist/test/production-phase3-cognition.test.js", "dist/test/dots3-presentation-only-local-hf.test.js"], timeoutMs: 240000 },
     { name: "diff-check", category: "test", command: "git", args: ["diff", "--check"], timeoutMs: 30000 },
   ],
-  commitMessage: "fix: isolate local HF native runtime in child process",
+  commandMessage: "fix: isolate local HF native runtime in child process",
   timeoutMs: 1200000,
 };
 process.stdout.write(JSON.stringify(request));
