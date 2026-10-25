@@ -31,6 +31,7 @@ jobs:
         with:
           repository: riggeyb/sentient-ops-mcp
           ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
