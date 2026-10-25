@@ -1,0 +1,75 @@
+name: Repair Sentient HF Roundtrip Runner Wrapper
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply exact runner-only repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path(".github/workflows/sentient-hf-bounded-live-artifact-roundtrip.yml")
+          s=p.read_text()
+          replacements=[
+            ("FLS_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}","FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}"),
+            ('from "/happ/dist/src/artifacts/huggingface-hub-transport.js";','from "/app/dist/src/artifacts/huggingface-hub-transport.js";'),
+            ('from "/happ/dist/src/artifacts/huggingface-roundtrip.js";','from "/app/dist/src/artifacts/huggingface-roundtrip.js";'),
+            ('process.env.DIRECT_URL /? ""','process.env.DIRECT_URL ?? ""'),
+            ('pass("FFRST_HF_ARTIFACT_ROUNDTRIP");','pass("FIRST_HF_ARTIFACT_ROUNDTRIP");'),
+            ('pass("SECRET_VALUES_EXPOSED=false");','pass("SECRET_VALUES_EXPOSED", "false");'),
+          ]
+          for old,new in replacements:
+            if s.count(old)!=1:
+              raise SystemExit(f"expected unique repair anchor: {old}")
+            s=s.replace(old,new,1)
+          old = """          machine_id="$(flyctl machines list --app "$FLY_APP_NAME" --json | jq -r 'sort_by(.id) | .[0].id')"
+          test -n "$machine_id"
+          state="$(flyctl machines list --app "$FLY_APP_NAME" --json | jq -r --arg id "$machine_id" '.[] | select(.id==$id) | .state')"
+"""
+          new = """          machines_json="$(flyctl machines list --app "$FLY_APP_NAME" --json)"
+          test "$(jq 'length' <<<"$machines_json")" -eq 1
+          machine_id="$(jq -r '.[0].id' <<<"$machines_json")"
+          test -n "$machine_id"
+          state="$(jq -r '.[0].state' <<<"$machines_json")"
+          initial_state="$state"
+          restore_machine_state() {
+            if [ "$initial_state" != "started" ]; then
+              flyctl machine stop "$machine_id" --app "$FLY_APP_NAME" >/dev/null 2>&1 || true
+            fi
+          }
+          trap restore_machine_state EXIT
+"""
+          if s.count(old)!=1:
+            raise SystemExit("expected unique machine-state anchor")
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'FLY_API_TOKEN:.*secrets.FLY_API_TOKEN' .github/workflows/sentient-hf-bounded-live-artifact-roundtrip.yml
+          ! grep -q '/happ/' .github/workflows/sentient-hf-bounded-live-artifact-roundtrip.yml
+          ! grep -q 'FFRST_HF' .github/workflows/sentient-hf-bounded-live-artifact-roundtrip.yml
+          echo "RUNNER_ONLY_REPAIR=PASS"
+      - name: Commit exact wrapper repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-operator-runner"
+          git config user.email "sentient-operator-runner@users.noreply.github.com"
+          git add .github/workflows/sentient-hf-bounded-live-artifact-roundtrip.yml
+          git commit -m "fix: repair bounded live HF roundtrip wrapper"
+          git push origin HEAD:main
+          echo "SENTIENT_SOURCE_MUTATION=false"
+          echo "PRODUCTION_MUTATION=false"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
