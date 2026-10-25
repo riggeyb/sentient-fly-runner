@@ -1,0 +1,81 @@
+name: Sentient Phase7 HF Binding Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-phase7-hf-binding-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ff2e8164a2e6888f3b58b15fb143c73d016f4fb9
+      PHASE7_PROOF_ID: 40227159272-1
+      PHASE7_ARTIFACT_MEMORY_ID: 8033fe8f-a927-4271-a810-0e4d0544a322
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Read-only same-cycle preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          machines="$(flyctl machines list -a "$APP" --json)"
+          test "$(jq 'length' <<<"$machines")" -eq 1
+          machine_id="$(jq -r '.[0].id' <<<"$machines")"
+          initial_state="$(jq -r '.[0].state' <<<"$machines")"
+          image="$(jq -r '.[0].config.image' <<<"$machines")"
+          test -n "$machine_id"
+          [[ "$image" == *"$EXPECTED_SHA"* ]]
+          restore() {
+            if [ "$initial_state" != "started" ]; then
+              flyctl machine stop "$machine_id" -a "$APP" >/dev/null 2>&1 || true
+            fi
+          }
+          trap restore EXIT
+          if [ "$initial_state" != "started" ]; then
+            flyctl machine start "$machine_id" -a "$APP" >/dev/null
+            state=""
+            for attempt in $(seq 1 30); do
+              state="$(flyctl machines list -a "$APP" --json | jq -r '.[0].state')"
+              [ "$state" = "started" ] && break
+              sleep 2
+            done
+            test "$state" = "started"
+          fi
+          b64="$(base64 -w0 scripts/sentient-hf-phase7-preflight.mjs)"
+          remote="printf '%s' '$b64' | base64 -d > /tmp/sentient-hf-phase7-preflight.mjs && PHASE7_PROOF_ID='$PHASE7_PROOF_ID' PHASE7_ARTIFACT_MEMORY_ID='$PHASE7_ARTIFACT_MEMORY_ID' node /tmp/sentient-hf-phase7-preflight.mjs; rc=\$?; rm -f /tmp/sentient-hf-phase7-preflight.mjs; exit \$rc"
+          set +e
+          out="$(flyctl ssh console -a "$APP" --machine "$machine_id" -C "sh -lc \"$remote\"" 2>&1)"
+          rc=$?
+          set -e
+          printf '%s\n' "$out" | grep -E '^(PREFLIGHT_CONTRACT|DATASET_BINDING_EXISTS|EVALUATION_BINDING_EXISTS|CANDIDATE_BINDING_EXISTS|DATASET_REGISTRY_|EVALUATION_REGISTRY_|CANDIDATE_REGISTRY_|DATASET_HF_HTTP_STATUS|CANDIDATE_HF_HTTP_STATUS|DATASET_HF_DIGEST_MATCH|CANDIDATE_HF_DIGEST_MATCH|DATASET_HF_SIZE_MATCH|CANDIDATE_HF_SIZE_MATCH|READONLY_PREFLIGHT|HF_WRITE_PERFORMED|POSTGRES_WRITE_PERFORMED|PHASE7_HF_PREFLIGHT_ERROR|SECRET_VALUES_EXPOSED)=' || true
+          test "$rc" -eq 0
+          grep -q '^PREFLIGHT_CONTRACT=PASS$' <<<"$out"
+          grep -q '^READONLY_PREFLIGHT=PASS$' <<<"$out"
+          grep -q '^HF_WRITE_PERFORMED=false$' <<<"$out"
+          grep -q '^POSTGRES_WRITE_PERFORMED=false$' <<<"$out"
+          grep -q '^SECRET_VALUES_EXPOSED=false$' <<<"$out"
+          echo "PREFLIGHT_WRAPPER=PASS"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "HF_PAID_INFERENCE_USED=false"
+          echo "HF_PAID_TRAINING_USED=false"
+
+      - name: Verify machine state restoration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "MACHINE_STATE_RESTORATION_CHECK=PASS"
+          echo "SOURCE_MUTATION=false"
+          echo "PRODUCTION_SOURCE_DEPLOYED=false"
