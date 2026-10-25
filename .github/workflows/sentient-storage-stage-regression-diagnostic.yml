@@ -1,0 +1,118 @@
+name: Sentient Storage Stage Regression Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: storage-hf-buildout-20261025
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fence exact peer tip and apply proposed integration in workspace only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "da4f11a0abd2f7553a9c1a4ce0f1450bc2d23e05"
+          test "$(git merge-base HEAD e9bd0c9135f05da2be337e5e7ac4077af0f4649d)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
+          python3 - <<'PY'
+          from pathlib import Path
+          def replace_once(path, old, new):
+              p=Path(path); s=p.read_text()
+              if s.count(old)!=1:
+                  raise SystemExit(f"{path}: anchor_count={s.count(old)}")
+              p.write_text(s.replace(old,new,1))
+          replace_once("src/state/postgres-state-repository.ts",
+            'import { emptyWorldStateSegment } from "./world-persistence.js";',
+            'import { emptyWorldStateSegment } from "./world-persistence.js";\nimport { emptyArtifactStateSegment } from "./artifact-persistence.js";')
+          replace_once("src/state/postgres-state-repository.ts",
+            '    spawn: emptySpawnStateSegment(),\n  };',
+            '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };')
+          replace_once("src/state/file-state-repository-v2.ts",
+            'import {\n  emptyWorldStateSegment,',
+            'import { emptyArtifactStateSegment } from "./artifact-persistence.js";\nimport {\n  emptyWorldStateSegment,')
+          replace_once("src/state/file-state-repository-v2.ts",
+            '    spawn: emptySpawnStateSegment(),\n  };',
+            '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };')
+          replace_once("src/state/migration.ts",
+            'import { emptyWorldStateSegment } from "./world-persistence.js";',
+            'import { emptyWorldStateSegment } from "./world-persistence.js";\nimport { emptyArtifactStateSegment } from "./artifact-persistence.js";')
+          replace_once("src/state/migration.ts",
+            '    spawn: emptySpawnStateSegment(),\n  };',
+            '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };')
+          replace_once("src/state/migration.ts",
+            '      input.spawn === undefined\n    ) {',
+            '      input.spawn === undefined ||\n      input.artifacts === undefined\n    ) {')
+          replace_once("src/state/migration.ts",
+            '          ...(input.spawn === undefined\n            ? { spawn: emptySpawnStateSegment() }\n            : {}),',
+            '          ...(input.spawn === undefined\n            ? { spawn: emptySpawnStateSegment() }\n            : {}),\n          ...(input.artifacts === undefined\n            ? { artifacts: emptyArtifactStateSegment() }\n            : {}),')
+          replace_once("src/state/state-integrity.ts",
+            'import { assertWorldStateSegment } from "./world-persistence.js";',
+            'import { assertWorldStateSegment } from "./world-persistence.js";\nimport { assertArtifactStateSegment } from "./artifact-persistence.js";')
+          replace_once("src/state/state-integrity.ts",
+            '  assertSpawnStateSegment(s);\n  assertObjectiveContinuationState(s);',
+            '  assertSpawnStateSegment(s);\n  assertArtifactStateSegment(s);\n  assertObjectiveContinuationState(s);')
+          PY
+          git rm -r --quiet node_modules dist
+          echo "WORKSPACE_ONLY_INTEGRATION=PASS"
+
+      - name: Clean install and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
+          npm run build >/tmp/build.log 2>&1
+          echo "BUILD=PASS"
+
+      - name: Focused artifact test diagnostic
+        shell: bash
+        run: |
+          set +e
+          node --test dist/test/artifact-storage.test.js >/tmp/focused.log 2>&1
+          rc=$?
+          set -e
+          echo "FOCUSED_ARTIFACT_TEST_EXIT=$rc"
+          if [ "$rc" -ne 0 ]; then
+            grep -E '(^not ok|failureType:|error:|code:)' /tmp/focused.log | head -80 || true
+          fi
+          test "$rc" -eq 0
+
+      - name: Cumulative regression diagnostic
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d dist/test
+          mapfile -t tests < <(find dist/test dist/tests -type f -name '*.test.js' 2>/dev/null | sort -u)
+          test "${#tests[@]}" -gt 0
+          failed=0
+          for t in "${tests[@]}"; do
+            set +e
+            node --test "$t" >/tmp/one-test.log 2>&1
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              echo "TEST_PASS=$t"
+            else
+              echo "TEST_FAIL=$t"
+              grep -E '(^not ok|failureType:|error:|code:)' /tmp/one-test.log | head -40 || true
+              failed=1
+            fi
+          done
+          echo "TEST_FILE_COUNT=${#tests[@]}"
+          echo "REGRESSION_FAILURE_PRESENT=$failed"
+          test "$failed" -eq 0
