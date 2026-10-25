@@ -1,0 +1,13 @@
+const cp=require("node:child_process");
+const raw=cp.execFileSync(process.execPath,["scripts/capability-tier-hardening-rev5-build-request.cjs"],{encoding:"utf8"});
+const request=JSON.parse(raw);
+const command=request.commands.find((entry)=>entry?.name==="compat-job2");
+if(!command||command.command!=="node"||!Array.isArray(command.args)||command.args.length<2)throw Error("REV6_COMPAT_JOB2_COMMAND_MISSING");
+const from='  idempotencyKey: "sentient-job2-self-execution-proof",';
+const to='  idempotencyKey: "objective:restart-proof:step-1",';
+const script=String(command.args[1]??"");
+const count=script.split(from).length-1;
+if(count!==2)throw Error("REV6_JOB2_ANCHOR_COUNT:"+count);
+command.args[1]=script.replaceAll(from,to);
+request.objective="SENTIENT_CAPABILITY_TIER_AND_AUTHORITY_ENFORCEMENT_V1 bootstrap rev6: peer strict rev5 authority patch with canonical Job2 compatibility anchor correction. Explicit user-authorized protected-policy bootstrap. Fail closed on exact-head/digest/build/test/diff failure. No deploy, resize, paid compute, secret exposure, or certification mutation.";
+process.stdout.write(JSON.stringify(request));
