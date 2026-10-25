@@ -23,6 +23,15 @@ jobs:
           set -euo pipefail
           APP="sentient-validation-runner"
           [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
+          state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
+          if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+          ready=false
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/dev/null 2>&1; then ready=true; break; fi
+            sleep 2
+          done
+          test "$ready" = true
           cat >/tmp/phase5-task.mjs <<'NODE'
           import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
           import { BoundedSentientPhase1AcceptancePolicyV1 } from "/app/dist/src/phase1/bounded-acceptance-policy.js";
@@ -50,12 +59,12 @@ jobs:
             console.log("PHASE5_TASK_APP_STATUS="+String(appResult.status??"none"));
             console.log("PHASE1_STATE_OWNER="+String(appResult.state?.authoritativeOwner??"none"));
             console.log("PHASE1_AUTHORITY_OWNER="+String(appResult.authority?.owner??"none"));
-            console.log("PHASE1_SUBORDINATE_ACCEPTED="+String(subordinate.accepted??"none"));
-            console.log("PHASE1_SUBORDINATE_PROVIDER="+String(subordinate.provider??"none"));
+            console.log("PHASE1_SUBORDINATE_ACCEPTED="+String(subordinate.acceped??"none"));
+            console.log("PHASE1_SUBORDINATE_PROVIDER=b+String(subordinate.provider??"none"));
             console.log("PHASE1_SUBORDINATE_MODEL="+String(subordinate.model??"none"));
             console.log("PHASE1_SUBORDINATE_REVISION="+String(subordinate.revision??"none"));
             console.log("PHASE1_ACCEPTANCE_POLICY_ID="+String(subordinate.acceptancePolicyId??"none"));
-            console.log("PHASE3_STATUS="+String(phase3.status??"none"));
+            console.log("PHASE3_STATUS=b+String(phase3.status??"none"));
             console.log("PHASE3_TRANSPORT="+String(phase3.transport??"none"));
             console.log("PHASE3_AUTHORITATIVE="+String(phase3.authoritative??"none"));
             console.log("PHASE3_AUTHORITY_OWNER="+String(phase3.authorityOwner??"none"));
