@@ -1,0 +1,55 @@
+name: Final Cert Phase13 Result Diagnostic
+'on':
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      objective_id: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      OID: ${{ inputs.objective_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Read sanitized successful objective authority fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,240}$ ]]
+          cat >/tmp/p13-result.mjs <<'NODE'
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          const id=process.env.CERT_OID,sha=process.env.CERT_SHA,tree=process.env.CERT_TREE;
+          if(!token||!id) throw Error("BINDING_MISSING");
+          if(process.env.SENTIENT_RUNTIME_SHA!==sha||process.env.SENTIENT_RUNTIME_TREE!==tree) throw Error("SOURCE_MISMATCH");
+          const r=await fetch("http://127.0.0.1:8080/v1/objectives/"+encodeURIComponent(id),{
+            headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(30000)
+          });
+          const b=await r.json();
+          if(r.status!==200) throw Error("STATUS_"+r.status);
+          const turn=b?.result?.body?.result??{}, sub=turn?.subordinate??{}, p3=turn?.phase3Assessment??{};
+          const out={
+            objectiveStatus:b.status??null,
+            turnStatus:turn.status??null,
+            stateAuthoritativeOwner:turn?.state?.authoritativeOwner??null,
+            authorityOwner:turn?.authority?.owner??null,
+            subordinateAccepted:sub.accepted??null,
+            provider:sub.provider??null,model:sub.model??null,revision:sub.revision??null,
+            acceptancePolicyId:sub.acceptancePolicyId??null,
+            phase3Status:p3.status??null,phase3Transport:p3.transport??null,
+            phase3Authoritative:p3.authoritative??null,phase3AuthorityOwner:p3.authorityOwner??null,
+            phase3ModelId:p3.modelId??null
+          };
+          console.log("PHASE13_RESULT="+JSON.stringify(out));
+          console.log("EXACT_SOURCE_IDENTITY=PASS");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B="$(base64 -w0 /tmp/p13-result.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B|base64 -d >/tmp/p13-result-${GITHUB_RUN_ID}.mjs; CERT_OID=$OID CERT_SHA=$SHA CERT_TREE=$TREE node /tmp/p13-result-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/p13-result-${GITHUB_RUN_ID}.mjs; exit \$rc'"
