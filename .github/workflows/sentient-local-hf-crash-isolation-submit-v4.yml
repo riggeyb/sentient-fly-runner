@@ -1,0 +1,62 @@
+name: Sentient Local HF Crash Isolation Submit V4
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-local-hf-crash-isolation
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Build exact request and submit through resident Governor
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/local-hf-crash-isolation-request.cjs
+          node scripts/local-hf-crash-isolation-request.cjs >/tmp/request.json
+          node -e 'const x=require("/tmp/request.json");if(x.expectedHead!=="7d54e0f5b77b65bc4984cd5a667084e12eb738c1"||x.expectedTree!=="3f1929fead05d17b182bea29c168faeafbcc1a98"||x.policyVersion!=="sentient-capability-tier/v1"||x.commands.length!==7)process.exit(2)'
+          cat >/tmp/post.mjs <<'NODE'
+          import {readFile} from "node:fs/promises";
+          const token=String(process.env.SENTIENT_ENGINEERING_API_TOKEN??"").trim();
+          if(!token) throw new Error("ENGINEERING_CREDENTIAL_MISSING");
+          const request=JSON.parse(await readFile("/tmp/request.json","utf8"));
+          const r=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{method:"POST",headers:{authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify(request),signal:AbortSignal.timeout(30000)});
+          const raw=await r.text(); let body={}; try{body=JSON.parse(raw)}catch{}
+          console.log(JSON.stringify({http:r.status,jobId:body.jobId??null,status:body.status??null,expectedHead:body.expectedHead??null,authorityReceipt:body.authorityReceipt??null}));
+          if(r.status!==202||!body.jobId||body.expectedHead!==request.expectedHead)process.exit(31);
+          console.log("ENGINEERING_CREATE=PASS");
+          console.log("JOB_ID="+body.jobId);
+          NODE
+          req="$(base64 -w0 /tmp/request.json)"
+          post="$(base64 -w0 /tmp/post.mjs)"
+          app=sentient-deployment-governor
+          id="$(flyctl machines list -a "$app" --json | jq -r '[.[]|select((.config.auto_destroy//false)!=true)]|sort_by(.id)|.[0].id//empty')"
+          test -n "$id"
+          before="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state'|head -n1)"
+          started=false
+          cleanup(){ rm -f /tmp/request.json /tmp/post.mjs; if [ "$started" = true ]; then flyctl machine stop "$id" -a "$app" >/dev/null 2>&1||true; fi; }
+          trap cleanup EXIT
+          if [ "$before" != started ]; then flyctl machine start "$id" -a "$app" >/dev/null; started=true; fi
+          for _ in $(seq 1 60); do state="$(flyctl machines list -a "$app" --json|jq -r --arg id "$id" '.[]|select(.id==$id)|.state'|head -n1)"; [ "$state" = started ]&&break; sleep 2; done
+          test "$state" = started
+          flyctl ssh console -a "$app" --machine "$id" --command "sh -lc 'echo $req|base64 -d >/tmp/request.json; echo $post|base64 -d >/tmp/post.mjs; node /tmp/post.mjs; rc=\$?; rm -f /tmp/request.json /tmp/post.mjs; exit \$rc'"
+          echo "GOVERNOR_ENGINEERING_INGRESS=PASS"
+          echo "RESOURCE_ENVELOPE_CHANGED=false"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
