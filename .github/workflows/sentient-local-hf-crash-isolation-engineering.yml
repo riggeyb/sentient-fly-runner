@@ -1,0 +1,60 @@
+name: Sentient Local HF Crash Isolation Engineering
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-local-hf-crash-isolation
+  cancel-in-progress: false
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build and validate exact TIER_2 request
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/local-hf-crash-isolation-build-request.part-* > /tmp/local-hf-crash-isolation-build-request.cjs
+          test "$(wc -c < /tmp/local-hf-crash-isolation-build-request.cjs)" -eq 10471
+          node --check /tmp/local-hf-crash-isolation-build-request.cjs
+          node /tmp/local-hf-crash-isolation-build-request.cjs > /tmp/request.json
+          node - <<'NODE'
+          const fs=require("fs");
+          const x=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));
+          const paths=[
+            "src/model/providers/huggingface.ts",
+            "src/model/providers/huggingface-worker.ts",
+            "test/local-hf-worker-isolation.test.ts"
+          ];
+          if(x.repo!=="riggeyb/sentient") throw new Error("REPO_MISMATCH");
+          if(x.branch!=="sentient-production-composition-20261017") throw new Error("BRANCH_MISMATCH");
+          if(x.expectedHead!=="7d54e0f5b77b65bc4984cd5a667084e12eb738c1") throw new Error("HEAD_MISMATCH");
+          if(x.expectedTree!=="3f1929fead05d17b182bea29c168faeafbcc1a98") throw new Error("TREE_MISMATCH");
+          if(x.objectiveId!=="SENTIENT_ROUTINE_LOCAL_HF_CRASH_ISOLATION_20261025") throw new Error("OBJECTIVE_MISMATCH");
+          if(x.actionId!=="local-hf-native-child-process-isolation-v1") throw new Error("ACTION_MISMATCH");
+          if(x.policyVersion!=="sentient-capability-tier/v1") throw new Error("POLICY_MISMATCH");
+          if(JSON.stringify(x.authorizedPaths)!==JSON.stringify(paths)) throw new Error("SCOPE_MISMATCH");
+          if(!Array.isArray(x.commands)||x.commands.length!==7) throw new Error("COMMAND_SET_MISMATCH");
+          console.log("REQUEST_BINDING=PASS");
+          console.log("REQUEST_TIER=2");
+          console.log("DEPLOY_ON_SUCCESS=false");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+      - name: Create EngineeringJob through hardened Governor
+        env:
+          MCP_CLIENT_TOKEN: ${{ secrets.MCP_CLIENT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPERATION=engineering_create ARGUMENTS="$(cat /tmp/request.json)" node operator.mjs
