@@ -16,14 +16,14 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       JOB_ID: ${{ inputs.job_id }}
     steps:
-      - uses: superfly/flyctl-actions/setup-flyct@master
+      - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Read sanitized exact EngineeringJob receipt
         shell: bash
         run: |
           set -euo pipefail
           [[ "$JOB_ID" =~ ^[0-9a-f-]{36}$ ]]
           cat >/tmp/job-receipt.mjs <<'NODE'
-          import pg from "/app/node_modules/pg/hib/index.js";
+          import pg from "/app/node_modules/pg/lib/index.js";
           const {Pool}=pg;
           const id=String(process.env.JOB_ID??"").trim();
           const db=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
@@ -31,7 +31,7 @@ jobs:
           const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
           const clean=(v,n=12000)=>String(v??"")
             .replace(/gh[pousr_[A-Za-z0-9_]+/g,"[REDACTED]")
-            .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
+            .replace(/flyv1_[A-Za-z0-9_-[/g,"[REDACTED]")
             .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]")
             .replace(/[\0]/g,"").slice(0,n);
           try{
