@@ -1,0 +1,115 @@
+name: Sentient HF Provider Env Configure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-hf-provider-env-configure
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_APP_NAME: sentient-validation-runner
+      SENTIENT_HF_NAMESPACE: sentient-labs
+      SENTIENT_HF_VERSIONED_REPOSITORY: sentient-labs/sentient-ml-artifacts
+      SENTIENT_HF_WORKING_BUCKET: sentient-labs/sentient-working-ml
+    steps:
+      - name: Setup flyctl
+        uses: superfly/flyctl-action@setup-flyctl
+
+      - name: Fence and configure exact non-secret HF environment
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLY_API_TOKEN"
+          flyctl machines list --app "$FLY_APP_NAME" --json >/tmp/machines-before.json
+          count="$(jq 'length' /tmp/machines-before.json)"
+          test "$count" -gt 0
+          jq -c '[
+            .[] |
+            {
+              id: .id,
+              region: .region,
+              image: .config.image,
+              guest: .config.guest,
+              mounts: (.config.mounts // []),
+              services: (.config.services // []),
+              restart: (.config.restart // {}),
+              schedule: (.config.schedule // null),
+              auto_destroy: (.config.auto_destroy // false),
+              standbys: (.config.standbys // [])
+            }
+          ] | sort_by(.id)' /tmp/machines-before.json >/tmp/nonenv-before.json
+          jq -c '[
+            .[] |
+            {
+              id: .id,
+              env: ((.config.env // {}) | del(.SENTIENT_HF_NAMESPACE, .SENTIENT_HF_VERSIONED_REPOSITORY, .SENTIENT_HF_WORKING_BUCKET))
+            }
+          ] | sort_by(.id)' /tmp/machines-before.json >/tmp/other-env-before.json
+          mapfile -t machine_ids < <(jq -r '.[].id' /tmp/machines-before.json)
+          for machine_id in "${machine_ids[@]}"; do
+            flyctl machine update "$machine_id" \
+              --app "$FLY_APP_NAME" \
+              --yes \
+              --env "SENTIENT_HF_NAMESPACE=$SENTIENT_HF_NAMESPACE" \
+              --env "SENTIENT_HF_VERSIONED_REPOSITORY=$SENTIENT_HF_VERSIONED_REPOSITORY" \
+              --env "SENTIENT_HF_WORKING_BUCKET=$SENTIENT_HF_WORKING_BUCKET" \
+              >"/tmp/machine-update-${machine_id}.log" 2>&1
+          done
+          flyctl machines list --app "$FLY_APP_NAME" --json >/tmp/machines-after.json
+          test "$(jq 'length' /tmp/machines-after.json)" -eq "$count"
+          jq -c '[.[].id] | sort' /tmp/machines-before.json >/tmp/chines-before.json
+          jq -c '[.[].id] | sort' /tmp/machines-after.json >/tmp/chines-after.json
+          cmp -s /tmp/chines-before.json /tmp/chines-after.json
+          jq -c '[
+            .[] |
+            {
+              id: .id,
+              region: .region,
+              image: .config.image,
+              guest: .config.guest,
+              mounts: (.config.mounts // []),
+              services: (.config.services // []),
+              restart: (.config.restart // {}),
+              schedule: (.config.schedule // null),
+              auto_destroy: (.config.auto_destroy // false),
+              standbys: (.config.standbys // [])
+            }
+          ] | sort_by(.id)' /tmp/machines-after.json >/tmp/nonenv-after.json
+          cmp -s /tmp/nonenv-before.json /tmp/nonenv-after.json
+          jq -c '[
+            .[] |
+            {
+              id: .id,
+              env: ((.config.env // {}) | del(.SENTIENT_HF_NAMESPACE, .SENTIENT_HF_VERSIONED_REPOSITORY, .SENTIENT_HF_WORKING_BUCKET))
+            }
+          ] | sort_by(.id)' /tmp/machines-after.json >/tmp/other-env-after.json
+          cmp -s /tmp/other-env-before.json /tmp/other-env-after.json
+          jq -e --arg namespace "$SENTIENT_HF_NAMESPACE" \
+            --arg versioned "$SENTIENT_HF_VERSIONED_REPOSITORY" \
+            --arg working "$SENTIENT_HF_WORKING_BUCKET" \
+            'all(.[];
+              .config.env.SENTIENT_HF_NAMESPACE == $namespace and
+              .config.env.SENTIENT_HF_VERSIONED_REPOSITORY == $versioned and
+              .config.env.SENTIENT_HF_WORKING_BUCKET == $working
+            )' /tmp/machines-after.json >/dev/null
+          echo "FLY_ENV_CONFIGURATION=PASS"
+          echo "HF_NAMESPACE_CONFIGURED=true"
+          echo "HF_VERSIONED_REPOSITORY_CONFIGURED=true"
+          echo "HF_WORKING_BUCKET_CONFIGURED=true"
+          echo "MACHINE_COUNT_UNCHANGED=true"
+          echo "MACHINE_IDS_UNCHANGED=true"
+          echo "RESOURCE_ENVELOPE_UNCHANGED=true"
+          echo "PREEXISTING_ENV_UNCHANGED=true"
+          echo "SENTIENT_HF_TOKEN_TOUCHED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
