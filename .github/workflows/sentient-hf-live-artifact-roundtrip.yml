@@ -87,7 +87,7 @@ jobs:
             ROUNDTRIP_RETRIEVAL=PASS \
             CACHE_RECONSTRUCTABLE=PASS \
             REMOTE_URI_ALONE_NOT_AUTHORITY=true \
-            HF_PAID_INFERENCE_USD=false \
+            HF_PAID_INFERENCE_USED=false \
             HF_PAID_TRAINING_USED=false \
             SECRET_VALUES_EXPOSED=false \
             PRIVATE_ACTIONS_BRIDGE_USED=false
