@@ -1,0 +1,84 @@
+ngface.js";',
+  'import { EventEmitter } from "node:events";\nimport { mkdtemp, rm, writeFile } from "node:fs/promises";\nimport { tmpdir } from "node:os";\nimport { join } from "node:path";\nimport test from "node:test";\nimport { TransformersJsLocalHfRunnerV1, createLocalHfChildProcessPortV1, type LocalHfWorkerPortV1 } from "../src/model/providers/huggingface.js";',
+  "TEST_IMPORTS"
+);
+
+if (test.includes("native abort in local HF child process is contained")) {
+  throw new Error("TEST_ALREADY_PRESENT");
+}
+
+test += String.raw`
+
+test("native abort in local HF child process is contained and retried without terminating the parent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sentient-local-hf-child-"));
+  const childPath = join(dir, "fixture.mjs");
+  await writeFile(
+    childPath,
+    \`process.on("message", (m) => {
+  if (m.kind === "initialize") {
+    process.send({ id: m.id, ok: true, kind: "initialized" });
+    return;
+  }
+  if (m.kind === "generate" && process.env.LOCAL_HF_FIXTURE_MODE === "abort") {
+    process.abort();
+  }
+  if (m.kind === "generate") {
+    process.send({
+      id: m.id,
+      ok: true,
+      kind: "generated",
+      generation: {
+        text: "child process recovered",
+        inputTokens: 4,
+        outputTokens: 3,
+        totalTokens: 7
+      }
+    });
+  }
+});
+\`,
+    "utf8",
+  );
+
+  let launches = 0;
+  const runner = new TransformersJsLocalHfRunnerV1({
+    workerFactory: () => {
+      const mode = launches++ === 0 ? "abort" : "respond";
+      return createLocalHfChildProcessPortV1({
+        modulePath: childPath,
+        env: { LOCAL_HF_FIXTURE_MODE: mode },
+        diagnosticOutput: "ignore",
+      });
+    },
+  });
+
+  try {
+    const result = await runner.generate({
+      prompt: "survive native abort",
+      maxInputTokens: 32,
+      maxOutputTokens: 8,
+    });
+    assert.equal(result.text, "child process recovered");
+    assert.equal(launches, 2);
+  } finally {
+    await runner.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+`;
+writeFileSync(testPath, test);
+`;
+
+const request = {
+  repo: "riggeyb/sentient",
+  branch: "sentient-production-composition-20261017",
+  expectedHead: "7d54e0f5b77b65bc4984cd5a667084e12eb738c1",
+  expectedTree: "3f1929fead05d17b182bea29c168faeafbcc1a98",
+  objectiveId: "SENTIENT_ROUTINE_LOCAL_HF_CRASH_ISOLATION_20261025",
+  actionId: "local-hf-native-child-process-isolation-v1",
+  authorizedPaths: [
+    "src/model/providers/huggingface.ts",
+    "src/model/providers/huggingface-worker.ts",
+    "test/local-hf-worker-isolation.test.ts"
+  ],
+  authorizationIdentity: "user:SENTIENT_ROUTINE_OPE
