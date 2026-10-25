@@ -17,37 +17,36 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build and validate strict rev6 EngineeringJob request
+      - name: Build and validate bounded rev7 diagnostic EngineeringJob request
         shell: bash
         run: |
           set -euo pipefail
-          node --check scripts/capability-tier-hardening-rev6-build-request.cjs
-          node scripts/capability-tier-hardening-rev6-build-request.cjs > /tmp/request.json
+          node --check scripts/capability-tier-hardening-rev7-diagnostic-build-request.cjs
+          node scripts/capability-tier-hardening-rev7-diagnostic-build-request.cjs > /tmp/request.json
           node - <<'NODE'
           const fs=require("fs");
           const r=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));
-          if(r.repo!=="riggeyb/sentient"||
-             r.branch!=="sentient-production-composition-20261017"||
-             r.expectedHead!=="5ce976089532a86ac262a2760367318b6f4b72a5"||
-             !Array.isArray(r.commands)||r.commands.length<8||r.commands.length>32||
+          if(r.repo!=="riggeyb/sentient" ||
+             r.branch!=="sentient-production-composition-20261017" ||
+             r.expectedHead!=="5ce976089532a86ac262a2760367318b6f4b72a5" ||
+             !Array.isArray(r.commands) || r.commands.length<10 || r.commands.length>32 ||
              r.commands.some(c=>!Array.isArray(c.args)||c.args.length>64||
                c.args.some(a=>typeof a!=="string"||a.length>8192)||
-               c.timeoutMs<1000||c.timeoutMs>600000)||
-             r.commands.reduce((n,c)=>n+c.timeoutMs,0)>r.timeoutMs||
-             r.timeoutMs>1800000||
-             r.commands.at(-1)?.category!=="test") throw Error("BOOTSTRAP_REQUEST_INVALID");
-          const forbidden=/deploy|resize|gpu|paid|secret|resource[-_ ]?increase/i;
-          if(r.commands.some(c=>forbidden.test(c.name))) throw Error("BOOTSTRAP_FORBIDDEN_EFFECT_COMMAND");
+               c.timeoutMs<1000||c.timeoutMs>600000) ||
+             r.commands.reduce((n,c)=>n+c.timeoutMs,0)>r.timeoutMs ||
+             r.timeoutMs>1800000 ||
+             r.commands.at(-1)?.category!=="test") throw Error("DIAGNOSTIC_REQUEST_INVALID");
           const names=new Set(r.commands.map(c=>c.name));
-          for(const required of ["prebuild","preflight-tests","apply","compat-phase0","compat-job2","postbuild","authority-tests","governor-tests","diff-check"]) {
-            if(!names.has(required)) throw Error("BOOTSTRAP_REQUIRED_STEP_MISSING:"+required);
+          for(const required of ["prebuild","apply","compat-phase0","compat-job2","inspect-spawn-tier-diagnostic","diagnostic-stop"]) {
+            if(!names.has(required)) throw Error("DIAGNOSTIC_REQUIRED_STEP_MISSING:"+required);
           }
-          console.log("BOOTSTRAP_REQUEST_VALIDATED=true");
+          const forbidden=/deploy|resize|gpu|paid|secret|resource[-_ ]?increase/i;
+          if(r.commands.some(c=>forbidden.test(c.name))) throw Error("DIAGNOSTIC_FORBIDDEN_EFFECT_COMMAND");
+          console.log("DIAGNOSTIC_REQUEST_VALIDATED=true");
           console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
           console.log("SECRET_VALUES_EXPOSED=false");
-          console.log("DEPLOY_ON_SUCCESS=false");
           NODE
-      - name: Create exact bounded EngineeringJob through existing operator
+      - name: Create non-pushing diagnostic EngineeringJob
         env:
           MCP_CLIENT_TOKEN: ${{ secrets.MCP_CLIENT_TOKEN }}
         shell: bash
