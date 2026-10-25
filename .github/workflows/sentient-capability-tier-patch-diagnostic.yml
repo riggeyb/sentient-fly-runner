@@ -11,28 +11,38 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Show public rev3 patch fragments for engineering-jobs test
+      - name: Show public rev2 spawn-tier and failing-test fragments
         shell: bash
         run: |
           set -euo pipefail
-          cat scripts/capability-tier-hardening-v1-rev3/payload.gz.part-* > /tmp/payload.gz
+          cat scripts/capability-tier-hardening-v1-rev2/payload.gz.part-* > /tmp/payload.gz
+          printf '%s  %s\n' '7e9ef41ac801e2f6f0d4d8cd841b06695bffbad3720a5f11752da152d40ab8a2' /tmp/payload.gz | sha256sum -c -
           gzip -t /tmp/payload.gz
           gzip -dc /tmp/payload.gz > /tmp/payload.mjs
+          printf '%s  %s\n' '3ca232463d97aebd8cece884a5360bb071e5c251a9f5a2a0b917233a7c16fb62' /tmp/payload.mjs | sha256sum -c -
           node - <<'NODE'
           const fs=require("node:fs");
           const s=fs.readFileSync("/tmp/payload.mjs","utf8");
-          const needle='replaceOnce("test/engineering-jobs.test.ts"';
-          let pos=0,count=0;
-          while((pos=s.indexOf(needle,pos))>=0){
-            count++;
-            const next=s.indexOf("replaceOnce(",pos+needle.length);
-            process.stdout.write(`---FRAGMENT_${count}---\n`);
-            process.stdout.write(s.slice(pos,next<0?Math.min(s.length,pos+6000):next));
-            process.stdout.write("\n");
-            pos+=needle.length;
+          const needles=[
+            'writeNew("test/capability-tier-authority.test.ts"',
+            'replaceOnce("src/spawn/policy-authority.ts"',
+            'replaceOnce("src/spawn/policy.ts"',
+          ];
+          for(const needle of needles){
+            let pos=0,count=0;
+            while((pos=s.indexOf(needle,pos))>=0){
+              count++;
+              const next=s.indexOf("\nreplaceOnce(",pos+needle.length);
+              const nextWrite=s.indexOf("\nwriteNew(",pos+needle.length);
+              const candidates=[next,nextWrite].filter(x=>x>=0);
+              const end=candidates.length?Math.min(...candidates):Math.min(s.length,pos+12000);
+              process.stdout.write(`---${needle}:${count}---\n`);
+              process.stdout.write(s.slice(pos,Math.min(end,pos+12000)));
+              process.stdout.write("\n");
+              pos+=needle.length;
+            }
+            console.log(`COUNT ${needle} = ${count}`);
           }
-          if(count===0) throw new Error("engineering_jobs_patch_not_found");
-          console.log("FRAGMENT_COUNT="+count);
           NODE
           echo "PUBLIC_PATCH_FRAGMENT_ONLY=true"
           echo "SECRET_VALUES_EXPOSED=false"
