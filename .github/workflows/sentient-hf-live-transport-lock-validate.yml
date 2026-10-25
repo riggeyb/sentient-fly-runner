@@ -1,0 +1,101 @@
+name: Sentient HF Live Transport Lock Validate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact private Sentient source SHA to validate
+        required: true
+        type: string
+      source_branch:
+        description: Exact private Sentient source branch to update
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-hf-live-transport-lock-${{ inputs.source_branch }}
+  cancel-in-progress: false
+
+jobs:
+  lock-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fence exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          git fetch origin "${{ inputs.source_branch }}" sentient-production-composition-20261017
+          test "$(git rev-parse "origin/${{ inputs.source_branch }}")" = "${{ inputs.source_sha }}"
+          test "$(git merge-base HEAD origin/sentient-production-composition-20261017)" = "b11c0ed524c0a9723cbf2a292689c1cc53228e28"
+          echo "SOURCE_IDENTITY_FENCE=PASS"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+
+      - name: Generate package lock only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/tmp/npm-lock.log 2>&1
+          changed="$(git diff --name-only)"
+          test "$changed" = "package-lock.json"
+          echo "LOCKFILE_SCOPE=PASS"
+
+      - name: Clean install and compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
+          if npm run build >/tmp/build.log 2>&1; then
+            echo "BUILD=PASS"
+          else
+            echo "BUILD=FAIL"
+            echo "PRIVATE_SOURCE_DIAGNOSTICS_EXPOSED=false"
+            exit 1
+          fi
+
+      - name: Focused transport and artifact regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node --test dist/test/huggingface-live-transport.test.js dist/test/artifact-storage.test.js >/tmp/focused-tests.log 2>&1; then
+            echo "HF_TRANSPORT_TESTS=PASS"
+          else
+            echo "HF_TRANSPORT_TESTS=FAIL"
+            echo "PRIVATE_SOURCE_DIAGNOSTICS_EXPOSED=false"
+            exit 1
+          fi
+
+      - name: Commit only validated lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ inputs.source_branch }}"
+          test "$(git rev-parse "origin/${{ inputs.source_branch }}")" = "${{ inputs.source_sha }}"
+          test "$(git diff --name-only)" = "package-lock.json"
+          git config user.name "sentient-hf-operations"
+          git config user.email "sentient-hf-operations@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "build: lock Hugging Face Hub client"
+          git push origin "HEAD:${{ inputs.source_branch }}"
+          echo "LOCKFILE_PUSH=PASS"
+          echo "SOURCE_MUTATION_SCOPE=package-lock.json"
+          echo "HF_PROVIDER_WRITE_USED=false"
+          echo "HF_PAID_INFERENCE_USED=false"
+          echo "HF_PAID_TRAINING_USED=false"
+          echo "PRIVATE_SOURCE_DIAGNOSTICS_EXPOSED=false"
