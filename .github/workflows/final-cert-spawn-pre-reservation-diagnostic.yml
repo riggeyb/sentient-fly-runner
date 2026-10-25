@@ -37,5 +37,6 @@ jobs:
             sleep 2
           done
           jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null
+          sed -i 's/const r@decision\.reservation;/const r=decision.reservation;/' scripts/final-spawn-pre-reservation.mjs
           B64="$(base64 -w0 scripts/final-spawn-pre-reservation.mjs)"
           flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64|base64 -d >/tmp/probe-${GITHUB_RUN_ID}.mjs; CERT_OID=$OID CERT_SID=$SID node /tmp/probe-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/probe-${GITHUB_RUN_ID}.mjs; exit \$rc'"
