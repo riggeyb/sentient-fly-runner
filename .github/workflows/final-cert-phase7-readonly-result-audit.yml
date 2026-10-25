@@ -1,0 +1,60 @@
+name: Final Cert Phase7 Readonly Result Audit
+'on':
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Expected exact deployed SHA
+        required: true
+        type: string
+      tree:
+        description: Expected exact deployed tree
+        required: true
+        type: string
+      proof_id:
+        description: Existing Phase7 proof ID
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Read only previously persisted Phase7 result
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          S: ${{ inputs.sha }}
+          T: ${{ inputs.tree }}
+          PID: ${{ inputs.proof_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=sentient-validation-runner
+          [[ "$S" =~ ^[0-9a-f]{40}$ ]] && [[ "$T" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PID" =~ ^[0-9]{8,12}-[1-9][0-9]*$ ]]
+          for i in $(seq 1 80); do
+            if curl -fsS --max-time 5 "https://$APP.fly.dev/readyz" >/tmp/ready.json 2>/dev/null && jq -e --arg s "$S" --arg t "$T" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/ready.json >/dev/null; then break; fi
+            sleep 2
+          done
+          jq -e --arg s "$S" --arg t "$T" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/ready.json >/dev/null
+          cat >/tmp/probe.mjs <<'NODE'
+          import { PostgresStateRepository } from './dist/src/state/postgres-state-repository.js';
+          const repo = new PostgresStateRepository({connectionString: process.env.DATABASE_URL??process.env.DIRECT_URL});
+          await repo.initialize();
+          try {
+            const snap=await repo.snapshot(), proof=process.env.FINAL_PHASE7_PROOF_ID;
+            const memories=snap.records.memories.filter(x=>x.metadata?.phase7LiveProofId===proof && x.metadata?.phase7Artifact==='model_improvement_v1');
+            const lessons=snap.records.lessons.filter(x=>x.metadata?.phase7LiveProofId===proof);
+            console.log('PHASE7_READONLY_ARTIFACTS='+memories.length);
+            console.log('PHASE7_READONLY_LESSONS='+lessons.length);
+            for (const m of memories) {
+              const a=JSON.parse(m.content??'{}');
+              console.log('PHASE7_READONLY_RESULT='+JSON.stringify({memoryId:m.id,lessonId:a.lessonId,decision:a.result?.decision,reason:a.result?.reason,checkpointPresent:!!a.result?.candidateCheckpointRef,score:a.result?.candidateScore,baseline:a.result?.baselineScore,datasetId:a.datasetId,candidateId:a.candidateId,heldOutCount:a.heldOutRunIds?.length,heldOutDisjoint:a.evaluationEligibility?.heldOutDisjoint,bothLabels:a.evaluationEligibility?.bothLabels}));
+            }
+          } finally {await repo.close();}
+          NODE
+          B64="$(base64 -w0 /tmp/probe.mjs)"
+          flyctl ssh console -a "$APP" -s -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/phase7-readonly.mjs && FINAL_PHASE7_PROOF_ID=$PID node /app/phase7-readonly.mjs; rc=\$?; rm -f /app/phase7-readonly.mjs; exit \$rc'"
+          echo SECRET_VALUES_EXPOSED=false
