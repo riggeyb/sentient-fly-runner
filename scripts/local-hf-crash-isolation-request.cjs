@@ -16,7 +16,13 @@ if (Buffer.byteLength(fixturePatch, "utf8") !== 115) throw new Error("FIXTURE_PA
 const fixturePatchDigest = crypto.createHash("sha256").update(fixturePatch, "utf8").digest("hex");
 if (fixturePatchDigest !== "2acac4cde63408c355652393c8d2c5674729b01cfa711976f0e081f1fa1b5877") throw new Error("FIXTURE_PATCH_DIGEST_MISMATCH");
 
-const editCode = baseEditCode + fixturePatch;
+const typePatchPath = "scripts/local-hf-crash-isolation-edit.part-03";
+const typePatch = fs.readFileSync(typePatchPath, "utf8");
+if (Buffer.byteLength(typePatch, "utf8") !== 294) throw new Error("TYPE_PATCH_SIZE_MISMATCH");
+const typePatchDigest = crypto.createHash("sha256").update(typePatch, "utf8").digest("hex");
+if (typePatchDigest !== "cad25161b015328a47bacc5eb39b3d83020c30c168952b81a1ddb084d61f92f0") throw new Error("TYPE_PATCH_DIGEST_MISMATCH");
+
+const editCode = baseEditCode + fixturePatch + typePatch;
 
 const request = {
   repo: "riggeyb/sentient",
@@ -43,7 +49,7 @@ const request = {
     { name: "local-hf-crash-isolation-tests", category: "test", command: "node", args: ["--test", "dist/test/local-hf-worker-isolation.test.js", "dist/test/phase3-local-hf-adapter.test.js", "dist/test/production-phase3-cognition.test.js", "dist/test/dots3-presentation-only-local-hf.test.js"], timeoutMs: 240000 },
     { name: "diff-check", category: "test", command: "git", args: ["diff", "--check"], timeoutMs: 30000 },
   ],
-  commandMessage: "fix: isolate local HF native runtime in child process",
+  commitMessage: "fix: isolate local HF native runtime in child process",
   timeoutMs: 1200000,
 };
 process.stdout.write(JSON.stringify(request));
