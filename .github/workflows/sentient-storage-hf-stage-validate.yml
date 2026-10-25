@@ -10,6 +10,22 @@ jobs:
   stage:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient_test
     steps:
       - uses: actions/checkout@v4
         with:
@@ -130,7 +146,6 @@ jobs:
       - name: Commit validated stage branch
         shell: bash
         run: |
-          set -euo pipefail
           git fetch origin storage-hf-buildout-20261025 sentient-production-composition-20261017
           test "$(git rev-parse origin/storage-hf-buildout-20261025)" = "da4f11a0abd2f7553a9c1a4ce0f1450bc2d23e05"
           test "$(git rev-parse origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
