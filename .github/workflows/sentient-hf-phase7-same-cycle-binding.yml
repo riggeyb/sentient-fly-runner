@@ -1,0 +1,122 @@
+name: Sentient HF Phase7 Same-Cycle Binding
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-hf-phase7-same-cycle-binding
+  cancel-in-progress: false
+
+jobs:
+  bind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_MACHINE_ID: 8469e7b243d558
+      EXPECTED_SOURCE_SHA: ff2e8164a2e6888f3b58b15fb143c73d016f4fb9
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Fence exact Machine and preserve prior state
+        id: fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLY_API_TOKEN"
+          flyctl machines list -a "$APP" --json > /tmp/machines-before.json
+          test "$(jq 'length' /tmp/machines-before.json)" -eq 1
+          machine_id="$(jq -r '.[0].id' /tmp/machines-before.json)"
+          original_state="$(jq -r '.[0].state' /tmp/machines-before.json)"
+          image="$(jq -r '.[0].config.image' /tmp/machines-before.json)"
+          test "$machine_id" = "$EXPECTED_MACHINE_ID"
+          case "$original_state" in stopped|started) ;; *) echo unsupported_machine_state; exit 1;; esac
+          case "$image" in *"$EXPECTED_SOURCE_SHA"*) ;; *) echo machine_source_image_mismatch; exit 1;; esac
+          echo "machine_id=$machine_id" >> "$GITHUB_OUTPUT"
+          echo "original_state=$original_state" >> "$GITHUB_OUTPUT"
+          echo "MACHINE_ID_FENCED=true"
+          echo "SOURCE_IMAGE_FENCED=true"
+          echo "SECRET_VALUES_EXPOSED=false"
+
+      - name: Start only if previously stopped
+        if: steps.fence.outputs.original_state == 'stopped'
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl machine start "${{ steps.fence.outputs.machine_id }}" -a "$APP" >/tmp/start.log 2>&1
+          for attempt in $(seq 1 30); do
+            state="$(flyctl machines list -a "$APP" --json | jq -r '.[0].state')"
+            if [ "$state" = "started" ]; then
+              echo "TEMPORARY_MACHINE_START=PASS"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo temporary_machine_start_failed
+          exit 1
+
+      - name: Bind the already-completed Phase7 cycle to HF
+        id: execute
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f scripts/sentient-hf-phase7-same-cycle-binding.mjs
+          script_b64="$(base64 -w0 scripts/sentient-hf-phase7-same-cycle-binding.mjs)"
+          remote="printf %s '$script_b64' | base64 -d >/tmp/sentient-hf-phase7-bind.mjs && node /tmp/sentient-hf-phase7-bind.mjs; rc=\$?; rm -f /tmp/sentient-hf-phase7-bind.mjs; exit \$rc"
+          set +e
+          output="$(flyctl ssh console -a "$APP" --machine "${{ steps.fence.outputs.machine_id }}" -C "sh -lc \"$remote\"" 2>&1)"
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$rc" -eq 0
+          for marker in \
+            FIRST_HF_LEARNING_CYCLE=PASS \
+            TRAINING_HELDOUT_DISJOINT=true \
+            DATASET_DIGEST_VERIFIED=true \
+            CANDIDATE_DIGEST_VERIFIED=true \
+            HF_ARTIFACT_BINDING=PASS \
+            POSTGRES_PHASE7_ARTIFACT_BINDING=PASS \
+            PROMOTION_DECISION=PROMOTED \
+            MODEL_MAY_PROMOTE_ITSELF=false \
+            SENTIENT_OWNS_PROMOTION_DECISION=true \
+            RUNTIME_ELIGIBILITY_GRANTED_BY_UPLOAD=false \
+            REMOTE_URI_ALONE_NOT_AUTHORITY=true \
+            HF_PAID_INFERENCE_USED=false \
+            HF_PAID_TRAINING_USED=false \
+            SECRET_VALUES_EXPOSED=false \
+            PRIVATE_ACTIONS_BRIDGE_USED=false
+          do
+            grep -Fxq "$marker" <<<"$output"
+          done
+
+      - name: Restore prior Machine state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          machine_id="${{ steps.fence.outputs.machine_id }}"
+          original_state="${{ steps.fence.outputs.original_state }}"
+          if [ -n "$machine_id" ] && [ "$original_state" = "stopped" ]; then
+            flyctl machine stop "$machine_id" -a "$APP" >/tmp/stop.log 2>&1 || true
+            for attempt in $(seq 1 30); do
+              state="$(flyctl machines list -a "$APP" --json | jq -r '.[0].state')"
+              if [ "$state" = "stopped" ]; then
+                echo "MACHINE_STATE_RESTORED=true"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo machine_state_restore_failed
+            exit 1
+          fi
+          if [ -n "$machine_id" ] && [ "$original_state" = "started" ]; then
+            state="$(flyctl machines list -a "$APP" --json | jq -r '.[0].state')"
+            test "$state" = "started"
+          fi
+          echo "MACHINE_STATE_RESTORED=true"
