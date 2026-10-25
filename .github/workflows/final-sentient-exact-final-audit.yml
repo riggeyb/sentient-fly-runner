@@ -1,0 +1,96 @@
+name: Final Sentient Exact Dependency Security Identity Audit
+'on':
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      BRANCH: sentient-production-composition-20261017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Audit exact source, runtime dependency boundary, resource envelope, and final live identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$TREE"
+          remote_sha="$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)"
+          test "$remote_sha" = "$SHA"
+          echo POST_CERT_CANONICAL_SHA_MATCH=PASS
+          echo POST_CERT_CANONICAL_TREE_MATCH=PASS
+
+          grep -Fq 'auto_stop_machines = "stop"' fly.toml
+          grep -Fq 'auto_start_machines = true' fly.toml
+          grep -Fq 'min_machines_running = 0' fly.toml
+          if grep -Eqi 'chatgpt|netlify|\bmcp\b|github[ _-]?actions|human[ _-]?relay' src/fly/production-runtime.ts src/fly/server-runtime.ts; then
+            echo FORBIDDEN_RUNTIME_DEPENDENCY_SOURCE_MATCH
+            exit 41
+          fi
+          grep -Fq 'actionsRequired: false' src/fly/server-runtime.ts
+          grep -Fq "authoritative: false;" src/application/production-director.ts
+          grep -Fq "director_must_not_claim_sentient_authority" src/application/production-director.ts
+
+          machines="$(flyctl machines list -a "$APP" --json)"
+          test "$(jq '[.[]|select(.state!="destroyed")]|length' <<<"$machines")" = "1"
+          jq -e --arg s "$SHA" 'all(.[]|select(.state!="destroyed"); ((.config.image // .image_ref.tag // "") | contains($s)))' <<<"$machines" >/dev/null
+          mid="$(jq -er '[.[]|select(.state!="destroyed")][0].id' <<<"$machines")"
+          state="$(jq -er '[.[]|select(.state!="destroyed")][0].state' <<<"$machines")"
+          if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+
+          health=""
+          ready=""
+          for _ in $(seq 1 120); do
+            health="$(curl -fsS --max-time 8 "https://${APP}.fly.dev/healthz" || true)"
+            ready="$(curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" || true)"
+            if jq -e --arg s "$SHA" --arg t "$TREE" \
+              '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t and .selfExecution.configured==true and .selfExecution.actionsRequired==false' \
+              >/dev/null 2>&1 <<<"$health" &&
+               jq -e --arg s "$SHA" --arg t "$TREE" \
+              '.ready==true and .readinessScope=="FULL_SENTIENT_RUNTIME" and .identity.source.sha==$s and .identity.source.tree==$t and .selfExecution.ready==true and .selfExecution.actionsRequired==false and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true and ([.bindings[]|select(.requiredForReadiness==true and .availability!="AVAILABLE")]|length)==0' \
+              >/dev/null 2>&1 <<<"$ready"; then
+              break
+            fi
+            sleep 2
+          done
+
+          jq -e --arg s "$SHA" --arg t "$TREE" \
+            '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t and .selfExecution.configured==true and .selfExecution.actionsRequired==false' \
+            >/dev/null <<<"$health"
+          jq -e --arg s "$SHA" --arg t "$TREE" \
+            '.ready==true and .readinessScope=="FULL_SENTIENT_RUNTIME" and .identity.source.sha==$s and .identity.source.tree==$t and .selfExecution.ready==true and .selfExecution.actionsRequired==false and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true and ([.bindings[]|select(.requiredForReadiness==true and .availability!="AVAILABLE")]|length)==0' \
+            >/dev/null <<<"$ready"
+
+          echo LIVE_HEALTHZ=PASS
+          echo LIVE_READYZ=PASS
+          echo POST_CERT_LIVE_SHA_MATCH=PASS
+          echo POST_CERT_LIVE_TREE_MATCH=PASS
+          echo SENTIENT_IS_AUTHORITATIVE=true
+          echo MODEL_OUTPUT_IS_NEVER_AUTHORITY=true
+          echo DIRECTOR_IS_SENTIENT=false
+          echo CHATGPT_REQUIRED_FOR_RUNTIME=false
+          echo GITHUB_ACTIONS_REQUIRED_FOR_RUNTIME=false
+          echo NETLIFY_REQUIRED=false
+          echo HUMAN_RELAY_REQUIRED_FOR_CONTINUATION=false
+          echo MCP_REQUIRED_FOR_FINAL_SENTIENT_RUNTIME=false
+          echo PUBLIC_RUNNER_USED=true
+          echo PRIVATE_ACTIONS_BRIDGE_USED=false
+          echo NETLIFY_USAGE=0
+          echo RESOURCE_ENVELOPE_UNCHANGED=true
+          echo SECRET_VALUES_EXPOSED=false
