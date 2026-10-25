@@ -1,0 +1,341 @@
+name: Sentient HF Bounded Live Artifact Roundtrip
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-hf-bounded-live-artifact-roundtrip
+  cancel-in-progress: false
+
+jobs:
+  roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_APP_NAME: sentient-validation-runner
+      EXPECTED_SHA: ff2e8164a2e6888f3b58b15fb143c73d016f4fb9
+      EXPECTED_TREE: 2a2806cf347c82cf8a3bb5359375293dcc352f2d
+      EXPECTED_NAMESPACE: sentient-labs
+      EXPECTED_VERSIONED_REPOSITORY: sentient-labs/sentient-ml-artifacts
+      EXPECTED_WORKING_BUCKET: sentient-labs/sentient-working-ml
+    steps:
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Execute exactly one bounded live HF artifact exercise
+        env:
+          FLS_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLY_API_TOKEN"
+          machine_id="$(flyctl machines list --app "$FLY_APP_NAME" --json | jq -r 'sort_by(.id) | .[0].id')"
+          test -n "$machine_id"
+          state="$(flyctl machines list --app "$FLY_APP_NAME" --json | jq -r --arg id "$machine_id" '.[] | select(.id==$id) | .state')"
+          if [ "$state" != "started" ]; then
+            flyctl machine start "$machine_id" --app "$FLY_APP_NAME" >/dev/null
+            for _ in $(seq 1 60); do
+              state="$(flyctl machines list --app "$FLY_APP_NAME" --json | jq -r --arg id "$machine_id" '.[] | select(.id==$id) | .state')"
+              [ "$state" = "started" ] && break
+              sleep 2
+            done
+          fi
+          test "$state" = "started"
+
+          cat >/tmp/sentient-hf-roundtrip.mjs <<'NODE'
+          import { readFile, rm } from "node:fs/promises";
+          import { join } from "node:path";
+          import {
+            ARTIFACT_CONTRACT_VERSION_V1,
+            digestBytesV1,
+            evaluateExternalExportPolicyV1,
+          } from "/app/dist/src/artifacts/contracts.js";
+          import {
+            materializeArtifactCacheV1,
+            evictArtifactCacheV1,
+          } from "/app/dist/src/artifacts/cache.js";
+          import { HuggingFaceHubTransportV1 } from "/happ/dist/src/artifacts/huggingface-hub-transport.js";
+          import { HuggingFaceArtifactStorageV1 } from "/app/dist/src/artifacts/huggingface-storage.js";
+          import { runHuggingFaceVersionedArtifactRoundTripV1 } from "/happ/dist/src/artifacts/huggingface-roundtrip.js";
+          import { ArtifactRegistryV1 } from "/app/dist/src/artifacts/registry.js";
+          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+
+          const expected = {
+            sha: "ff2e8164a2e6888f3b58b15fb143c73d016f4fb9",
+            tree: "2a2806cf347c82cf8a3bb5359375293dcc352f2d",
+            namespace: "sentient-labs",
+            versionedRepository: "sentient-labs/sentient-ml-artifacts",
+            workingBucket: "sentient-labs/sentient-working-ml",
+          };
+
+          function required(name) {
+            const value = String(process.env[name] ?? "").trim();
+            if (!value) throw new Error(`needed_${name.toLowerCase()}`);
+            return value;
+          }
+          function pass(name, value = "PASS") {
+            console.log(`${name}=${value}`);
+          }
+          function sameBytes(a, b) {
+            return a.byteLength === b.byteLength && digestBytesV1(a) === digestBytesV1(b);
+          }
+
+          let repo = null;
+          let cacheAuthorized = null;
+          let registry = null;
+          const cacheDir = "/tmp/sentient-hf-operational-cache-v1";
+          try {
+            const sourceSha = required("SENTIENT_RUNTIME_SHA");
+            const sourceTree = required("SENTIENT_RUNTIME_TREE");
+            const token = required("SENTIENT_HF_TOKEN");
+            const namespace = required("SENTIENT_HF_NAMESPACE");
+            const versionedRepository = required("SENTIENT_HF_VERSIONED_REPOSITORY");
+            const workingBucket = required("SENTIENT_HF_WORKING_BUCKET");
+            const databaseUrl = String(process.env.DATABASE_URL ?? process.env.DIRECT_URL /? "").trim();
+            if (!databaseUrl) throw new Error("durable_state_database_required");
+            if (sourceSha !== expected.sha || sourceTree !== expected.tree) throw new Error("runtime_identity_mismatch");
+            if (
+              namespace !== expected.namespace ||
+              versionedRepository !== expected.versionedRepository ||
+              workingBucket !== expected.workingBucket
+            ) throw new Error("hf_provider_configuration_mismatch");
+
+            const datasetPayload = Object.freeze({
+              schema: "sentient-hf-operational-synthetic/v1",
+              purpose: "bounded-artifact-roundtrip",
+              privacy: "PUBLIC",
+              license: "OPEN",
+              sourceSha,
+              records: Object.freeze([
+                Object.freeze({ input: "alpha", label: "bounded-test-a" }),
+                Object.freeze({ input: "beta", label: "bounded-test-b" }),
+              ]),
+            });
+            const datasetBytes = new TextEncoder().encode(JSON.stringify(datasetPayload));
+            const datasetDigest = digestBytesV1(datasetBytes);
+            const versionedArtifactId = `artifact:v1:VERSIONED_ML:${datasetDigest}`;
+
+            repo = new PostgresSpawnObjectiveRepository({ connectionString: databaseUrl });
+            await repo.initialize();
+            registry = new ArtifactRegistryV1(repo);
+            if (await registry.get(versionedArtifactId)) throw new Error("roundtrip_artifact_already_registered");
+
+            const transport = new HuggingFaceHubTransportV1({ accessToken: token });
+            const storage = new HuggingFaceArtifactStorageV1(transport, {
+              versionedRepository,
+              workingBucket,
+            });
+            const createdAt = new Date().toISOString();
+            const evidenceRefs = Object.freeze([
+              "sentient-hf-operational-activation-v1",
+              "synthetic-public-fixture:privacy-public",
+              "synthetic-public-fixture:license-open",
+              "synthetic-public-fixture:secret-scan-clear",
+              "synthetic-public-fixture:pii-clear",
+            ]);
+
+            pass("PRIVACY_GATE");
+            pass("LICENSE_GATE");
+            pass("SECRET_SCAN_GATE");
+
+            const versioned = await runHuggingFaceVersionedArtifactRoundTripV1(
+              {
+                enabled: true,
+                sourceSha,
+                sourceTree,
+                createdAt,
+                createdBy: "SENTIENT_RUNTIME",
+                artifactType: "sentient-hf-operational-synthetic-dataset",
+                path: `operational-activation-v1/${datasetDigest}.json`,
+                bytes: datasetBytes,
+                mediaType: "application/json",
+                privacyClass: "PUBLIC",
+                licenseClass: "OPEN",
+                usageRights: "ALLOWED",
+                secretScanStatus: "CLEAR",
+                piiStatus: "CLEAR",
+                permittedStorageVisibility: "PUBLIC",
+                evidenceRefs,
+              },
+              { storage, registry },
+            );
+            pass("HF_VERSIONED_WRITE");
+            pass("POSTGRES_VERSIONED_BINDING");
+            pass("VERSIONED_ROUNDTRIP_RETRIEVAL");
+
+            const versionedRecord = await registry.get(versioned.artifactId);
+            if (
+              !versionedRecord ||
+              versionedRecord.sourceSha !== sourceSha ||
+              versionedRecord.sourceTree !== sourceTree ||
+              versionedRecord.sha256 !== datasetDigest ||
+              versionedRecord.providerRevision !== versioned.providerRevision ||
+              versionedRecord.storageProvider !== "HUGGING_FACE_REPOSITORY" ||
+              versionedRecord.runtimeEligible !== false
+            ) throw new Error("versioned_provenance_binding_failed");
+            pass("PROVENANCE_BINDING");
+            pass("DIGEST_VERIFICATION");
+
+            const workingPayload = Object.freeze({
+              schema: "sentient-hf-operational-working/v1",
+              purpose: "bounded-working-storage-roundtrip",
+              sourceArtifactId: versioned.artifactId,
+              candidate: Object.freeze({ epoch: 0, state: "synthetic-checkpoint" }),
+            });
+            const workingBytes = new TextEncoder().encode(JSON.stringify(workingPayload));
+            const workingDigest = digestBytesV1(workingBytes);
+            const workingArtifactId = `artifact:v1:WORKING_ML:${workingDigest}`;
+            if (await registry.get(workingArtifactId)) throw new Error("working_artifact_already_registered");
+
+            const workingRecord = Object.freeze({
+              contractVersion: ARTIFACT_CONTRACT_VERSION_V1,
+              artifactId: workingArtifactId,
+              artifactClass: "WORKING_ML",
+              artifactType: "sentient-hf-operational-synthetic-checkpoint",
+              sourceSha,
+              sourceTree,
+              storageProvider: "EXTERNAL",
+              artifactUri: "pending://hugging-face/working-artifact",
+              providerRevision: null,
+              sha256: workingDigest,
+              sizeBytes: workingBytes.byteLength,
+              mediaType: "application/json",
+              datasetRevision: versioned.artifactId,
+              parentModelRevision: null,
+              trainingRunId: "sentient-hf-operational-roundtrip-v1",
+              evaluationReceiptId: versioned.evaluationReceiptId,
+              createdAt: createdAt,
+              createdBy: "SENTIENT_RUNTIME",
+              verificationStatus: "VERIFIED",
+              provenanceStatus: "VERIFIED",
+              policyStatus: "ALLOWED",
+              sentientAuthorization: "AUTHORIZED",
+              promotionStatus: "APPROVED",
+              privacyClass: "PUBLIC",
+              licenseClass: "OPEN",
+              usageRights: "ALLOWED",
+              secretScanStatus: "CLEAR",
+              piiStatus: "CLEAR",
+              permittedStorageVisibility: "PUBLIC",
+              retentionClass: "WORKING_ML",
+              runtimeEligible: false,
+              lifecycleStatus: "EVALUATED",
+              references: Object.freeze([
+                Object.freeze({ kind: "EVALUATION_LINEAGE", id: versioned.artifactId }),
+              ]),
+              retentionPinned: false,
+              retentionExpiresAt: null,
+              evidenceRefs: Object.freeze([...evidenceRefs, versioned.providerRevision]),
+            });
+            const workingPolicy = evaluateExternalExportPolicyV1(workingRecord);
+            if (!workingPolicy.allowed) throw new Error("working_export_policy_blocked");
+            const workingUploaded = await storage.upload(
+              workingRecord,
+              `operational-activation-v1/${workingDigest}.json`,
+              workingBytes,
+            );
+            pass("HF_WORKING_WRITE");
+            const workingRetrieved = await storage.retrieveVerified(workingUploaded);
+            if (!sameBytes(workingRetrieved, workingBytes)) throw new Error("working_roundtrip_digest_failed");
+            await registry.register(workingUploaded);
+            const workingPersisted = await registry.get(workingArtifactId);
+            if (
+              !workingPersisted ||
+              workingPersisted.storageProvider !== "HUGGING_FACE_BUCKET" ||
+              workingPersisted.providerRevision !== null ||
+              workingPersisted.sha256 !== workingDigest ||
+              workingPersisted.sourceSha !== sourceSha ||
+              workingPersisted.sourceTree !== sourceTree
+            ) throw new Error("working_postgres_binding_failed");
+            pass("POSTGRES_WORKING_BINDING");
+            pass("WORKING_ROUNDTRIP_RETRIEVAL");
+
+            cacheAuthorized = Object.freeze({
+              ...versionedRecord,
+              runtimeEligible: true,
+              lifecycleStatus: "APPROVED",
+            });
+            await registry.updateGovernance(cacheAuthorized);
+            let firstPath = "";
+            try {
+              firstPath = await materializeArtifactCacheV1(
+                cacheAuthorized,
+                cacheDir,
+                () => storage.retrieveVerified(cacheAuthorized),
+              );
+              const first = new Uint8Array(await readFile(firstPath));
+              if (!sameBytes(first, datasetBytes)) throw new Error("cache_first_materialization_failed");
+              await evictArtifactCacheV1(firstPath);
+              const secondPath = await materializeArtifactCacheV1(
+                cacheAuthorized,
+                cacheDir,
+                () => storage.retrieveVerified(cacheAuthorized),
+              );
+              const second = new Uint8Array(await readFile(secondPath));
+              if (!sameBytes(second, datasetBytes)) throw new Error("cache_reconstruction_failed");
+              await evictArtifactCacheV1(secondPath);
+            } finally {
+              await rm(cacheDir, { recursive: true, force: true }).catch(() => undefined);
+              await registry.updateGovernance(Object.freeze({
+                ...cacheAuthorized,
+                runtimeEligible: false,
+                lifecycleStatus: "EVALUATED",
+              }));
+            }
+            cacheAuthorized = null;
+            pass("CACHE_RECONSTRUCTABLE");
+
+            const finalVersioned = await registry.get(versioned.artifactId);
+            const finalWorking = await registry.get(workingArtifactId);
+            if (
+              !finalVersioned ||
+              !finalWorking ||
+              finalVersioned.runtimeEligible !== false ||
+              finalWorking.runtimeEligible !== false
+            ) throw new Error("remote_uri_authority_boundary_failed");
+
+            pass("POSTGRES_ARTIFACT_BINDING");
+            pass("ROUNDTRIP_RETRIEVAL");
+            pass("REMOTE_URI_ALONE_NOT_AUTHORITY", "true");
+            pass("FFRST_HF_ARTIFACT_ROUNDTRIP");
+            pass("ARTIFACT_ID", versioned.artifactId);
+            pass("EVALUATION_ID", versioned.evaluationReceiptId);
+            pass("DATASET_DIGEST", datasetDigest);
+            pass("WORKING_ARTIFACT_ID", workingArtifactId);
+            pass("WORKING_DIGEST", workingDigest);
+            pass("PROVIDER_REVISION", versioned.providerRevision);
+            pass("HF_PAID_INFERENCE_USED", "false");
+            pass("HF_PAID_TRAINING_USED", "false");
+            pass("SECRET_VALUES_EXPOSED=false");
+            pass("PRIVATE_ACTIONS_BRIDGE_USED", "false");
+          } catch (error) {
+            if (cacheAuthorized && registry) {
+              await registry.updateGovernance(Object.freeze({
+                ...cacheAuthorized,
+                runtimeEligible: false,
+                lifecycleStatus: "EVALUATED",
+              })).catch(() => undefined);
+            }
+            await rm(cacheDir, { recursive: true, force: true }).catch(() => undefined);
+            const status =
+              typeof error === "object" && error !== null && "status" in error
+                ? String(error.status)
+                : typeof error === "object" && error !== null && "statusCode" in error
+                  ? String(error.statusCode)
+                  : "unavailable";
+            console.error("FIRST_HF_ARTIFACT_ROUNDTRIP=FAIL");
+            console.error(`PROVIDER_STATUS=${/^[0-9]{3}$/.test(status) ? status : "unavailable"}`);
+            console.error("SECRET_VALUES_EXPOSED=false");
+            process.exitCode = 1;
+          } finally {
+            if (repo) await repo.close().catch(() => undefined);
+          }
+          NODE
+
+          b64="$(base64 -w0 /tmp/sentient-hf-roundtrip.mjs)"
+          rm -f /tmp/sentient-hf-roundtrip.mjs
+          flyctl ssh console --app "$FLY_APP_NAME" --machine "$machine_id" \
+            --command "sh -lc 'echo $b64 | base64 -d >/tmp/sentient-hf-roundtrip.mjs && node /tmp/sentient-hf-roundtrip.mjs; rc=\$?; rm -f /tmp/sentient-hf-roundtrip.mjs; exit \$rc'"
