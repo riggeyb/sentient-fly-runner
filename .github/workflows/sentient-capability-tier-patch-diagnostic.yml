@@ -11,11 +11,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Show public rev2 patch fragments for engineering-jobs test
+      - name: Show public rev3 patch fragments for engineering-jobs test
         shell: bash
         run: |
           set -euo pipefail
-          cat scripts/capability-tier-hardening-v1-rev2/payload.gz.part-* > /tmp/payload.gz
+          cat scripts/capability-tier-hardening-v1-rev3/payload.gz.part-* > /tmp/payload.gz
           gzip -t /tmp/payload.gz
           gzip -dc /tmp/payload.gz > /tmp/payload.mjs
           node - <<'NODE'
