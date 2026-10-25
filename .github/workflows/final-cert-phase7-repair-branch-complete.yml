@@ -1,0 +1,214 @@
+name: Final Cert Phase7 Repair Branch Complete
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CANONICAL_BASE: 4fe2ad60442e876f1931386ad6438b9d82487346
+      REPAIR_BRANCH: final-cert-phase7-heldout-robustness-20261025
+      EXPECTED_REPAIR_HEAD: 7f97446498bc238c5bc628a03640758927156381
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: final-cert-phase7-heldout-robustness-20261025
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Fence repair and canonical heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin sentient-production-composition-20261017 "$REPAIR_BRANCH"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_REPAIR_HEAD"
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "$CANONICAL_BASE"
+          echo REPAIR_BRANCH_FENCE=PASS
+
+      - name: Complete production wiring and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          app=Path("src/application/production-model-improvement.ts")
+          s=app.read_text()
+          old='''  const trainingRunIds=new Set(dataset.map(x=>x.runId));
+           const heldOut=resolvePhase7HeldOutExamplesV1(snapshot,trainingRunIds).filter(
+            x=>snapshot.records.modelRuns.some(run=>run.id===x.runId&&run.sessionId===learning.episode.sessionId),
+           );'''
+          new='''  const trainingRunIds=new Set(dataset.map(x=>x.runId));
+           const heldOut=resolvePhase7HeldOutExamplesV1(snapshot,trainingRunIds,learning.episode.sessionId);'''
+          if s.count(old)!=1:
+              raise SystemExit(f"production anchor count={s.count(old)}")
+          app.write_text(s.replace(old,new))
+
+          test=Path("test/production-model-improvement.test.ts")
+          s=test.read_text()
+          old='''  const heldPos = await run(service, session.id, "succeeded", 3);
+           const heldNeg = await run(service, session.id, "failed", 4);
+           await exp(service, session.id, heldPos.id, "success", "positive held out operational outcome");
+           await exp(service, session.id, heldNeg.id, "failure", "negative held out operational outcome");
+           const heldPosEv = await ev(service, source.id, "held positive observed");
+           const heldNegEv = await ev(service, source.id, "held negative observed");
+           await ver(service, claim.id, heldPos.id, heldPosEv.id);
+           await ver(service, claim.id, heldNeg.id, heldNegEv.id);
+
+           const adapter = new ProductionLocalHfModelImprovementV1(
+             repository,
+             new FixtureFeatureExtractor(),
+           );'''
+          new='''  const heldPos = await run(service, session.id, "succeeded", 3);
+           await exp(service, session.id, heldPos.id, "success", "positive held out operational outcome");
+           const heldPosEv = await ev(service, source.id, "held positive observed");
+           await ver(service, claim.id, heldPos.id, heldPosEv.id);
+
+           const missingLabelAdapter = new ProductionLocalHfModelImprovementV1(
+             repository,
+             new FixtureFeatureExtractor(),
+           );
+           await assert.rejects(
+             missingLabelAdapter.run({
+               lessonId: lesson.id,
+               verifiedFailureVerificationId: failedVer.id,
+             }),
+             /phase7_held_out_dataset_requires_disjoint_verified_positive_and_negative/,
+           );
+
+           const heldNeg = await run(service, session.id, "failed", 4);
+           await exp(service, session.id, heldNeg.id, "failure", "negative held out operational outcome");
+           const heldNegEv = await ev(service, source.id, "held negative observed");
+           await ver(service, claim.id, heldNeg.id, heldNegEv.id);
+
+           const adapter = new ProductionLocalHfModelImprovementV1(
+             repository,
+             new FixtureFeatureExtractor(),
+           );'''
+          if s.count(old)!=1:
+              raise SystemExit(f"production test anchor count={s.count(old)}")
+          test.write_text(s.replace(old,new))
+          PY
+
+          cat > test/phase7-held-out-selection-robustness.test.ts <<'EOF'
+          import assert from "node:assert/strict";
+          import test from "node:test";
+          import {
+            phase7ExamplesHaveBothLabelsV1,
+            resolvePhase7HeldOutExamplesV1,
+          } from "../src/phase7/production-lineage.js";
+          import { STATE_SCHEMA_VERSION, type StateSnapshot } from "../src/state/types.js";
+
+          test("Phase 7 filters to the lesson session before bounding and preserves both verified labels", () => {
+            const snapshot=syntheticSnapshot([
+              ...Array.from({length:40},(_,i)=>({
+                id:`000-global-${String(i).padStart(2,"0")}`,
+                sessionId:"other-session",
+                outcome:i%2===0?"success" as const:"failure" as const,
+              })),
+              ...Array.from({length:32},(_,i)=>({
+                id:`100-target-positive-${String(i).padStart(2,"0")}`,
+                sessionId:"target-session",
+                outcome:"success" as const,
+              })),
+              {id:"999-target-negative",sessionId:"target-session",outcome:"failure" as const},
+            ]);
+            const selected=resolvePhase7HeldOutExamplesV1(snapshot,new Set(),"target-session");
+            assert.equal(selected.length,32);
+            assert.equal(selected.every(x=>x.runId.includes("target")),true);
+            assert.equal(phase7ExamplesHaveBothLabelsV1(selected),true);
+            assert.equal(selected.filter(x=>x.label==="POSITIVE").length,31);
+            assert.equal(selected.filter(x=>x.label==="NEGATIVE").length,1);
+            assert.equal(selected.some(x=>x.runId==="999-target-negative"),true);
+          });
+
+          test("Phase 7 bounded selection does not invent a missing label",()=>{
+            const snapshot=syntheticSnapshot(
+              Array.from({length:40},(_,i)=>({
+                id:`target-positive-${String(i).padStart(2,"0")}`,
+                sessionId:"target-session",
+                outcome:"success" as const,
+              })),
+            );
+            const selected=resolvePhase7HeldOutExamplesV1(snapshot,new Set(),"target-session");
+            assert.equal(selected.length,32);
+            assert.equal(phase7ExamplesHaveBothLabelsV1(selected),false);
+            assert.equal(selected.every(x=>x.label==="POSITIVE"),true);
+          });
+
+          type Row={id:string;sessionId:string;outcome:"success"|"failure"};
+          function syntheticSnapshot(rows:readonly Row[]):StateSnapshot{
+            const now="2026-10-25T06:00:00.000Z";
+            const version={schemaVersion:STATE_SCHEMA_VERSION};
+            const modelRuns=rows.map((row,index)=>({
+              id:row.id,createdAt:now,updatedAt:now,provenance:{actor:"system" as const},version,
+              kind:"model_run" as const,sessionId:row.sessionId,provider:"local-hf",model:"fixture",
+              attempt:index+1,status:row.outcome==="success"?"succeeded" as const:"failed" as const,
+              usage:null,latencyMs:1,
+              ...(row.outcome==="failure"?{failure:{reason:"fixture",code:"fixture",retryable:false}}:{}),
+            }));
+            const experiences=rows.map(row=>({
+              id:`${row.id}:experience`,createdAt:now,updatedAt:now,
+              provenance:{actor:"system" as const,modelRunId:row.id},version,
+              kind:"experience" as const,sessionId:row.sessionId,modelRunId:row.id,outcome:row.outcome,
+              summary:`${row.outcome==="success"?"positive":"negative"} ${row.id}`,
+            }));
+            const evidence=rows.map(row=>({
+              id:`${row.id}:evidence`,createdAt:now,updatedAt:now,
+              provenance:{actor:"system" as const,modelRunId:row.id},version,
+              kind:"evidence" as const,sourceId:"synthetic-source",observation:`observed ${row.id}`,
+            }));
+            const verifications=rows.map(row=>({
+              id:`${row.id}:verification`,createdAt:now,updatedAt:now,
+              provenance:{actor:"system" as const,modelRunId:row.id},version,
+              kind:"verification" as const,claimId:"synthetic-claim",verifierId:"phase7-deterministic-verifier",
+              status:"passed" as const,checkedAt:now,summary:"verified",
+              evidenceIds:[`${row.id}:evidence`],deterministic:true,
+            }));
+            return {
+              schemaVersion:STATE_SCHEMA_VERSION,generation:1,
+              records:{tasks:[],sessions:[],modelRuns,experiences,memories:[],lessons:[],sources:[],claims:[],
+                inferences:[],evidence,verifications,toolCalls:[]},
+              world:undefined,production:undefined,
+            } as unknown as StateSnapshot;
+          }
+          EOF
+
+          git diff --check
+          echo PHASE7_REPAIR_COMPLETE_EDIT=PASS
+
+      - name: Build and targeted Phase7 regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/phase7-held-out-selection-robustness.test.js \
+            dist/test/production-model-improvement.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/phase7-local-hf-feature-head.test.js
+          echo PHASE7_HELD_OUT_ROBUSTNESS_TARGETED_TESTS=PASS
+
+      - name: Commit tested repair branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$REPAIR_BRANCH" sentient-production-composition-20261017
+          test "$(git rev-parse "origin/$REPAIR_BRANCH")" = "$EXPECTED_REPAIR_HEAD"
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "$CANONICAL_BASE"
+          git config user.name sentient-phase7-final-cert
+          git config user.email sentient-phase7-final-cert@users.noreply.github.com
+          git add src/application/production-model-improvement.ts test/production-model-improvement.test.ts test/phase7-held-out-selection-robustness.test.ts
+          git diff --cached --check
+          git commit -m "test: cover Phase7 held-out selection robustness"
+          git push origin "HEAD:refs/heads/$REPAIR_BRANCH"
+          echo "REPAIR_SHA=$(git rev-parse HEAD)"
+          echo "REPAIR_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo PHASE7_REPAIR_BRANCH_TESTED=PASS
