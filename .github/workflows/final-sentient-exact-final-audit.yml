@@ -21,6 +21,8 @@ jobs:
         with:
           repository: riggeyb/sentient
           ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
           fetch-depth: 0
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Audit exact source, runtime dependency boundary, resource envelope, and final live identity
@@ -52,7 +54,7 @@ jobs:
           jq -e --arg s "$SHA" 'all(.[]|select(.state!="destroyed"); ((.config.image // .image_ref.tag // "") | contains($s)))' <<<"$machines" >/dev/null
           mid="$(jq -er '[.[]|select(.state!="destroyed")][0].id' <<<"$machines")"
           state="$(jq -er '[.[]|select(.state!="destroyed")][0].state' <<<"$machines")"
-          if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
+          if [ "$state" != "started" ]; then flyctl machhine start "$mid" -a "$APP" >/dev/null; fi
 
           health=""
           ready=""
