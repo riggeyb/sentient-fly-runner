@@ -1,0 +1,151 @@
+TierV1>((max, tier) => tier > max ? tier : max, 0);
+}
+
+const TIER_4_TOKENS = new Set([
+  "paid_compute", "paid_compute_enablement", "gpu", "gpu_enable", "resize", "resource_change",
+  "resource_increase", "delete", "artifact_delete", "retention_pin_remove", "policy_change",
+  "policy_modify", "secret_policy_change", "destructive_database", "drop_table",
+]);
+const TIER_3_TOKENS = new Set([
+  "deploy", "deployment", "production_deploy", "production_mutation", "production_environment_mutation",
+  "production_database_mutation", "model_promotion", "activate_model",
+]);
+const TIER_2_TOKENS = new Set([
+  "write", "edit", "source_write", "source_mutation", "source_merge", "engineering_job", "commit", "push",
+]);
+const TIER_1_TOKENS = new Set([
+  "cache_write", "cache_mutation", "working_artifact_write", "hf_working_write", "hf_versioned_write",
+  "sandbox_write", "temporary_write",
+]);
+
+function normalizedToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[\\s./:-]+/g, "_");
+}
+
+export function capabilityTierForEffectTokenV1(value: string): CapabilityTierV1 {
+  const token = normalizedToken(value);
+  if (TIER_4_TOKENS.has(token)) return 4;
+  if (TIER_3_TOKENS.has(token)) return 3;
+  if (TIER_2_TOKENS.has(token)) return 2;
+  if (TIER_1_TOKENS.has(token)) return 1;
+  return 0;
+}
+
+export function requestedEffectTierV1(input: {
+  capabilities?: readonly string[];
+  tools?: readonly { toolId: string; capabilities: readonly string[]; scope: readonly string[] }[];
+  repositoryWritePaths?: readonly string[];
+  repositoryOperations?: readonly string[];
+}): CapabilityTierV1 {
+  const tokens = [
+    ...(input.capabilities ?? []),
+    ...(input.tools ?? []).flatMap((tool) => [tool.toolId, ...tool.capabilities, ...tool.scope]),
+    ...(input.repositoryOperations ?? []),
+  ];
+  const tokenTier = tokens.reduce<CapabilityTierV1>(
+    (tier, token) => maxCapabilityTierV1(tier, capabilityTierForEffectTokenV1(token)),
+    0,
+  );
+  return (input.repositoryWritePaths?.length ?? 0) > 0
+    ? maxCapabilityTierV1(tokenTier, 2)
+    : tokenTier;
+}
+
+export function normalizeAuthorizedSourcePathV1(value: string): string {
+  const normalized = value.trim().replaceAll("\\\\", "/").replace(/^\\.\\/+/, "").replace(/\\/+/g, "/");
+  if (
+    !PATH.test(normalized)
+    || normalized.startsWith("/")
+    || normalized === "."
+    || normalized === ".."
+    || normalized.split("/").includes("..")
+    || normalized.endsWith("/")
+    || normalized.includes("*")
+  ) throw new Error("engineering_authorized_path_invalid");
+  return normalized;
+}
+
+const PROTECTED_EXACT = new Set([
+  "src/action-fabric/policy.ts",
+  "src/spawn/policy.ts",
+  "src/spawn/policy-authority.ts",
+  "src/spawn/policy-budgets.ts",
+  "src/spawn/policy-types.ts",
+  "src/engineering/contracts.ts",
+  "src/engineering/repository-worker.ts",
+  "src/engineering/postgres-jobs.ts",
+  "src/artifacts/export-policy.ts",
+  "src/artifacts/gc.ts",
+  "src/artifacts/trust.ts",
+  "src/artifacts/phase7-binding.ts",
+  "fly.governor.toml",
+  "fly.recovery.toml",
+  "Dockerfile.governor",
+  "Dockerfile.recovery",
+]);
+
+export function isProtectedPolicyPathV1(value: string): boolean {
+  const path = normalizeAuthorizedSourcePathV1(value);
+  return path.startsWith("src/authority/")
+    || path.startsWith("src/deployment-governor/")
+    || PROTECTED_EXACT.has(path);
+}
+
+export function assertOrdinarySourceMutationScopeV1(paths: readonly string[]): readonly string[] {
+  if (paths.length < 1 || paths.length > 64) throw new Error("engineering_authorized_paths_must_have_1_to_64_entries");
+  const normalized = [...new Set(paths.map(normalizeAuthorizedSourcePathV1))].sort();
+  if (normalized.length !== paths.length) throw new Error("engineering_authorized_paths_must_be_unique");
+  const protectedPath = normalized.find(isProtectedPolicyPathV1);
+  if (protectedPath !== undefined) {
+    throw new Error(\`REJECTED_REQUIRES_SEPARATE_AUTHORITY:protected_policy_path:\${protectedPath}\`);
+  }
+  return Object.freeze(normalized);
+}
+
+export function assertChangedPathsAuthorizedV1(
+  changedPaths: readonly string[],
+  authorizedPaths: readonly string[],
+): void {
+  const allowed = new Set(authorizedPaths.map(normalizeAuthorizedSourcePathV1));
+  for (const raw of changedPaths) {
+    const path = normalizeAuthorizedSourcePathV1(raw);
+    if (isProtectedPolicyPathV1(path)) {
+      throw new Error(\`REJECTED_REQUIRES_SEPARATE_AUTHORITY:protected_policy_path:\${path}\`);
+    }
+    if (!allowed.has(path)) throw new Error(\`engineering_changed_path_not_authorized:\${path}\`);
+  }
+}
+`);
+
+replaceOnce("src/engineering/contracts.ts",
+`export const ENGINEERING_JOB_CONTRACT = "sentient-engineering-job/v1" as const;
+`,
+`import {
+  CAPABILITY_TIER_POLICY_VERSION,
+  assertOrdinarySourceMutationScopeV1,
+} from "../authority/capability-tiers.js";
+
+export const ENGINEERING_JOB_CONTRACT = "sentient-engineering-job/v1" as const;
+`);
+
+replaceOnce("src/engineering/contracts.ts",
+`export interface EngineeringJobInputV1 {
+  repo: "riggeyb/sentient" | "riggeyb/director-studio-beta";
+  branch: string;
+  expectedHead: string;
+  idempotencyKey?: string;
+  objective: string;
+  commands: readonly EngineeringCommandV1[];
+  commitMessage: string;
+  timeoutMs: number;
+}
+`,
+`export interface EngineeringJobInputV1 {
+  repo: "riggeyb/sentient" | "riggeyb/director-studio-beta";
+  branch: string;
+  expectedHead: string;
+  expectedTree: string;
+  objectiveId: string;
+  actionId: string;
+  authorizedPaths: readonly string[];
+  authori
