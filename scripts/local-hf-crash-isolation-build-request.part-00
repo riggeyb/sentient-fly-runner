@@ -1,0 +1,69 @@
+const editCode = String.raw`
+import { readFileSync, writeFileSync } from "node:fs";
+
+const providerPath = "src/model/providers/huggingface.ts";
+let provider = readFileSync(providerPath, "utf8");
+function replaceOne(text, from, to, label) {
+  const count = text.split(from).length - 1;
+  if (count !== 1) throw new Error(label + "_ANCHOR_COUNT_" + count);
+  return text.replace(from, to);
+}
+
+provider = replaceOne(
+  provider,
+  'import { Worker } from "node:worker_threads";',
+  'import { fork, type ChildProcess } from "node:child_process";\nimport { fileURLToPath } from "node:url";',
+  "PROVIDER_IMPORT"
+);
+
+provider = replaceOne(
+  provider,
+  'const DEFAULT_LOCAL_HF_WORKER_FACTORY_V1: LocalHfWorkerFactoryV1 = () =>\n  new Worker(new URL("./huggingface-worker.js", import.meta.url)) as unknown as LocalHfWorkerPortV1;',
+  `class LocalHfChildProcessPortV1 implements LocalHfWorkerPortV1 {
+  public constructor(private readonly child: ChildProcess) {}
+
+  public postMessage(value: unknown): void {
+    if (!this.child.connected || typeof this.child.send !== "function") {
+      throw new Error("local_hf_child_ipc_unavailable");
+    }
+    this.child.send(value);
+  }
+
+  public on(event: "message", listener: (value: unknown) => void): this;
+  public on(event: "error", listener: (error: Error) => void): this;
+  public on(event: "exit", listener: (code: number) => void): this;
+  public on(
+    event: "message" | "error" | "exit",
+    listener: ((value: unknown) => void) | ((error: Error) => void) | ((code: number) => void),
+  ): this {
+    if (event === "message") {
+      this.child.on("message", listener as (value: unknown) => void);
+    } else if (event === "error") {
+      this.child.on("error", listener as (error: Error) => void);
+    } else {
+      this.child.on("exit", (code, signal) => {
+        (listener as (code: number) => void)(code ?? signalExitCodeV1(signal));
+      });
+    }
+    return this;
+  }
+
+  public async terminate(): Promise<number> {
+    if (this.child.exitCode !== null || this.child.signalCode !== null) {
+      return this.child.exitCode ?? signalExitCodeV1(this.child.signalCode);
+    }
+    return await new Promise<number>((resolve) => {
+      let settled = false;
+      const finish = (code: number) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(force);
+        resolve(code);
+      };
+      const force = setTimeout(() => {
+        if (!settled) this.child.kill("SIGKILL");
+      }, 1_000);
+      this.child.once("exit", (code, signal) => {
+        finish(code ?? signalExitCodeV1(signal));
+      });
+      if (!this.child.kill("SIGTERM")) finish(
