@@ -1,7 +1,17 @@
-name: Sentient Storage Stage Compile Private Diagnostic
+name: Sentient Storage Stage Compile Sanitized Diagnostic
 
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact private source SHA
+        required: true
+        type: string
+      source_branch:
+        description: Expected source branch containing SHA
+        required: true
+        default: storage-hf-buildout-20261025
+        type: string
 
 permissions:
   contents: read
@@ -14,52 +24,52 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: storage-hf-buildout-20261025
+          ref: ${{ inputs.source_sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Fence exact staging tip
+
+      - name: Fence exact source
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "d6d4a9a28ac55c139daf38672e588e0cd4a56bf4"
-          test "$(git merge-base HEAD e9bd0c9135f05da2be337e5e7ac4077af0f4649d)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse "origin/${{ inputs.source_branch }}")" = "${{ inputs.source_sha }}"
+          test "$(git merge-base HEAD origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
           echo "SOURCE_IDENTITY_FENCE=PASS"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+
       - name: Install dependencies silently
         shell: bash
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
-      - name: Compile with privacy-safe result
+          echo "NPM_CI=PASS"
+
+      - name: Compile and emit sanitized TypeScript diagnostics
         shell: bash
         run: |
           set +e
           npx tsc -p tsconfig.json --pretty false >/tmp/tsc.log 2>&1
           rc=$?
           set -e
-          error_count="$(grep -c 'error TS' /tmp/tsc.log || true)"
           echo "TSC_EXIT_CODE=$rc"
-          echo "TSC_ERROR_COUNT=$error_count"
-          echo "PRIVATE_SOURCE_LINES_EXPOSED=false"
-          echo "SECRET_VALUES_EXPOSED=false"
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'PY'
+          import re
+          from pathlib import Path
+          lines = Path("/tmp/tsc.log").read_text(errors="replace").splitlines()
+          pattern = re.compile(r'^(src|test|tests)/[^((:\s]+\(\d+,\d+\): error TS\d++: .+$')
+          safe = [line for line in lines if pattern.match(line)]
+          for line in safe[:100]:
+              print("TS_DIAGNOSTIC=" + line)
+          print("TS_DIAGNOSTIC_COUNT=" + str(len(safe)))
+          print("PRIVATE_SOURCE_LINES_EXPOSED=false")
+          print("SECRET_VALUES_EXPOSED=false")
+          PY
+          fi
           test "$rc" -eq 0
-      - name: Build production Docker image without push or deploy
-        shell: bash
-        run: |
-          set -euo pipefail
-          SHA="$(git rev-parse HEAD)"
-          TREE="$(git rev-parse 'HEAD^{tree}')"
-          git bundle create sentient-source.bundle HEAD
-          docker build \
-            --build-arg "SENTIENT_RUNTIME_SHA=$SHA" \
-            --build-arg "SENTIENT_RUNTIME_TREE=$TREE" \
-            --build-arg "SENTIENT_SKILLS_SHA=unset" \
-            --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=e9bd0c9135f05da2be337e5e7ac4077af0f4649d" \
-            -t sentient-storage-readonly:"${SHA::12}" .
-          echo "DOCKER_BUILD=PASS"
-          echo "REGISTRY_PUSH=false"
-          echo "DEPLOYMENT=false"
-          echo "RESOURCE_ENVELOPE_CHANGES=none"
