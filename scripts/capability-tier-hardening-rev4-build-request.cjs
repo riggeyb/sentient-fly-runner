@@ -2,8 +2,8 @@ const fs=require("node:fs");
 const {createHash}=require("node:crypto");
 const {gunzipSync}=require("node:zlib");
 const base="scripts/capability-tier-hardening-v1-rev3";
-const p0=fs.readFileSync(`${base}/payload.gz.part-00`);
-const p1=fs.readFileSync(`${base}/payload.gz.part-01`);
+const p0=fs.readFileSync(process.env.REV4_PAYLOAD_P0 || `${base}/payload.gz.part-00`);
+const p1=fs.readFileSync(process.env.REV4_PAYLOAD_P1 || `${base}/payload.gz.part-01`);
 const gz=Buffer.concat([p0,p1]);
 const h=x=>createHash("sha256").update(x).digest("hex");
 if(h(gz)!=="2477671742050bbe9f682815c28063a42adc30665818a09e0c04994648f3e86e")throw new Error("REV4_GZIP_DIGEST_MISMATCH");
@@ -13,9 +13,9 @@ const writeCmd=(name,dest,buf)=>({name,category:"edit",command:"node",args:["-e"
 const commands=[
   {name:"install-locked-dependencies",category:"build",command:"npm",args:["ci","--ignore-scripts"],timeoutMs:240000},
   {name:"baseline-build",category:"build",command:"npm",args:["run","build"],timeoutMs:180000},
-  writeCmd("embed-verified-authority-patch-0","/tmp/capbility-rev4-p0",p0),
+  writeCmd("embed-verified-authority-patch-0","/tmp/capability-rev4-p0",p0),
   writeCmd("embed-verified-authority-patch-1","/tmp/capability-rev4-p1",p1),
-  {name:"assemble-verify-authority-patch",category:"inspect",command:"node",args:["--input-type=module","-e","import{readFileSync,writeFileSync}from'node:fs';import{createHash}from'node:crypto';import{gunzipSync}from'node:zlib';const gz=Buffer.concat([readFileSync('/tmp/capbility-rev4-p0'),readFileSync('/tmp/capbility-rev4-p1')]);const h=x=>createHash('sha256').update(x).digest('hex');if(h(gz)!=='2477671742050bbe9f682815c28063a42adc30665818a09e0c04994648f3e86e')throw Error('payload_gzip_digest_mismatch');const src=gunzipSync(gz);if(h(src)!=='a8af4b447f5dc8a2a1bc66e15769c3dc67a5132a61b6481d2fa971c84d2cf977')throw Error('payload_source_digest_mismatch');writeFileSync('/tmp/sentient-capability-tier-hardening-v1-rev4.mjs',src);console.log('AUTHORITY_PATCH_DIGEST_VERIFIED=true');"],timeoutMs:30000},
+  {name:"assemble-verify-authority-patch",category:"inspect",command:"node",args:["--input-type=module","-e","import{readFileSync,writeFileSync}from'node:fs';import{createHash}from'node:crypto';import{gunzipSync}from'node:zlib';const gz=Buffer.concat([readFileSync('/tmp/capability-rev4-p0'),readFileSync('/tmp/capability-rev4-p1')]);const h=x=>createHash('sha256').update(x).digest('hex');if(h(gz)!=='2477671742050bbe9f682815c28063a42adc30665818a09e0c04994648f3e86e')throw Error('payload_gzip_digest_mismatch');const src=gunzipSync(gz);if(h(src)!=='a8af4b447f5dc8a2a1bc66e15769c3dc67a5132a61b6481d2fa971c84d2cf977')throw Error('payload_source_digest_mismatch');writeFileSync('/tmp/sentient-capability-tier-hardening-v1-rev4.mjs',src);console.log('AUTHORITY_PATCH_DIGEST_VERIFIED=true');"],timeoutMs:30000},
   {name:"apply-authority-hardening",category:"edit",command:"node",args:["/tmp/sentient-capability-tier-hardening-v1-rev4.mjs"],timeoutMs:30000},
   {name:"post-change-build",category:"build",command:"npm",args:["run","build"],timeoutMs:180000},
   {name:"authority-focused-tests",category:"test",command:"node",args:["--test","dist/test/capability-tier-authority.test.js","dist/test/engineering-jobs.test.js","dist/test/deployment-governor.test.js","dist/test/deployment-governor-boundaries.test.js"],timeoutMs:150000},
