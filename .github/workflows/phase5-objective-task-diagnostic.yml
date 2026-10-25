@@ -25,6 +25,8 @@ jobs:
           [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
           cat >/tmp/phase5-task.mjs <<'NODE'
           import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          import { BoundedSentientPhase1AcceptancePolicyV1 } from "/app/dist/src/phase1/bounded-acceptance-policy.js";
+          import { deriveTaskRequirementsV1 } from "/app/dist/src/phase1/core-runtime.js";
           const objectiveId=String(process.env.PHASE5_OBJECTIVE_ID??"").trim();
           const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
@@ -58,6 +60,21 @@ jobs:
             console.log("PHASE3_AUTHORITATIVE="+String(phase3.authoritative??"none"));
             console.log("PHASE3_AUTHORITY_OWNER="+String(phase3.authorityOwner??"none"));
             console.log("PHASE3_MODEL_ID_PRESENT="+String(Boolean(phase3.modelId)));
+            if(task.status!=="succeeded" || result.httpStatus!==200 || appResult.status!=="RESPONDED") throw new Error("CERT13_DURABLE_RESULT_INVALID");
+            if(appResult.state?.authoritativeOwner!=="SENTIENT" || appResult.authority?.owner!=="SENTIENT" || subordinate.accepted!==true) throw new Error("CERT13_DURABLE_AUTHORITY_INVALID");
+            if(subordinate.provider!=="huggingface-local" || subordinate.model!=="onnx-community/SmolLM2-135M-Instruct-ONNX" || subordinate.revision!=="b8a5c0f183b78c55955a5364f610c36668b5e681" || subordinate.acceptancePolicyId!=="sentient-fly-phase1-acceptance-policy/v1") throw new Error("CERT13_DURABLE_MODEL_IDENTITY_INVALID");
+            if(phase3.status!=="ASSESSED" || phase3.transport!=="LOCAL" || phase3.authoritative!==false || phase3.authorityOwner!=="SENTIENT_RUNTIME" || !phase3.modelId) throw new Error("CERT13_DURABLE_PHASE3_INVALID");
+            const req=deriveTaskRequirementsV1({requestId:`policy:${objectiveId}`,sessionId:`policy-session:${objectiveId}`,taskId:`policy-task:${objectiveId}`,userRequest:"Evaluate a syntactically valid subordinate proposal."});
+            const policy=new BoundedSentientPhase1AcceptancePolicyV1({policyId:"sentient-fly-phase1-acceptance-policy/v1",maxProposalChars:8000});
+            const dec=await policy.evaluate(req,{text:"x".repeat(8001),provider:subordinate.provider,model:subordinate.model,revision:subordinate.revision});
+            if(dec.accepted!==false || !String(dec.reason).includes("8000")) throw new Error("CERT13_POLICY_REJECTION_INVALID");
+            console.log("OBJECTIVE_ASYNC_INGRESS=PASS");
+            console.log("OBJECTIVE_PERSISTENCE=PASS");
+            console.log("PHASE1_LIVE_AUTHORITY=PASS");
+            console.log("MODEL_REMAINS_SUBORDINATE=PASS");
+            console.log("PHASE1_VALID_PROPOSAL_CONSTRAINED=PASS");
+            console.log("LOCAL_HF_COGNITION_LIVE=PASS");
+            console.log("PHASE3_LIVE_COGNITION=PASS");
             console.log("SECRET_VALUES_EXPOSED=false");
           } finally {
             await repo.close();
