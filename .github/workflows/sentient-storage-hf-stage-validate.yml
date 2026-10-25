@@ -91,11 +91,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker build -t sentient-storage-hf-validate:"${{ inputs.source_sha }}" .
+          source_sha="$(git rev-parse HEAD)"
+          source_tree="$(git rev-parse 'HEAD^{tree}')"
+          git bundle create sentient-source.bundle HEAD
+          git bundle verify sentient-source.bundle
+          docker build \
+            --build-arg "SENTIENT_RUNTIME_SHA=$source_sha" \
+            --build-arg "SENTIENT_RUNTIME_TREE=$source_tree" \
+            --build-arg "SENTIENT_SKILLS_SHA=unset" \
+            --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=e9bd0c9135f05da2be337e5e7ac4077af0f4649d" \
+            -t sentient-storage-hf-validate:"${{ inputs.source_sha }}" .
           image_id="$(docker image inspect sentient-storage-hf-validate:"${{ inputs.source_sha }}" --format '{{.Id}}')"
           test -n "$image_id"
+          rm -f sentient-source.bundle
           echo "DOCKER_BUILD_REPRODUCIBLE=PASS"
           echo "DOCKER_IMAGE_ID=$image_id"
+          echo "SOURCE_BUNDLE_COMMITTED=false"
 
       - name: Final receipt
         if: always()
