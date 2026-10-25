@@ -1,5 +1,5 @@
 name: Governor Local Deploy Exact
-"on":
+on:
   workflow_dispatch:
     inputs:
       sha:
