@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: sentient-storage-hf-stage-validate
+  cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -53,14 +57,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --quiet --no-tags origin "${{ inputs.source_branch }}" sentient-production-composition-20261017
           test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
           test "$(git rev-parse "origin/${{ inputs.source_branch }}")" = "${{ inputs.source_sha }}"
           test "$(git merge-base HEAD origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
           test -z "$(git ls-files 'node_modules/**')"
           test -z "$(git ls-files 'dist/**')"
           test -f .gitignore
+          test -f .dockerignore
           grep -Fxq 'node_modules/' .gitignore
           grep -Fxq 'dist/' .gitignore
+          echo "SOURCE_IDENTITY_FENCE=PASS"
           echo "SOURCE_SHA=$(git rev-parse HEAD)"
           echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo "NODE_MODULES_TRACKING_REMOVED=PASS"
@@ -69,44 +76,52 @@ jobs:
           echo "CANONICAL_BRANCH_MUTATED=false"
           echo "CERTIFIED_TAG_MUTATED=false"
 
-      - name: Clean dependency install build and regressions
+      - name: Clean dependency install build and privacy-safe regressions
         shell: bash
         run: |
           set -euo pipefail
-          npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
-          if ! npm run build >/tmp/build.log 2>&1; then
-            tail -n 200 /tmp/build.log
-            exit 1
-          fi
-          node --test dist/test/artifact-storage.test.js
+          run_hidden () {
+            label="$1"; shift
+            if "$@" >"/tmp/${label}.log" 2>&1; then
+              echo "${label}=PASS"
+            else
+              echo "${label}=FAIL"
+              echo "PRIVATE_SOURCE_DIAGNOSTICS_EXPOSED=false"
+              exit 1
+            fi
+          }
+          run_hidden NPM_CI npm ci --no-audit --no-fund
+          run_hidden BUILD npm run build
+          run_hidden ARTIFACT_STORAGE node --test dist/test/artifact-storage.test.js
           mapfile -t tests < <(find dist/test dist/tests -type f -name '*.test.js' 2>/dev/null | sort -u)
           test "${#tests[@]}" -gt 0
-          node --test "${tests[@]}"
-          echo "BUILD_REPRODUCIBLE=PASS"
-          echo "ARTIFACT_STORAGE_FOCUSED=PASS"
-          echo "CUMULATIVE_REGRESSIONS=PASS"
+          run_hidden CUMULATIVE_REGRESSIONS node --test "${tests[@]}"
           echo "TEST_FILE_COUNT=${#tests[@]}"
+          echo "BUILD_REPRODUCIBLE=PASS"
+          echo "HF_PAID_INFERENCE_USED=false"
+          echo "HF_PAID_TRAINING_USED=false"
 
-      - name: Docker rebuild proof
+      - name: Docker rebuild and source-witness proof
         shell: bash
         run: |
           set -euo pipefail
           source_sha="$(git rev-parse HEAD)"
           source_tree="$(git rev-parse 'HEAD^{tree}')"
-          git bundle create sentient-source.bundle HEAD
-          git bundle verify sentient-source.bundle
-          docker build \
-            --build-arg "SENTIENT_RUNTIME_SHA=$source_sha" \
-            --build-arg "SENTIENT_RUNTIME_TREE=$source_tree" \
-            --build-arg "SENTIENT_SKILLS_SHA=unset" \
-            --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=e9bd0c9135f05da2be337e5e7ac4077af0f4649d" \
-            -t sentient-storage-hf-validate:"${{ inputs.source_sha }}" .
-          image_id="$(docker image inspect sentient-storage-hf-validate:"${{ inputs.source_sha }}" --format '{{.Id}}')"
-          test -n "$image_id"
-          rm -f sentient-source.bundle
-          echo "DOCKER_BUILD_REPRODUCIBLE=PASS"
-          echo "DOCKER_IMAGE_ID=$image_id"
-          echo "SOURCE_BUNDLE_COMMITTED=false"
+          git bundle create sentient-source.bundle HEAD >/tmp/bundle-create.log 2>&1
+          git bundle verify sentient-source.bundle >/tmp/bundle-verify.log 2>&1
+          if docker build             --build-arg "SENTIENT_RUNTIME_SHA=$source_sha"             --build-arg "SENTIENT_RUNTIME_TREE=$source_tree"             --build-arg "SENTIENT_SKILLS_SHA=unset"             --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=e9bd0c9135f05da2be337e5e7ac4077af0f4649d"             -t "sentient-storage-hf-validate:${{ inputs.source_sha }}" . >/tmp/docker-build.log 2>&1; then
+            image_id="$(docker image inspect "sentient-storage-hf-validate:${{ inputs.source_sha }}" --format '{{.Id}}')"
+            test -n "$image_id"
+            rm -f sentient-source.bundle
+            echo "DOCKER_BUILD_REPRODUCIBLE=PASS"
+            echo "SOURCE_BUNDLE_VERIFIED=PASS"
+            echo "SOURCE_BUNDLE_COMMITTED=false"
+          else
+            rm -f sentient-source.bundle
+            echo "DOCKER_BUILD_REPRODUCIBLE=FAIL"
+            echo "PRIVATE_SOURCE_DIAGNOSTICS_EXPOSED=false"
+            exit 1
+          fi
 
       - name: Final receipt
         if: always()
@@ -120,3 +135,4 @@ jobs:
           echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
           echo "SOURCE_MUTATION=false"
           echo "DEPLOYMENT=false"
+          echo "CERTIFICATION_REOPENED=false"
