@@ -1,0 +1,98 @@
+name: Sentient Storage Boundary Readonly Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fence certified operational baseline and inventory tracked bloat
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
+          test "$(git rev-parse 'HEAD^{tree}')" = "0d5317a5434f20530d4814d748ae9fa9a7a520f3"
+          node_count="$(git ls-files 'node_modules/**' | wc -l | tr -d ' ')"
+          dist_count="$(git ls-files 'dist/**' | wc -l | tr -d ' ')"
+          node_bytes="$(git ls-tree -r -l HEAD node_modules | awk '{s+=$4} END {printf "%.0f",s+0}')"
+          dist_bytes="$(git ls-tree -r -l HEAD dist | awk '{s+=$4} END {printf "%.0f",s+0}')"
+          echo "NODE_MODULES_TRACKED_FILES=$node_count"
+          echo "NODE_MODULES_TRACKED_BLOB_BYTES=$node_bytes"
+          echo "DIST_TRACKED_FILES=$dist_count"
+          echo "DIST_TRACKED_BLOB_BYTES=$dist_bytes"
+          test "$node_count" -gt 0
+          test "$dist_count" -gt 0
+
+      - name: Prove clean source rebuild without committed dependency/build trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf node_modules dist
+          npm ci --no-audit --no-fund
+          npm run build
+          test -d node_modules
+          test -d dist
+          node --test \
+            dist/test/persistence.test.js \
+            dist/test/production-model-improvement.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/phase7-local-hf-feature-head.test.js \
+            dist/test/phase7-held-out-selection.test.js
+          echo "CLEAN_CHECKOUT_DEPENDENCY_INSTALL=PASS"
+          echo "CLEAN_CHECKOUT_BUILD=PASS"
+          echo "CLEAN_CHECKOUT_TARGETED_TESTS=PASS"
+          echo "NODE_MODULES_TRACKING_REQUIRED=false"
+          echo "DIST_TRACKING_REQUIRED=false"
+          echo "HISTORY_REWRITE_REQUIRED=false"
+
+      - name: Audit production build references
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'COPY package*.json ./' Dockerfile
+          grep -Fq 'RUN npm install --package-lock=false --no-audit --no-fund' Dockerfile
+          grep -Fq 'RUN npm run build' Dockerfile
+          grep -Fq 'COPY --from=build /app/node_modules ./node_modules' Dockerfile
+          grep -Fq 'COPY --from=build /app/dist ./dist' Dockerfile
+          grep -Fq 'dockerfile = "Dockerfile"' fly.toml
+          echo "PRODUCTION_BUILDS_NODE_MODULES_FROM_MANIFESTS=PASS"
+          echo "PRODUCTION_BUILDS_DIST_FROM_SOURCE=PASS"
+          echo "FLY_CACHE_PERSISTENT_VOLUME_REQUIRED=false"
+
+      - name: Report existing Hugging Face write configuration presence only
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+          SENTIENT_HF_TOKEN: ${{ secrets.SENTIENT_HF_TOKEN }}
+          SENTIENT_HF_NAMESPACE: ${{ vars.SENTIENT_HF_NAMESPACE }}
+          SENTIENT_HF_VERSIONED_REPOSITORY: ${{ vars.SENTIENT_HF_VERSIONED_REPOSITORY }}
+          SENTIENT_HF_WORKING_BUCKET: ${{ vars.SENTIENT_HF_WORKING_BUCKET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          token_available=false
+          if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACE_TOKEN:-}" ] || [ -n "${SENTIENT_HF_TOKEN:-}" ]; then
+            token_available=true
+          fi
+          echo "HF_WRITE_TOKEN_AVAILABLE=$token_available"
+          test -n "${SENTIENT_HF_NAMESPACE:-}" && echo "HF_NAMESPACE_CONFIGURED=true" || echo "HF_NAMESPACE_CONFIGURED=false"
+          test -n "${SENTIENT_HF_VERSIONED_REPOSITORY:-}" && echo "HF_VERSIONED_REPOSITORY_CONFIGURED=true" || echo "HF_VERSIONED_REPOSITORY_CONFIGURED=false"
+          test -n "${SENTIENT_HF_WORKING_BUCKET:-}" && echo "HF_WORKING_BUCKET_CONFIGURED=true" || echo "HF_WORKING_BUCKET_CONFIGURED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
