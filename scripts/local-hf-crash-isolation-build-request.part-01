@@ -1,0 +1,76 @@
+1);
+    });
+  }
+}
+
+export function createLocalHfChildProcessPortV1(options: {
+  modulePath?: string;
+  env?: NodeJS.ProcessEnv;
+  diagnosticOutput?: "inherit" | "ignore";
+} = {}): LocalHfWorkerPortV1 {
+  const modulePath = options.modulePath
+    ?? fileURLToPath(new URL("./huggingface-worker.js", import.meta.url));
+  const output = options.diagnosticOutput ?? "inherit";
+  const child = fork(modulePath, [], {
+    stdio: ["ignore", output, output, "ipc"],
+    env: { ...localHfChildEnvironmentV1(), ...(options.env ?? {}) },
+  });
+  return new LocalHfChildProcessPortV1(child);
+}
+
+function localHfChildEnvironmentV1(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { HF_HUB_DISABLE_TELEMETRY: "1" };
+  for (const key of [
+    "PATH", "HOME", "TMPDIR", "TMP", "TEMP",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+    "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS",
+  ] as const) {
+    const value = process.env[key];
+    if (value) env[key] = value;
+  }
+  return env;
+}
+
+function signalExitCodeV1(signal: NodeJS.Signals | null): number {
+  return signal === "SIGABRT" ? 134 : 1;
+}
+
+const DEFAULT_LOCAL_HF_WORKER_FACTORY_V1: LocalHfWorkerFactoryV1 =
+  () => createLocalHfChildProcessPortV1();`,
+  "DEFAULT_FACTORY"
+);
+writeFileSync(providerPath, provider);
+
+const workerPath = "src/model/providers/huggingface-worker.ts";
+let worker = readFileSync(workerPath, "utf8");
+worker = replaceOne(
+  worker,
+  'import { parentPort } from "node:worker_threads";',
+  "",
+  "WORKER_IMPORT"
+);
+worker = replaceOne(
+  worker,
+  'if (parentPort === null) throw new Error("local_hf_worker_parent_port_missing");\nlet pipelinePromise: Promise<PipelineLike> | null = null;',
+  'const ipcSend = typeof process.send === "function" ? process.send.bind(process) : null;\nif (ipcSend === null) throw new Error("local_hf_worker_ipc_missing");\nlet pipelinePromise: Promise<PipelineLike> | null = null;',
+  "WORKER_IPC_INIT"
+);
+worker = replaceOne(
+  worker,
+  'parentPort.on("message", (value: unknown) => {',
+  'process.on("message", (value: unknown) => {',
+  "WORKER_MESSAGE"
+);
+worker = replaceOne(
+  worker,
+  'function post(response: WorkerResponse): void {\n  parentPort!.postMessage(response);\n}',
+  'function post(response: WorkerResponse): void {\n  ipcSend!(response);\n}',
+  "WORKER_POST"
+);
+writeFileSync(workerPath, worker);
+
+const testPath = "test/local-hf-worker-isolation.test.ts";
+let test = readFileSync(testPath, "utf8");
+test = replaceOne(
+  test,
+  'import { EventEmitter } from "node:events";\nimport test from "node:test";\nimport { TransformersJsLocalHfRunnerV1, type LocalHfWorkerPortV1 } from "../src/model/providers/huggi
