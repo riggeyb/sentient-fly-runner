@@ -21,9 +21,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/capability-tier-hardening-build-request.cjs > /tmp/request.json
+          node scripts/capability-tier-hardening-rev4-build-request.cjs > /tmp/request.json
           node -e 'const fs=require("fs");const r=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));if(r.repo!=="riggeyb/sentient"||r.branch!=="sentient-production-composition-20261017"||r.expectedHead!=="5ce976089532a86ac262a2760367318b6f4b72a5"||!Array.isArray(r.commands)||r.commands.length<3||r.commands.length>32||r.commands.some(c=>!Array.isArray(c.args)||c.args.length>64||c.args.some(a=>typeof a!=="string"||a.length>8192)||c.timeoutMs<1000||c.timeoutMs>600000)||r.commands.reduce((n,c)=>n+c.timeoutMs,0)>r.timeoutMs||r.timeoutMs>1800000||r.commands.at(-1)?.category!=="test")throw Error("BOOTSTRAP_REQUEST_INVALID");'
           echo "BOOTSTRAP_REQUEST_VALIDATED=true"
+          echo "REV4_NETWORK_EXPANSION=false"
           echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
           echo "SECRET_VALUES_EXPOSED=false"
       - name: Create exact bounded EngineeringJob through existing operator
