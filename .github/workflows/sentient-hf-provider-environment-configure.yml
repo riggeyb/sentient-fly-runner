@@ -1,0 +1,144 @@
+name: Sentient HF Provider Environment Configure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-hf-provider-environment-configure
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      HF_NAMESPACE: sentient-labs
+      HF_VERSIONED_REPOSITORY: sentient-labs/sentient-ml-artifacts
+      HF_WORKING_BUCKET: sentient-labs/sentient-working-ml
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Preflight exact machine and secret boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl machines list -a "$APP" --json > /tmp/before.json
+          flyctl secrets list -a "$APP" --json > /tmp/secrets.json
+          python3 - <<'PY'
+          import json
+          machines=json.load(open("/tmp/before.json"))
+          secrets=json.load(open("/tmp/secrets.json"))
+          if len(machines) != 1:
+              raise SystemExit("EXPECTED_EXACTLY_ONE_MACHINE")
+          names={
+              str(x.get("Name") or x.get("name") or "")
+              for x in secrets if isinstance(x,dict)
+          }
+          if "SENTIENT_HF_TOKEN" not in names:
+              raise SystemExit("SENTIENT_HF_TOKEN_SECRET_MISSING")
+          conflicts=[
+              name for name in (
+                  "SENTIENT_HF_NAMESPACE",
+                  "SENTIENT_HF_VERSIONED_REPOSITORY",
+                  "SENTIENT_HF_WORKING_BUCKET",
+              ) if name in names
+          ]
+          if conflicts:
+              raise SystemExit("HF_TARGET_ENV_SECRET_CONFLICT")
+          machine=machines[0]
+          print("MACHINE_COUNT_BEFORE=1")
+          print("HF_TOKEN_SECRET_PRESENT=true")
+          print("HF_TARGET_ENV_SECRET_CONFLICT=false")
+          print("MACHINE_ID=" + str(machine.get("id") or machine.get("ID") or ""))
+          print("SECRET_NAMES_EXPOSED=false")
+          print("SECRET_VALUES_EXPOSED=false")
+          PY
+          machine_id="$(python3 - <<'PY'
+          import json
+          m=json.load(open("/tmp/before.json"))[0]
+          print(m.get("id") or m.get("ID") or "")
+          PY
+          )"
+          test -n "$machine_id"
+          echo "MACHINE_ID=$machine_id" >> "$GITHUB_ENV"
+
+      - name: Set only approved non-secret Hugging Face environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl machine update "$MACHINE_ID" \
+            -a "$APP" \
+            --yes \
+            --env "SENTIENT_HF_NAMESPACE=$HF_NAMESPACE" \
+            --env "SENTIENT_HF_VERSIONED_REPOSITORY=$HF_VERSIONED_REPOSITORY" \
+            --env "SENTIENT_HF_WORKING_BUCKET=$HF_WORKING_BUCKET" \
+            >/tmp/update.log 2>&1
+          echo "FLY_MACHINE_ENV_UPDATE=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
+
+      - name: Verify exact configuration and unchanged resource envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl machines list -a "$APP" --json > /tmp/after.json
+          flyctl secrets list -a "$APP" --json > /tmp/secrets-after.json
+          python3 - <<'PY'
+          import json, os, copy
+          before=json.load(open("/tmp/before.json"))
+          after=json.load(open("/tmp/after.json"))
+          secrets=json.load(open("/tmp/secrets-after.json"))
+          if len(before) != 1 or len(after) != 1:
+              raise SystemExit("MACHINE_COUNT_CHANGED")
+          b,a=before[0],after[0]
+          bid=str(b.get("id") or b.get("ID") or "")
+          aid=str(a.get("id") or a.get("ID") or "")
+          if not bid or bid != aid:
+              raise SystemExit("MACHINE_ID_CHANGED")
+          bc=copy.deepcopy(b.get("config") or {})
+          ac=copy.deepcopy(a.get("config") or {})
+          be=dict(bc.pop("env",{}) or {})
+          ae=dict(ac.pop("env",{}) or {})
+          targets={
+              "SENTIENT_HF_NAMESPACE": os.environ["HF_NAMESPACE"],
+              "SENTIENT_HF_VERSIONED_REPOSITORY": os.environ["HF_VERSIONED_REPOSITORY"],
+              "SENTIENT_HF_WORKING_BUCKET": os.environ["HF_WORKING_BUCKET"],
+          }
+          for k,v in targets.items():
+              if ae.get(k) != v:
+                  raise SystemExit(f"TARGET_ENV_MISMATCH_{k}")
+          if {k:v for k,v in be.items() if k not in targets} != {k:v for k,v in ae.items() if k not in targets}:
+              raise SystemExit("UNRELATED_ENV_CHANGED")
+          if bc != ac:
+              raise SystemExit("NON_ENV_MACHINE_CONFIG_CHANGED")
+          for field in ("region","name"):
+              if b.get(field) != a.get(field):
+                  raise SystemExit(f"MACHINE_{field.upper()}_CHANGED")
+          names={
+              str(x.get("Name") or x.get("name") or "")
+              for x in secrets if isinstance(x,dict)
+          }
+          if "SENTIENT_HF_TOKEN" not in names:
+              raise SystemExit("SENTIENT_HF_TOKEN_SECRET_LOST")
+          for k in targets:
+              if k in names:
+                  raise SystemExit("HF_TARGET_ENV_BECAME_SECRET")
+          print("FLY_ENV_CONFIGURATION=PASS")
+          print("MACHINE_COUNT_AFTER=1")
+          print("RESOURCE_ENVELOPE_CHANGES=NONE")
+          print("UNRELATED_ENV_CHANGES=NONE")
+          print("HF_TOKEN_REMAINS_SECRET=true")
+          print("HF_NAMESPACE_CONFIGURED=true")
+          print("HF_VERSIONED_REPOSITORY_CONFIGURED=true")
+          print("HF_WORKING_BUCKET_CONFIGURED=true")
+          print("SECRET_NAMES_EXPOSED=false"
+          print("SECRET_VALUES_EXPOSED=false")
+          PY
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "GITHUB_ACTIONS_REQUIRED_FOR_RUNTIME=false"
+          echo "HF_PAID_INFERENCE_USED=false"
+          echo "HF_PAID_TRAINING_USED=false"
