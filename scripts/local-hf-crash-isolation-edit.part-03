@@ -1,0 +1,8 @@
+const providerIpcTypeSource=readFileSync(providerPath,"utf8");
+const providerIpcTypeRepaired=replaceOnce(
+  providerIpcTypeSource,
+  '    this.child.send(value);',
+  '    this.child.send(value as object);',
+  "PROVIDER_IPC_SERIALIZABLE",
+);
+writeFileSync(providerPath,providerIpcTypeRepaired);
