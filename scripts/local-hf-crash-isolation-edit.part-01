@@ -1,0 +1,123 @@
+{
+  return signal === "SIGABRT" ? 134 : 1;
+}
+
+const DEFAULT_LOCAL_HF_WORKER_FACTORY_V1: LocalHfWorkerFactoryV1 =
+  () => createLocalHfChildProcessPortV1();`,
+  "DEFAULT_FACTORY",
+);
+writeFileSync(providerPath, provider);
+
+const workerPath = "src/model/providers/huggingface-worker.ts";
+let worker = readFileSync(workerPath, "utf8");
+worker = replaceOnce(
+  worker,
+  'import { parentPort } from "node:worker_threads";\n',
+  "",
+  "WORKER_IMPORT",
+);
+worker = replaceOnce(
+  worker,
+  `if (parentPort === null) throw new Error("local_hf_worker_parent_port_missing");
+let pipelinePromise: Promise<PipelineLike> | null = null;`,
+  `const ipcSend = typeof process.send === "function" ? process.send.bind(process) : null;
+if (ipcSend === null) throw new Error("local_hf_worker_ipc_missing");
+let pipelinePromise: Promise<PipelineLike> | null = null;`,
+  "WORKER_IPC_INIT",
+);
+worker = replaceOnce(
+  worker,
+  'parentPort.on("message", (value: unknown) => {',
+  'process.on("message", (value: unknown) => {',
+  "WORKER_MESSAGE",
+);
+worker = replaceOnce(
+  worker,
+  `function post(response: WorkerResponse): void {
+  parentPort!.postMessage(response);
+}`,
+  `function post(response: WorkerResponse): void {
+  ipcSend!(response);
+}`,
+  "WORKER_POST",
+);
+writeFileSync(workerPath, worker);
+
+const testPath = "test/local-hf-worker-isolation.test.ts";
+let test = readFileSync(testPath, "utf8");
+test = replaceOnce(
+  test,
+  `import { EventEmitter } from "node:events";
+import test from "node:test";
+import { TransformersJsLocalHfRunnerV1, type LocalHfWorkerPortV1 } from "../src/model/providers/huggingface.js";`,
+  `import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { TransformersJsLocalHfRunnerV1, createLocalHfChildProcessPortV1, type LocalHfWorkerPortV1 } from "../src/model/providers/huggingface.js";`,
+  "TEST_IMPORTS",
+);
+if (test.includes("native abort in local HF child process is contained and retried")) {
+  throw new Error("TEST_ALREADY_PRESENT");
+}
+test += String.raw`
+
+test("native abort in local HF child process is contained and retried without terminating the parent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sentient-local-hf-child-"));
+  const childPath = join(dir, "fixture.mjs");
+  await writeFile(
+    childPath,
+    \`process.on("message", (m) => {
+  if (m.kind === "initialize") {
+    process.send({ id: m.id, ok: true, kind: "initialized" });
+    return;
+  }
+  if (m.kind === "generate" && process.env.LOCAL_HF_FIXTURE_MODE === "abort") {
+    process.abort();
+  }
+  if (m.kind === "generate") {
+    process.send({
+      id: m.id,
+      ok: true,
+      kind: "generated",
+      generation: {
+        text: "child process recovered",
+        inputTokens: 4,
+        outputTokens: 3,
+        totalTokens: 7
+      }
+    });
+  }
+});
+\`,
+    "utf8",
+  );
+
+  let launches = 0;
+  const runner = new TransformersJsLocalHfRunnerV1({
+    workerFactory: () => {
+      const mode = launches++ === 0 ? "abort" : "respond";
+      return createLocalHfChildProcessPortV1({
+        modulePath: childPath,
+        env: { LOCAL_HF_FIXTURE_MODE: mode },
+        diagnosticOutput: "ignore",
+      });
+    },
+  });
+
+  try {
+    const result = await runner.generate({
+      prompt: "survive native abort",
+      maxInputTokens: 32,
+      maxOutputTokens: 8,
+    });
+    assert.equal(result.text, "child process recovered");
+    assert.equal(launches, 2);
+  } finally {
+    await runner.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+`;
+writeFileSync(testPath, test);
