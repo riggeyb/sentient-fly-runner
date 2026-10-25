@@ -17,12 +17,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build and validate bounded rev7 diagnostic EngineeringJob request
+      - name: Build and validate bounded rev8 EngineeringJob request
         shell: bash
         run: |
           set -euo pipefail
-          node --check scripts/capability-tier-hardening-rev7-diagnostic-build-request.cjs
-          node scripts/capability-tier-hardening-rev7-diagnostic-build-request.cjs > /tmp/request.json
+          node --check scripts/capability-tier-hardening-rev8-build-request.cjs
+          node scripts/capability-tier-hardening-rev8-build-request.cjs > /tmp/request.json
           node - <<'NODE'
           const fs=require("fs");
           const r=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));
@@ -35,18 +35,19 @@ jobs:
                c.timeoutMs<1000||c.timeoutMs>600000) ||
              r.commands.reduce((n,c)=>n+c.timeoutMs,0)>r.timeoutMs ||
              r.timeoutMs>1800000 ||
-             r.commands.at(-1)?.category!=="test") throw Error("DIAGNOSTIC_REQUEST_INVALID");
+             r.commands.at(-1)?.category!=="test") throw Error("REV8_REQUEST_INVALID");
           const names=new Set(r.commands.map(c=>c.name));
-          for(const required of ["prebuild","apply","compat-phase0","compat-job2","inspect-spawn-tier-diagnostic","diagnostic-stop"]) {
-            if(!names.has(required)) throw Error("DIAGNOSTIC_REQUIRED_STEP_MISSING:"+required);
+          for(const required of ["prebuild","apply","compat-phase0","compat-job2","compat-spawn-tier-fixture","postbuild","authority-tests","governor-tests","diff-check"]) {
+            if(!names.has(required)) throw Error("REV8_REQUIRED_STEP_MISSING:"+required);
           }
           const forbidden=/deploy|resize|gpu|paid|secret|resource[-_ ]?increase/i;
-          if(r.commands.some(c=>forbidden.test(c.name))) throw Error("DIAGNOSTIC_FORBIDDEN_EFFECT_COMMAND");
-          console.log("DIAGNOSTIC_REQUEST_VALIDATED=true");
+          if(r.commands.some(c=>forbidden.test(c.name))) throw Error("REV8_FORBIDDEN_EFFECT_COMMAND");
+          if(names.has("diagnostic-stop")) throw Error("REV8_DIAGNOSTIC_STOP_PRESENT");
+          console.log("REV8_REQUEST_VALIDATED=true");
           console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
-      - name: Create non-pushing diagnostic EngineeringJob
+      - name: Create bounded EngineeringJob
         env:
           MCP_CLIENT_TOKEN: ${{ secrets.MCP_CLIENT_TOKEN }}
         shell: bash
