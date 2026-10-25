@@ -1,0 +1,62 @@
+name: Sentient HF Provider Readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Report Hugging Face configuration presence only
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=sentient-validation-runner
+          secrets="$(flyctl secrets list -a "$app" --json)"
+          machines="$(flyctl machines list -a "$app" --json)"
+          SECRETS_JSON="$secrets" MACHINES_JSON="$machines" python3 - <<'PY'
+          import json, os
+          secrets = json.loads(os.environ.get("SECRETS_JSON", "[]"))
+          machines = json.loads(os.environ.get("MACHINES_JSON", "[]"))
+          names = {
+              str(x.get("Name") or x.get("name") or "")
+              for x in secrets
+              if isinstance(x, dict)
+          }
+          envs = {}
+          for x in machines:
+              if not isinstance(x, dict):
+                  continue
+              config = x.get("config") or {}
+              env = config.get("env") or {}
+              if isinstance(env, dict):
+                  envs.update({str(k): str(v) for k, v in env.items()})
+          def secret_present(*candidates):
+              return any(c in names for c in candidates)
+          def env_present(*candidates):
+              return any(c in envs and bool(envs[c]) for c in candidates)
+          print("HF_WRITE_TOKEN_AVAILABLE=" + str(secret_present(
+              "HF_TOKEN", "HUGGINGFACE_TOKEN", "SENTIENT_HF_TOKEN"
+          )).lower())
+          print("HF_NAMESPACE_CONFIGURED=" + str(env_present(
+              "SENTIENT_HF_NAMESPACE", "HF_NAMESPACE"
+          )).lower())
+          print("HF_VERSIONED_REPOSITORY_CONFIGURED=" + str(env_present(
+              "SENTIENT_HF_VERSIONED_REPOSITORY", "HF_VERSIONED_REPOSITORY"
+          )).lower())
+          print("HF_WORKING_BUCKET_CONFIGURED=" + str(env_present(
+              "SENTIENT_HF_WORKING_BUCKET", "HF_WORKING_BUCKET"
+          )).lower())
+          print("SECRET_NAMES_EXPOSED=false")
+          print("SECRET_VALUES_EXPOSED=false")
+          PY
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "HF_PAID_INFERENCE_USED=false"
+          echo "HF_PAID_TRAINING_USED=false"
