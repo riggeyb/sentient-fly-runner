@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Show public rev2 spawn-tier and failing-test fragments
+      - name: Show public rev2 tier-mapping, spawn-tier and failing-test fragments
         shell: bash
         run: |
           set -euo pipefail
@@ -24,6 +24,7 @@ jobs:
           const fs=require("node:fs");
           const s=fs.readFileSync("/tmp/payload.mjs","utf8");
           const needles=[
+            'writeNew("src/authority/capability-tiers.ts"',
             'writeNew("test/capability-tier-authority.test.ts"',
             'replaceOnce("src/spawn/policy-authority.ts"',
             'replaceOnce("src/spawn/policy.ts"',
@@ -35,9 +36,9 @@ jobs:
               const next=s.indexOf("\nreplaceOnce(",pos+needle.length);
               const nextWrite=s.indexOf("\nwriteNew(",pos+needle.length);
               const candidates=[next,nextWrite].filter(x=>x>=0);
-              const end=candidates.length?Math.min(...candidates):Math.min(s.length,pos+12000);
+              const end=candidates.length?Math.min(...candidates):Math.min(s.length,pos+16000);
               process.stdout.write(`---${needle}:${count}---\n`);
-              process.stdout.write(s.slice(pos,Math.min(end,pos+12000)));
+              process.stdout.write(s.slice(pos,Math.min(end,pos+16000)));
               process.stdout.write("\n");
               pos+=needle.length;
             }
