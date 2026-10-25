@@ -1,5 +1,5 @@
 name: Final Cert Objective Failure Detail
-""/on":
+on:
   workflow_dispatch:
     inputs:
       objective_id:
@@ -36,25 +36,23 @@ jobs:
           state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
           if [ "$state" != "started" ]; then flyctl machine start "$mid" -a "$APP" >/dev/null; fi
           for _ in $(seq 1 90); do
-            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
-               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then
-              break
-            fi
+            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null && jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then break; fi
             sleep 2
           done
           jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null
           cat >/tmp/detail.mjs <<'NODE'
           import {PostgresSpawnObjectiveRepository as Repo} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
-          const id=String(process.env.CERT_ID??"").trim(),db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          const id=String(process.env.CERT_ID??"").trim();
+          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??").trim();
           if(!id||!db) throw new Error("CERT_DETAIL_BINDING_MISSING");
           const repo=new Repo({connectionString:db});
-          const clean=(v,n=500)=>String(v??"").replace(/[\r\n\0]/g," ").slice(0,n);
+          const clean=(v,n=1000)=>String(v??"").replace(/[\r\n\0]/g," ").slice(0,n);
           const scrub=(v,d=0)=>{
-            if(d>7)return "[truncated]";
+            if(d>6)return "[truncated]";
             if(v===null||typeof v==="boolean"||typeof v==="number")return v;
-            if(typeof v==="string")return clean(v,1000);
-            if(Array.isArray(v))return v.slice(0,50).map(x=>scrub(x,d+1));
-            if(!v||typeof v!=="object")return clean(v,200);
+            if(typeof v==="string")return clean(v);
+            if(Array.isArray(v))return v.slice(0,40).map(x=>scrub(x,d+1));
+            if(!v||typeof v!=="object")return clean(v);
             const o={};
             for(const [k,x] of Object.entries(v)){
               o[k]=/(token|secret|password|credential|authorization|cookie|database|url)/i.test(k)?"[REDACTED]":scrub(x,d+1);
@@ -65,16 +63,16 @@ jobs:
             const task=await repo.get("task",id);
             if(task?.kind!=="task") throw new Error("CERT_DETAIL_TASK_MISSING");
             const md=(task.metadata&&typeof task.metadata==="object"&&!Array.isArray(task.metadata))?task.metadata:{};
-            const result=md.result??null;
-            console.log("CERT_DETAIL_TASK_STATUS="+clean(task.status));
-            console.log("CERT_DETAIL_TASK_ERROR="+clean(md.error??"none"));
-            console.log("CERT_DETAIL_RESULT="+JSON.stringify(scrub(result)));
             const root=await repo.getObjectiveContinuation(id);
-            console.log("CERT_DETAIL_ROOT="+JSON.stringify(scrub({
-              revision:root?.revision??null,
-              terminal:root?.terminal??null,
-              dependencies:hroot?.evidenceDependencies??[]).map(d=>({id:d.id,status:d.status,subjectIdentity:d.subjectIdentity,evidenceId:d.evidenceId??null}))
-            })));
+            const detail={
+              taskStatus:task.status,
+              taskError:md.error??null,
+              result:md.result??null,
+              rootRevision:root?.revision??null,
+              rootTerminal:root?.terminal??null,
+              dependencies:(root?.evidenceDependencies??[]).map(d=>({id:d.id,status:d.status,subjectIdentity:d.subjectIdentity,evidenceId:d.evidenceId??null}))
+            };
+            console.log("CERT_DETAIL="+JSON.stringify(scrub(detail)));
             console.log("SECRET_VALUES_EXPOSED=false");
           } finally { await repo.close().catch(()=>undefined); }
           NODE
