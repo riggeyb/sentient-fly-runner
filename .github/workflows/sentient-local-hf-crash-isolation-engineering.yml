@@ -24,6 +24,7 @@ jobs:
         with:
           node-version: "22"
       - uses: superfly/flyctl-actions/setup-flyctl@master
+
       - name: Build and validate exact TIER_2 request
         shell: bash
         run: |
@@ -35,29 +36,105 @@ jobs:
           printf '%s  %s\n' '2acac4cde63408c355652393c8d2c5674729b01cfa711976f0e081f1fa1b5877' scripts/local-hf-crash-isolation-edit.part-02 | sha256sum -c -
           cat /tmp/local-hf-crash-isolation-edit.base.mjs scripts/local-hf-crash-isolation-edit.part-02 > /tmp/local-hf-crash-isolation-edit.mjs
           node --check /tmp/local-hf-crash-isolation-edit.mjs
-          node - <<'NODE' > /tmp/request.json
-         ÛÛœİœÏ\™\]Z\™J™œÈŠNÂˆÛÛœİY]ÛÙOYœËœ™XYš[TŞ[˜Ê‹İ\ÛØØ[Z‹XÜ˜\ÚZ\ÛÛ][Û‹YY]›ZœÈ‹]ŠNÂˆÛÛœİ™\]Y\İ^Âˆ™\ÎˆœšYÙÙ^X‹ÜÙ[Y[‹ˆœ˜[˜ÚˆœÙ[Y[\›ÙXİ[Û‹XÛÛ\ÜÚ][Û‹LŒŒLMÈ‹ˆ^XİYXYˆÙMLXÍØX˜ÍNÙXMÌLL™XÌÎÌH‹ˆ^XİY™YNˆŒÙŒNLY™XYYMØŒN˜™XLXÌM˜YXY˜˜ØÌXNN‹ˆØš™Xİ]™RYˆ”ÑS•QS•Ô“ÕUS‘WÓĞĞSÒ—ĞÔTÒÒTÓÓUSÓ—ÌŒŒLH‹ˆXİ[Û’Yˆ›ØØ[Z‹[˜]]™KXÚ[\›ØÙ\ÜËZ\ÛÛ][Û‹]ŒH‹ˆ]]Üš^™Y]Î–ÂˆœÜ˜ËÛ[Ù[Ü›İšY\œËÚYÙÚ[™Ù˜XÙKÈ‹ˆœÜ˜ËÛ[Ù[Ü›İšY\œËÚYÙÚ[™Ù˜XÙK]ÛÜšÙ\‹È‹ˆ\İÛØØ[Z‹]ÛÜšÙ\‹Z\ÛÛ][Û‹\İÈ‚ˆKˆ]]Üš^˜][Û’Y[]Nˆ\Ù\”ÑS•QS•Ô“ÕUS‘WÓÔTUSÓSÑU‘SÔQS•ÕŒH‹ˆ]]Üš^˜][Û”™X\ÛÛˆ”™\X]Y]™H˜\N‘\œ›ÜˆÒQĞP”•Ü˜\Ú\È\›Z[˜]HH]]Üš]]]™HÙ[Y[ÜİÚ[HØØ[YÙÚ[™È˜XÙHÓ“–[™™\™[˜ÙH[œÈ[œÚYHÛÜšÙ\—İ™XYËˆ\ÛÛ]HHØ[YHØØ[^™\›ËXÛÜİ[™™\™[˜ÙH›İØÛÛ[ˆ[ˆÔÈÚ[›ØÙ\ÜÈÛÈ˜]]™HX›ÜÈ\™HÛÛZ[™Y[™™]šYYÚ]İ]Ú[™Ú[™È[Ù[]]Üš]K™\Ûİ\˜Ù\ËÜˆZYXÛÛ\]HÛXŞKˆ‹ˆÛXŞU™\œÚ[ÛˆœÙ[Y[XØ\Xš[]K]Y\‹İŒH‹ˆØš™Xİ]™Nˆ”“ÕUS‘WÓĞĞSÒ—ÓUU‘WĞÔTÒÒTÓÓUSÓ—ÕŒNˆ™\XÙHH›ÙXİ[ÛˆØØ[YÙÚ[™È˜XÙHÛÜšÙ\—İ™XYÈ›İ[™\HÚ][ˆÔÈÚ[\›ØÙ\ÜÈ›İ[™\HÚ[H™\Ù\š[™ÈHØØ[•ÛÜšÙ\”ÜŒH™\]Y\İÜ™\ÜÛœÙHÛÛ˜Xİİ\œ™[Û[ÛLˆ[Ù[Ü™]š\Ú[Û‹ÜMÔHÛÛ™šYİ\˜][Û‹Û™K\™]H™Z]š[Ü‹X›ÜÙ[X[XÜË[Ù[›Û‹X]]Üš]K[™™\›Ë\ZYXÛÛ\]HÛXŞKˆØ[š]^™HHÚ[[š\›Û›Y[ÈH˜\œ›İÈ[[YKÛ™]ÛÜšÈ[İÛ\İÛÈˆÜš]HÙXÜ™]È[™[œ™[]YÜ™Y[X[È\™H›İ[š\š]YˆYH™X[Ú[\›ØÙ\ÜÈ™YÜ™\ÜÚ[ÛˆÚ\™HHš\œİÚ[›ØÙ\ÜË˜X›Ü
 
-\È\š[™ÈÙ[™\˜][Ûˆ[™H]]Üš]]]™H\™[İ\š]™\Ë™XÜ™X]\ÈHÚ[[™İXØÙYYËˆ›È\Ş[Y[™\Ûİ\˜ÙHÚ[™ÙKÛXŞKØ]]Üš]H]]][Û‹[Ù[Ú[™ÙKZYÛÛ\]KÙ\YšXØ][ÛˆÚ[™ÙKÜˆ\İÜšXØ[\İ]HÛX[\ˆ‹ˆÛÛ[X[™Î–ÂˆÛ˜[YNˆš[œİ[ZœË[›Ë[˜]]™K\ØÜš\È‹Ø]YÛÜNˆœÚ[‹ÛÛ[X[™ˆ›œH‹\™ÜÎ–È˜ÚH‹‹KZYÛ›Ü™K\ØÜš\È—K[Y[İ]\ÎŒÌKˆÛ˜[YNˆœ™Y›YÚXZ[‹Ø]YÛÜNˆ˜Z[‹ÛÛ[X[™ˆ›œH‹\™ÜÎ–Èœ[ˆ‹˜Z[—K[Y[İ]\ÎŒLŒKˆÛ˜[YNˆœ™Y›YÚ[ØØ[Z‹]\İÈ‹Ø]YÛÜNˆ\İ‹ÛÛ[X[™ˆ››ÙH‹\™ÜÎ–È‹K]\İ‹™\İİ\İÛØØ[Z‹]ÛÜšÙ\‹Z\ÛÛ][Û‹\İšœÈ‹™\İİ\İÜ\ÙLË[ØØ[Z‹XY\\‹\İšœÈ‹™\İİ\İÜ›ÙXİ[Û‹\\ÙLËXÛÙÛš][Û‹\İšœÈ—K[Y[İ]\ÎŒNKˆÛ˜[YNˆš[\[Y[XÚ[\›ØÙ\ÜËZ\ÛÛ][Ûˆ‹Ø]YÛÜNˆ™Y]‹ÛÛ[X[™ˆ››ÙH‹\™ÜÎ–È‹KZ[œ]]\O[[Ù[H‹‹YH‹Y]ÛÙWK[Y[İ]\ÎŒÌKˆÛ˜[YNˆ˜Z[XY\‹XÚ[™ÙH‹Ø]YÛÜNˆ˜Z[‹ÛÛ[X[™ˆ›œH‹\™ÜÎ–Èœ[ˆ‹˜Z[—K[Y[İ]\ÎŒLŒKˆÛ˜[YNˆ›ØØ[Z‹XÜ˜\ÚZ\ÛÛ][Û‹]\İÈ‹Ø]YÛÜNˆ\İ‹ÛÛ[X[™ˆ››ÙH‹\™ÜÎ–È‹K]\İ‹™\İİ\İÛØØ[Z‹]ÛÜšÙ\‹Z\ÛÛ][Û‹\İšœÈ‹™\İİ\İÜ\ÙLË[ØØ[Z‹XY\\‹\İšœÈ‹™\İİ\İÜ›ÙXİ[Û‹\\ÙLËXÛÙÛš][Û‹\İšœÈ‹™\İİ\İÙİÌË\™\Ù[][Û‹[Û›K[ØØ[Z‹\İšœÈ—K[Y[İ]\ÎŒKˆÛ˜[YNˆ™Y™‹XÚXÚÈ‹Ø]YÛÜNˆ\İ‹ÛÛ[X[™ˆ™Ú]‹\™ÜÎ–È™Y™ˆ‹‹KXÚXÚÈ—K[Y[İ]\ÎŒÌBˆKˆÛÛ[Z]Y\ÜØYÙNˆ™š^ˆ\ÛÛ]HØØ[ˆ˜]]™H[[YH[ˆÚ[›ØÙ\ÜÈ‹ˆ[Y[İ]\ÎŒLŒˆNÂˆ›ØÙ\ÜËœİİ]Üš]J”ÓÓ‹œİš[™ÚYJ™\]Y\İ
-JNÂˆ“ÑBˆ›ÙHH	Ó“ÑIÂˆÛÛœİœÏ\™\]Z\™J™œÈŠNÂˆ6öç7BƒÔ¥4ôâç'6R†g2ç&VDf–ÆU7–æ2‚"÷F×÷&WVW7Bæ§6öâ"Â'WFc‚"’“°¢½¹ÍĞÁ…Ñ¡Ìõl(€€€€€€€€€€€€‰ÍÉŒ½µ½‘•°½ÁÉ½Ù¥‘•ÉÌ½¡Õ¥¹™…”¹ÑÌˆ°(€€€€€€€€€€€€‰ÍÉŒ½µ½‘•°½ÁÉ½Ù¥‘•ÉÌ½¡Õ¥¹™…”µİ½É­•È¹ÑÌˆ°(€€€€€€€€€€€€‰Ñ•ÍĞ½±½…°µ¡˜µİ½É­•Èµ¥Í½±…Ñ¥½¸¹Ñ•ÍĞ¹ÑÌˆ(€€€€€€€€€tì(€€€€€€€€€¥˜¡à¹•áÁ•Ñ•‘!•…„ôôˆİÔÑ”Á˜ÕˆÜİˆØÕ‰ŒĞäàÑÕ„ØØÜÀàÑ”ÄÉ•ˆÜÌáŒÄˆ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰!}5%M5Q ˆ¤ì(€€€€€€€€€¥˜¡à¹•áÁ•Ñ•‘QÉ•”„ôôˆÍ˜ÄäÈå™•…ÀÕÄİˆÄàÉ‰•„ÈåŒÄØá™…•…™‰ŒÅ„äàˆ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰QI}5%M5Q ˆ¤ì(€€€€€€€€€¥˜¡à¹Á½±¥åY•ÉÍ¥½¸„ôô‰Í•¹Ñ¥•¹Ğµ…Á…‰¥±¥ÑäµÑ¥•È½ØÄˆ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰A=1%e}5%M5Q ˆ¤ì(€€€€€€€€€¥˜¡)M=8¹ÍÑÉ¥¹¥™ä¡à¹…ÕÑ¡½É¥é•‘A…Ñ¡Ì¤„ôõ)M=8¹ÍÑÉ¥¹¥™ä¡Á…Ñ¡Ì¤¤Ñ¡É½Ü¹•ÜÉÉ½È ‰M=A}5%M5Q ˆ¤ì(€€€€€€€€€¥˜ …ÉÉ…ä¹¥ÍÉÉ…ä¡à¹½µµ…¹‘Ì¥ññà¹½µµ…¹‘Ì¹±•¹Ñ „ôôİññà¹½µµ…¹‘Ì¹…Ğ ´Ä¤ü¹…Ñ•½Éä„ôô‰Ñ•ÍĞˆ¤Ñ¡É½Ü¹•ÜÉÉ½È ‰=559}MQ}5%M5Q ˆ¤ì(€€€€€€€€€½¹Í½±”¹±½œ ‰IEUMQ}	%9%9õAMLˆ¤ì(€€€€€€€€€½¹Í½±”¹±½œ ‰IEUMQ}Q%HôÈˆ¤ì(€€€€€€€€€console.log("DEPLOY_ON_SUCCESS=false");
+          node - <<'NODE' > /tmp/request.json
+          const fs=require("fs");
+          const editCode=fs.readFileSync("/tmp/local-hf-crash-isolation-edit.mjs","utf8");
+          const request={
+            repo:"riggeyb/sentient",
+            branch:"sentient-production-composition-20261017",
+            expectedHead:"7d54e0f5b77b65bc4984cd5a667084e12eb738c1",
+            expectedTree:"3f1929fead05d17b182bea29c168faeafbcc1a98",
+            objectiveId:"SENTIENT_ROUTINE_LOCAL_HF_CRASH_ISOLATION_20261025",
+            actionId:"local-hf-native-child-process-isolation-v1",
+            authorizedPaths:[
+              "src/model/providers/huggingface.ts",
+              "src/model/providers/huggingface-worker.ts",
+              "test/local-hf-worker-isolation.test.ts"
+            ],
+            authorizationIdentity:"user:SENTIENT_ROUTINE_OPERATIONAL_DEVELOPMENT_V1",
+            authorizationReason:"Repeated live Napi::Error SIGABRT crashes terminate the authoritative Sentient host while local Hugging Face ONNX inference runs inside worker_threads. Isolate the same local-zero-cost inference protocol in an OS child process so native aborts are contained and retried without changing model, authority, resources, or paid-compute policy.",
+            policyVersion:"sentient-capability-tier/v1",
+            objective:"ROUTINE_LOCAL_HF_NATIVE_CRASH_ISOLATION_V1: Replace the production local Hugging Face worker_threads boundary with an OS child-process boundary while preserving the LocalHfWorkerPortV1 request/response contract, current SmolLM2 model/revision/q4 CPU configuration, one-retry behavior, abort semantics, model non-authority, and zero-paid-compute policy. Sanitize the child environment to a narrow runtime/network allowlist so HF write secrets and unrelated credentials are not inherited. Add a real child-process regression where the first child process.abort()s during generation and the authoritative parent survives, recreates a child, and succeeds. No deployment, resource change, policy/authority mutation, model change, paid compute, certification change, or historical-state cleanup.",
+            commands:[
+              {name:"install-js-no-native-scripts",category:"shell",command:"npm",args:["ci","--ignore-scripts"],timeoutMs:300000},
+              {name:"preflight-build",category:"build",command:"npm",args:["run","build"],timeoutMs:120000},
+              {name:"preflight-local-hf-tests",category:"test",command:"node",args:["--test","dist/test/local-hf-worker-isolation.test.js","dist/test/phase3-local-hf-adapter.test.js","dist/test/production-phase3-cognition.test.js"],timeoutMs:180000},
+              {name:"implement-child-process-isolation",category:"edit",command:"node",args:["--input-type=module","-e",editCode],timeoutMs:30000},
+              {name:"build-after-change",category:"build",command:"npm",args:["run","build"],timeoutMs:120000},
+              {name:"local-hf-crash-isolation-tests",category:"test",command:"node",args:["--test","dist/test/local-hf-worker-isolation.test.js","dist/test/phase3-local-hf-adapter.test.js","dist/test/production-phase3-cognition.test.js","dist/test/dots3-presentation-only-local-hf.test.js"],timeoutMs:240000},
+              {name:"diff-check",category:"test",command:"git",args:["diff","--check"],timeoutMs:30000}
+            ],
+            commitMessage:"fix: isolate local HF native runtime in child process",
+            timeoutMs:1200000
+          };
+          process.stdout.write(JSON.stringify(request));
+          NODE
+
+          node - <<'NODE'
+          const fs=require("fs");
+          const x=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));
+          const paths=[
+            "src/model/providers/huggingface.ts",
+            "src/model/providers/huggingface-worker.ts",
+            "test/local-hf-worker-isolation.test.ts"
+          ];
+          if(x.expectedHead!=="7d54e0f5b77b65bc4984cd5a667084e12eb738c1") throw new Error("HEAD_MISMATCH");
+          if(x.expectedTree!=="3f1929fead05d17b182bea29c168faeafbcc1a98") throw new Error("TREE_MISMATCH");
+          if(x.policyVersion!=="sentient-capability-tier/v1") throw new Error("POLICY_MISMATCH");
+          if(JSON.stringify(x.authorizedPaths)!==JSON.stringify(paths)) throw new Error("SCOPE_MISMATCH");
+          if(!Array.isArray(x.commands)||x.commands.length!==7||x.commands.at(-1)?.category!=="test") throw new Error("COMMAND_SET_MISMATCH");
+          console.log("REQUEST_BINDING=PASS");
+          console.log("REQUEST_TIER=2");
+          console.log("DEPLOY_ON_SUCCESS=false");
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
+
       - name: Create EngineeringJob through resident Governor
         shell: bash
         run: |
           set -euo pipefail
           cat >/tmp/create-engineering.mjs <<'NODE'
           import { readFile } from "node:fs/promises";
-         ÛÛœİÚÙ[Tİš[™Ê›ØÙ\ÜË™[‹”ÑS•QS•ÑS‘ÒS‘QT’S‘×ĞTWÕÒÑSÏÈˆŠKš[J
-NÂˆYŠ]ÚÙ[ŠH›İÈ™]È\œ›ÜŠ‘ÓÕ‘T““Ô—Ô‘TÒQS•ÑS‘ÒS‘QT’S‘×ĞÔ‘QS•PSÓRTÔÒS‘ÈŠNÂˆÛÛœİ™\]Y\İR”ÓÓ‹œ\œÙJ]ØZ]™XYš[J‹İ\Ü™\]Y\İšœÛÛˆ‹]ŠJNÂˆ6öç7B#Öv—BfWF6‚‚&‡GG¢òó#rããã£ƒƒ÷cöVæv–æVW&–ærö¦ö'2"Ç°¢ÖWF†öC¢%õ5B"À¢†VFW'3§¶WF†÷&—¦F–öã¢$&V&W""·Fö¶VâÂ&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ'ÒÀ¢&öG“¤¥4ôâç7G&–æv–g’‡&WVW7B’À¢6–væÃ¤&÷'E6–væÂçF–ÖV÷WBƒ3¢Ò“°¢6öç7B&sÖv—B"çFW‡B‚“°¢ÆWB&öG“×·Ó°¢G'—¶&öG“Ô¥4ôâç'6R‡&r—Ö6F6‡·Ğ¢6öç7B÷WC×´…EEõ5DEU3§"ç7FGW7Ó°¢f÷"†6öç7B²öb²&6öçG&7B"Â&¦ö$–B"Â'&Wò"Â&'&æ6‚"Â&W‡V7FVD†VB"Â'7FGW2"Â&7&VFVDB%Ò’–b†²–â&öG’’÷WE¶µÓÖ&öG•¶µÓ°¢–b†&öG’æWF†÷&—G•&V6V—BbgG—Vöb&öG’æWF†÷&—G•&V6V—CÓÓÒ&ö&¦V7B"—°¢6öç7BÖ&öG’æWF†÷&—G•&V6V—C°¢÷WBæWF†÷&—G•&V6V—C×°¢7F–öä–C¦æ7F–öä–CóöçVÆÂÀ¢7F–öåG—S¦æ7F–öåG—SóöçVÆÂÀ¢…Á…‰¥±¥ÑåQ¥•Èé„¹…Á…‰¥±¥ÑåQ¥•Èüı¹Õ±°°(€€€€€€€€€€€€€Á½±¥åY•ÉÍ¥½¸é„¹Á½±¥åY•ÉÍ¥½¸üı¹Õ±°°(€€€€€€€€€€€€€Í½ÕÉ•M¡„é„¹Í½ÕÉ•M¡„üı¹Õ±°°(€€€€€€€€€€€€€Í½ÕÉ•QÉ•”é„¹Í½ÕÉ•QÉ•”üı¹Õ±°°(€€€€€€€€€€€€€…ÕÑ¡½É¥é•‘M½Á”é„¹…ÕÑ¡½É¥é•‘M½Á”üı¹Õ±°(€€€€€€€€€€€ôì(€€€€€€€€€ô(€€€€€€€€€½¹Í½±”¹±½œ¡)M=8¹ÍÑÉ¥¹¥™ä¡½ÕĞ¤¤ì(€€€€€€€€€¥˜¡È¹ÍÑ…ÑÕÌ„ôôÈÀÈñğÑåÁ•½˜‰½‘ä¹©½‰%„ôô‰ÍÑÉ¥¹œˆñğ€…‰½‘ä¹©½‰%¤ÁÉ½•ÍÌ¹•á¥Ğ ÌÄ¤ì(€€€€€€€€€¥˜¡‰½‘ä¹•áÁ•Ñ•‘!•…„ôõÉ•ÅÕ•ÍĞ¹•áÁ•Ñ•‘!•…¤ÁÉ½•ÍÌ¹•á¥Ğ ÌÈ¤ì(€€€€€€€€€console.log("ENGINEERING_CREATE=PASS");
+          const token=String(process.env.SENTIENT_ENGINEERING_API_TOKEN??"").trim();
+          if(!token) throw new Error("GOVERNOR_RESIDENT_ENGINEERING_CREDENTIAL_MISSING");
+          const request=JSON.parse(await readFile("/tmp/request.json","utf8"));
+          const r=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{
+            method:"POST",
+            headers:{authorization:"Bearer "+token,"content-type":"application/json"},
+            body:JSON.stringify(request),
+            signal:AbortSignal.timeout(30000)
+          });
+          const raw=await r.text();
+          let body={};
+          try{body=JSON.parse(raw)}catch{}
+          const out={HTTP_STATUS:r.status};
+          for(const k of ["contract","jobId","repo","branch","expectedHead","status","createdAt"]) if(k in body) out[k]=body[k];
+          if(body.authorityReceipt&&typeof body.authorityReceipt==="object"){
+            const a=body.authorityReceipt;
+            out.authorityReceipt={
+              actionId:a.actionId??null,
+              actionType:a.actionType??null,
+              capabilityTier:a.capabilityTier??null,
+              policyVersion:a.policyVersion??null,
+              sourceSha:a.sourceSha??null,
+              sourceTree:a.sourceTree??null,
+              authorizedScope:a.authorizedScope??null
+            };
+          }
+          console.log(JSON.stringify(out));
+          if(r.status!==202 || typeof body.jobId!=="string" || !body.jobId) process.exit(31);
+          if(body.expectedHead!==request.expectedHead) process.exit(32);
+          console.log("ENGINEERING_CREATE=PASS");
           console.log("JOB_ID="+body.jobId);
           console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
+
           request_b64="$(base64 -w0 /tmp/request.json)"
           script_b64="$(base64 -w0 /tmp/create-engineering.mjs)"
           app=sentient-deployment-governor
-          id="$(flyctl machines list -a "$app" --json | jq -r 'sort_by(.id) | .[0].id // empty')"
+          id="$(flyctl machines list -a "$app" --json | jq -r '[.[] | select((.config.auto_destroy // false) != true)] | sort_by(.id) | .[0].id // empty')"
           test -n "$id"
           before="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
           test -n "$before"
