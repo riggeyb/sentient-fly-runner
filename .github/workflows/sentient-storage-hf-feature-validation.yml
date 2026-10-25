@@ -1,0 +1,77 @@
+name: Sentient storage HF feature validation
+on:
+  workflow_dispatch:
+    inputs:
+      feature_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FEATURE_BRANCH: sentient-storage-hf-operational-buildout-v1
+      FEATURE_SHA: ${{ inputs.feature_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.FEATURE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence exact feature identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$FEATURE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$FEATURE_SHA"
+          test "$(git branch --contains HEAD --format='%(refname:short)' | grep -Fx "$FEATURE_BRANCH" || true)" = "$FEATURE_BRANCH"
+      - name: Normalize dependency and generated tracking
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout "$FEATURE_BRANCH"
+          npm install --save-exact @huggingface/hub@2.17.9 --no-audit --no-fund
+          git rm -r --cached --ignore-unmatch node_modules dist
+          test -f package-lock.json
+          test -f .gitignore
+          test -f .dockerignore
+      - name: Build and focused regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          node --test \
+            dist/test/state-v2.test.js \
+            dist/test/state-mvp4-production.test.js \
+            dist/test/state-mvp5-knowledge.test.js \
+            dist/test/objective-continuation.test.js \
+            dist/test/phase7-model-improvement.test.js \
+            dist/test/phase7-production-lineage.test.js
+          test "$(git ls-files 'node_modules/**' | wc -l)" -eq 0
+          test "$(git ls-files 'dist/**' | wc -l)" -eq 0
+          echo "NODE_MODULES_TRACKING_REMOVED=true"
+          echo "DIST_TRACKING_REMOVED=true"
+          echo "BUILD_REPRODUCIBLE=PASS"
+      - name: Commit normalized feature tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-storage-coordinator"
+          git config user.email "sentient-storage-coordinator@users.noreply.github.com"
+          git add package.json package-lock.json .gitignore .dockerignore
+          if git diff --cached --quiet; then
+            echo "NO_NORMALIZATION_COMMIT_NEEDED=true"
+          else
+            git commit -m "chore: remove generated trees and pin HF storage dependency"
+            git push origin "HEAD:$FEATURE_BRANCH"
+          fi
+          echo "END_SHA=$(git rev-parse HEAD)"
+          echo "END_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "SECRET_VALUES_EXPOSED=false"
