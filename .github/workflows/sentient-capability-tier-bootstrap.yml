@@ -17,12 +17,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build and validate strict rev5 EngineeringJob request
+      - name: Build and validate strict rev6 EngineeringJob request
         shell: bash
         run: |
           set -euo pipefail
-          node --check scripts/capability-tier-hardening-rev5-build-request.cjs
-          node scripts/capability-tier-hardening-rev5-build-request.cjs > /tmp/request.json
+          node --check scripts/capability-tier-hardening-rev6-build-request.cjs
+          node scripts/capability-tier-hardening-rev6-build-request.cjs > /tmp/request.json
           node - <<'NODE'
           const fs=require("fs");
           const r=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));
