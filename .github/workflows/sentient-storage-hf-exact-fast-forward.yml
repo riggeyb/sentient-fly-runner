@@ -1,0 +1,80 @@
+name: Sentient Storage HF Exact Fast Forward
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_base_sha:
+        description: Exact canonical SHA before landing
+        required: true
+        type: string
+      target_sha:
+        description: Exact validated source SHA to land
+        required: true
+        type: string
+      target_tree:
+        description: Exact validated source tree to land
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-storage-hf-canonical-landing
+  cancel-in-progress: false
+
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Fence canonical candidate ancestry and certified tag
+        env:
+          EXPECTED_BASE_SHA: ${{ inputs.expected_base_sha }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          TARGET_TREE: ${{ inputs.target_tree }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_BASE_SHA"
+          git fetch origin storage-hf-buildout-20261025:refs/remotes/origin/storage-hf-buildout-20261025
+          test "$(git rev-parse origin/storage-hf-buildout-20261025)" = "$TARGET_SHA"
+          test "$(git rev-parse "$TARGET_SHA^{tree}")" = "$TARGET_TREE"
+          test "$(git rev-parse 'sentient-certified-2026-10-25^{}')" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
+          git merge-base  --is-ancestor "$EXPECTED_BASE_SHA" "$TARGET_SHA"
+          test "$(git rev-list --count "$EXPECTED_BASE_SHA..$TARGET_SHA")" -gt 0
+          echo "CANONICAL_FENCE=PASS"
+          echo "CANDIDATE_FENCE=PASS"
+          echo "CERTIFIED_TAG_PRESERVED=PASS"
+          echo "FAST_FORWARD_ANCESTRY=PASS"
+
+      - name: Recheck remote canonical and fast forward without force
+        env:
+          EXPECTED_BASE_SHA: ${{ inputs.expected_base_sha }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          TARGET_TREE: ${{ inputs.target_tree }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin sentient-production-composition-20261017:refs/remotes/origin/sentient-production-composition-20261017
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "$EXPECTED_BASE_SHA"
+          git push origin "$TARGET_SHA:refs/heads/sentient-production-composition-20261017"
+          git fetch origin sentient-production-composition-20261017:refs/remotes/origin/sentient-production-composition-20261017
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "$TARGET_SHA"
+          test "$(git rev-parse "$TARGET_SHA^{tree}")" = "$TARGET_TREE"
+          echo "CANONICAL_FAST_FORWARD=PASS"
+          echo "FINAL_CANONICAL_SHA=$TARGET_SHA"
+          echo "FINAL_CANONICAL_TREE=$TARGET_TREE"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "CERTIFIED_TAG_MUTATED=false"
+          echo "GIT_HISTORY_REWRITTEN=false"
+          echo "DEPLOYMENT_PERFORMED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
