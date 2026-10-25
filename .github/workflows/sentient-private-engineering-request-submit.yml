@@ -1,0 +1,147 @@
+name: Sentient Private Engineering Request Submit
+
+"on":
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Private riggeyb/sentient issue containing encoded EngineeringJob request
+        required: true
+        type: string
+      request_sha256:
+        description: SHA-256 of decoded request JSON
+        required: true
+        type: string
+      expected_head:
+        description: Exact authorized source head
+        required: true
+        type: string
+      expected_tree:
+        description: Exact authorized source tree
+        required: true
+        type: string
+      objective_id:
+        description: Exact objective identity
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-private-engineering-submit
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-deployment-governor
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      REQUEST_SHA256: ${{ inputs.request_sha256 }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+      EXPECTED_TREE: ${{ inputs.expected_tree }}
+      OBJECTIVE_ID: ${{ inputs.objective_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Submit private request through existing Governor
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE_NUMBER" =~ ^[0-9]{1,10}$ ]]
+          [[ "$REQUEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:/-]{1,200}$ ]]
+
+          machines="$(flyctl machines list -a "$APP" --json)"
+          machine_id="$(jq -r '[.[] | select((.config.auto_destroy // false) != true and .state == "started")] | .[0].id // empty' <<<"$machines")"
+          test -n "$machine_id"
+
+          cat > /tmp/submit-private-request.mjs <<'NODE'
+          import { createHash } from "node:crypto";
+          import { gunzipSync } from "node:zlib";
+
+          const issueNumber = required("ISSUE_NUMBER");
+          const expectedDigest = required("REQUEST_SHA256");
+          const expectedHead = required("EXPECTED_HEAD");
+          const expectedTree = required("EXPECTED_TREE");
+          const objectiveId = required("OBJECTIVE_ID");
+          const sourceToken = required("SENTIENT_SOURCE_GITHUB_TOKEN");
+          const engineeringToken = required("SENTIENT_ENGINEERING_API_TOKEN");
+
+          const issueResponse = await fetch(
+            `https://api.github.com/repos/riggeyb/sentient/issues/${issueNumber}`,
+            {
+              headers: {
+                authorization: `Bearer ${sourceToken}`,
+                accept: "application/vnd.github+json",
+                "user-agent": "sentient-governor-private-engineering-submit",
+              },
+              signal: AbortSignal.timeout(20_000),
+            },
+          );
+          if (!issueResponse.ok) fail(`PRIVATE_REQUEST_FETCH_HTTP_${issueResponse.status}`);
+          const issue = await issueResponse.json();
+          const body = typeof issue?.body === "string" ? issue.body : "";
+          const match = body.match(/REQUEST_BASE64_BEGIN\s+([A-Za-z0-9+/=\s]+?)\s+REQUEST_BASE64_END/);
+          if (!match) fail("PRIVATE_REQUEST_PAYLOAD_MISSING");
+          const compressed = Buffer.from(match[1].replace(/\s+/g, ""), "base64");
+          const requestBytes = gunzipSync(compressed);
+          const digest = createHash("sha256").update(requestBytes).digest("hex");
+          if (digest !== expectedDigest) fail("PRIVATE_REQUEST_DIGEST_MISMATCH");
+          const request = JSON.parse(requestBytes.toString("utf8"));
+
+          if (request.repo !== "riggeyb/sentient") fail("PRIVATE_REQUEST_REPO_MISMATCH");
+          if (request.branch !== "sentient-production-composition-20261017") fail("PRIVATE_REQUEST_BRANCH_MISMATCH");
+          if (request.expectedHead !== expectedHead) fail("PRIVATE_REQUEST_HEAD_MISMATCH");
+          if (request.expectedTree !== expectedTree) fail("PRIVATE_REQUEST_TREE_MISMATCH");
+          if (request.objectiveId !== objectiveId) fail("PRIVATE_REQUEST_OBJECTIVE_MISMATCH");
+          if (request.policyVersion !== "sentient-capability-tier/v1") fail("PRIVATE_REQUEST_POLICY_MISMATCH");
+          if (!Array.isArray(request.authorizedPaths) || request.authorizedPaths.length < 1 || request.authorizedPaths.length > 16) {
+            fail("PRIVATE_REQUEST_SCOPE_INVALID");
+          }
+          if (!Array.isArray(request.commands) || request.commands.length < 1 || request.commands.at(-1)?.category !== "test") {
+            fail("PRIVATE_REQUEST_FINAL_TEST_REQUIRED");
+          }
+
+          const response = await fetch("http://127.0.0.1:8080/v1/engineering/jobs", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${engineeringToken}`,
+              accept: "application/json",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(request),
+            signal: AbortSignal.timeout(30_000),
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) fail(`ENGINEERING_CREATE_HTTP_${response.status}`);
+          if (typeof result?.jobId !== "string" || !result.jobId) fail("ENGINEERING_JOB_ID_MISSING");
+          console.log(`ENGINEERING_JOB_ID=${clean(result.jobId)}`);
+          console.log(`ENGINEERING_STATUS=${clean(result.status ?? "unknown")}`);
+          console.log(`EXPECTED_HEAD=${expectedHead}`);
+          console.log(`EXPECTED_TREE=${expectedTree}`);
+          console.log(`OBJECTIVE_ID=${objectiveId}`);
+          console.log("PRIVATE_REQUEST_DIGEST=PASS");
+          console.log("PRIVATE_SOURCE_PAYLOAD_EXPOSED=false");
+          console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
+          console.log("SECRET_VALUES_EXPOSED=false");
+
+          function required(name) {
+            const value = String(process.env[name] ?? "").trim();
+            if (!value) fail(`${name}_MISSING`);
+            return value;
+          }
+          function clean(value) {
+            return String(value).replace(/[\r\n\0]/g, " ").slice(0, 240);
+          }
+          function fail(message) {
+            throw new Error(clean(message).replace(/[^A-Za-z0-9_.:-]/g, "_"));
+          }
+          NODE
+
+          script_b64="$(base64 -w0 /tmp/submit-private-request.mjs)"
+          remote="echo $script_b64 | base64 -d > /tmp/submit-private-request.mjs; ISSUE_NUMBER=$ISSUE_NUMBER REQUEST_SHA256=$REQUEST_SHA256 EXPECTED_HEAD=$EXPECTED_HEAD EXPECTED_TREE=$EXPECTED_TREE OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/submit-private-request.mjs; rc=\$?; rm -f /tmp/submit-private-request.mjs; exit \$rc"
+          flyctl ssh console -a "$APP" --machine "$machine_id" -C "sh -lc '$remote'"
