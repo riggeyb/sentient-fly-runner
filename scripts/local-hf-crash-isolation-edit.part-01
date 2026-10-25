@@ -68,30 +68,29 @@ test("native abort in local HF child process is contained and retried without te
   const childPath = join(dir, "fixture.mjs");
   await writeFile(
     childPath,
-    [
-      'process.on("message", (m) => {',
-      '  if (m.kind === "initialize") {',
-      '    process.send({ id: m.id, ok: true, kind: "initialized" });',
-      '    return;',
-      '  }',
-      '  if (m.kind === "generate" && process.env.LOCAL_HF_FIXTURE_MODE === "abort") {',
-      '    process.abort();',
-      '  }',
-      '  if (m.kind === "generate") {',
-      '    process.send({',
-      '      id: m.id,',
-      '      ok: true,',
-      '      kind: "generated",',
-      '      generation: {',
-      '        text: "child process recovered",',
-      '        inputTokens: 4,',
-      '        outputTokens: 3,',
-      '        totalTokens: 7',
-      '      }',
-      '    });',
-      '  }',
-      '});',
-    ].join("\n"),
+    \`process.on("message", (m) => {
+  if (m.kind === "initialize") {
+    process.send({ id: m.id, ok: true, kind: "initialized" });
+    return;
+  }
+  if (m.kind === "generate" && process.env.LOCAL_HF_FIXTURE_MODE === "abort") {
+    process.abort();
+  }
+  if (m.kind === "generate") {
+    process.send({
+      id: m.id,
+      ok: true,
+      kind: "generated",
+      generation: {
+        text: "child process recovered",
+        inputTokens: 4,
+        outputTokens: 3,
+        totalTokens: 7
+      }
+    });
+  }
+});
+\`,
     "utf8",
   );
 
