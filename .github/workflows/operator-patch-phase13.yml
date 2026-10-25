@@ -1,11 +1,8 @@
 name: Final Cert Phase4 Executor Exception Terminalization Repair
-on:
+"on":
   workflow_dispatch: {}
 permissions:
   contents: read
-concurrency:
-  group: final-cert-phase4-terminalization-repair
-  cancel-in-progress: false
 jobs:
   repair:
     runs-on: ubuntu-latest
@@ -16,87 +13,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          path: runner
+      - uses: actions/checkout@v4
+        with:
           repository: riggeyb/sentient
           ref: sentient-production-composition-20261017
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
+          path: sentient
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Patch exact source and add focused regression
+      - name: Patch, build, and test
         shell: bash
         run: |
           set -euo pipefail
+          cd sentient
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
           git fetch origin "$BRANCH"
           test "$(git rev-parse "origin/$BRANCH")" = "$BASE_SHA"
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path("src/phase4/multistep-autonomy.ts")
-          s=p.read_text()
-          old="""      const execution=await input.executor.execute(effectiveStep);
-      latestRef=execution.authoritativeResultRef;
-"""
-          new="""      let execution:StepExecutionV1;
-      try{
-        execution=await input.executor.execute(effectiveStep);
-      }catch(error){
-        const previousRevision=continuation.revision;
-        continuation=markObjectiveTerminal(continuation,{
-          expectedRevision:previousRevision,
-          status:"FAILED",
-          reasonRef:`phase4:${plan.planId}:${step.stepId}:executor-error`,
-        }).record;
-        await persist(input.continuationWriter,continuation,previousRevision);
-        throw error;
-      }
-      latestRef=execution.authoritativeResultRef;
-"""
-          if s.count(old)!=1:
-              raise SystemExit(f"phase4 execution anchor count={s.count(old)}")
-          p.write_text(s.replace(old,new))
-          PY
-          cat >> test/phase4-multistep-autonomy.test.ts <<'EOF'
-
-          test("Phase 4 terminalizes durable continuation before rethrowing an executor exception", async () => {
-            const persisted:Array<{status:string|null;reasonRef:string|null;revision:number}>=[];
-            await assert.rejects(
-              executeObjectivePlanV1({
-                objective:"Inspect the repository",
-                identity:{...identity,objectiveId:"executor-exception-objective"},
-                continuationWriter:{
-                  async upsertObjectiveContinuation(record){
-                    persisted.push({
-                      status:record.terminal?.status??null,
-                      reasonRef:record.terminal?.reasonRef??null,
-                      revision:record.revision,
-                    });
-                  },
-                },
-                executor:{
-                  async execute(){
-                    throw new Error("phase5_restart_retry_exhausted:test");
-                  },
-                },
-              }),
-              /phase5_restart_retry_exhausted:test/,
-            );
-            const terminal=persisted.at(-1);
-            assert.equal(terminal?.status,"FAILED");
-            assert.match(terminal?.reasonRef??"",/^phase4:plan-[0-9a-f]{8}:step-1:executor-error$/);
-            assert.ok((terminal?.revision??0)>0);
-          });
-          EOF
+          python3 ../runner/scripts/apply-phase4-terminalization-repair.py
           git diff --check
-          test "$(git diff --name-only | sort)" = "$(printf '%s\n' src/phase4/multistep-autonomy.ts test/phase4-multistep-autonomy.test.ts | sort)"
-      - name: Build and focused/cross-phase regressions
-        shell: bash
-        run: |
-          set -euo pipefail
           npm ci --no-audit --no-fund
           npm run build
           node --test \
+            dist/test/final-cert-phase4-executor-exception.test.js \
             dist/test/phase4-multistep-autonomy.test.js \
             dist/test/phase5-collaborative-convergence.test.js \
             dist/test/phase5-fly-restart-lease-retry.test.js \
@@ -105,15 +47,16 @@ jobs:
             dist/test/phase6-capability-integration.test.js \
             dist/test/phase7-model-improvement.test.js
           echo FINAL_CERT_PHASE4_EXCEPTION_TERMINALIZATION_TESTS=PASS
-      - name: Commit only exact tested repair if shared head unchanged
+      - name: Commit tested repair
         shell: bash
         run: |
           set -euo pipefail
+          cd sentient
           git fetch origin "$BRANCH"
           test "$(git rev-parse "origin/$BRANCH")" = "$BASE_SHA"
           git config user.name sentient-final-cert
           git config user.email sentient-final-cert@users.noreply.github.com
-          git add src/phase4/multistep-autonomy.ts test/phase4-multistep-autonomy.test.ts
+          git add src/phase4/multistep-autonomy.ts test/final-cert-phase4-executor-exception.test.ts
           git diff --cached --check
           git commit -m "fix: terminalize objective on executor exception"
           git push --force-with-lease="refs/heads/$BRANCH:$BASE_SHA" origin "HEAD:refs/heads/$BRANCH"
