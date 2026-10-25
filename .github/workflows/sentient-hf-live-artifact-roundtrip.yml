@@ -19,9 +19,9 @@ jobs:
       APP: sentient-validation-runner
       EXPECTED_MACHINE_ID: 8469e7b243d558
       EXPECTED_SOURCE_SHA: ff2e8164a2e6888f3b58b15fb143c73d016f4fb9
-      EXPECTED_SOURCE_TREE:
-        2a2806cf347c82cf8a3bb5359375293dcc352f2d
     steps:
+      - uses: actions/checkout@v4
+
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Fence exact Machine and preserve prior state
@@ -62,235 +62,11 @@ jobs:
           exit 1
 
       - name: Execute exactly one live HF artifact roundtrip
-        id: execute
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/sentient-hf-roundtrip.mjs <<'JS'
-          import { rm } from "node:fs/promises";
-          import { HuggingFaceHubTransportV1 } from "/app/dist/src/artifacts/huggingface-hub-transport.js";
-          import { HuggingFaceArtifactStorageV1 } from "/app/dist/src/artifacts/huggingface-storage.js";
-          import { runHuggingFaceVersionedArtifactRoundTripV1 } from "/http://app/dist/src/artifacts/huggingface-roundtrip.js";
-          import { ArtifactRegistryV1 } from "/app/dist/src/artifacts/registry.js";
-          import {
-            digestBytesV1,
-            evaluateExternalExportPolicyV1,
-          } from "/app/dist/src/artifacts/contracts.js";
-          import {
-            materializeArtifactCacheV1,
-            evictArtifactCacheV1,
-          } from "/app/dist/src/artifacts/cache.js";
-          import { PostgresStateRepository } from "/http://app/dist/src/state/postgres-state-repository.js";
-
-          const EXPECTED_SHA = "ff2e8164a2e6888f3b58b15fb143c73d016f4fb9";
-          const EXPECTED_TREE = "2a2806cf347c82cf8a3bb5359375293dcc352f2d";
-          const VERSIONED_PATH = "operational/sentient-hf-activation-v1/versioned-fixture.json";
-          const WORKING_PATH = "operational/sentient-hf-activation-v1/working-fixture.json";
-          const CACHE_DIR = "/tmp/sentient-hf-activation-cache-v1";
-          const encoder = new TextEncoder();
-
-          function required(name) {
-            const value = process.env[name]?.trim();
-            if (!value) throw new Error(`${name}_required`);
-            return value;
-          }
-          function assert(condition, message) {
-            if (!condition) throw new Error(message);
-          }
-          function sanitize(message, secrets) {
-            let out = String(message);
-            for (const secret of secrets) {
-              if (secret) out = out.split(secret).join("[REDACTED]");
-            }
-            return out.replace(/postgres(?:ql)?:/\/[^\si]+/gi, "postgresql://[REDACTED]");
-          }
-
-          const token = required("SENTIENT_HF_TOKEN");
-          const versionedRepository = required("SENTIENT_HF_VERSIONED_REPOSITORY");
-          const workingBucket = required("SENTIENT_HF_WORKING_BUCKET");
-          const namespace = required("SENTIENT_HF_NAMESPACE");
-          const databaseUrl = process.env.DATABASE_URL?.trim() || process.env.DIRECT_URL?.trim();
-          if (!databaseUrl) throw new Error("database_url_required");
-          const sourceSha = required("SENTIENT_RUNTIME_SHA");
-          const sourceTree = required("SENTIENT_RUNTIME_TREE");
-          assert(sourceSha === EXPECTED_SHA, "runtime_source_sha_mismatch");
-          assert(sourceTree === EXPECTED_TREE, "runtime_source_tree_mismatch");
-          assert(versionedRepository === `${namespace}/sentient-ml-artifacts`, "versioned_repository_mismatch");
-          assert(workingBucket === `${namespace}/sentient-working-ml`, "working_bucket_mismatch");
-
-          const repo = new PostgresStateRepository({ connectionString: databaseUrl });
-          const secrets = [token, databaseUrl];
-          try {
-            await repo.initialize();
-            const registry = new ArtifactRegistryV1(repo);
-            const transport = new HuggingFaceHubTransportV1({ accessToken: token });
-            const storage = new HuggingFaceArtifactStorageV1(transport, {
-              versionedRepository,
-              workingBucket,
-            });
-            const createdAt = new Date().toISOString();
-            const evidenceRefs = Object.freeze([
-              "sentient-hf-operational-activation-v1",
-              `source:${sourceSha}`,
-            ]);
-
-            const versionedBytes = encoder.encode(JSON.stringify({
-              contract: "sentient-hf-operational-activation-fixture/v1",
-              storageClass: "VERSIONED_ML",
-              classification: "PUBLIC",
-              synthetic: true,
-              payload: [1, 2, 3],
-            }));
-            const versioned = await runHuggingFaceVersionedArtifactRoundTripV1({
-              enabled: true,
-              sourceSha,
-              sourceTree,
-              createdAt,
-              createdBy: "SENTIENT_RUNTIME",
-              artifactType: "sentient-operational-hf-roundtrip-fixture",
-              path: VERSIONED_PATH,
-              bytes: versionedBytes,
-              mediaType: "application/json",
-              privacyClass: "PUBLIC",
-              licenseClass: "OPEN",
-              usageRights: "ALLOWED",
-              secretScanStatus: "CLEAR",
-              piiStatus: "CLEAR",
-              permittedStorageVisibility: "PUBLIC",
-              evidenceRefs,
-            }, { storage, registry });
-            assert(versioned.uploadVerified === true, "versioned_upload_not_verified");
-            assert(versioned.postgresBindingVerified === true, "versioned_postgres_binding_failed");
-            assert(versioned.roundTripRetrievalVerified === true, "versioned_roundtrip_retrieval_failed");
-            assert(versioned.remoteUriAloneTrusted === false, "versioned_remote_uri_became_authority");
-
-            const workingBytes = encoder.encode(JSON.stringify({
-              contract: "sentient-hf-operational-activation-fixture/v1",
-              storageClass: "WORKING_ML",
-              classification: "PUBLIC",
-              synthetic: true,
-              payload: [4, 5, 6],
-            }));
-            const workingDigest = digestBytesV1(workingBytes);
-            const workingArtifactId = `artifact:v1:WORKING_ML:${workingDigest}`;
-            const provisionalWorking = Object.freeze({
-              contractVersion: "sentient-artifacts/v1",
-              artifactId: workingArtifactId,
-              artifactClass: "WORKING_ML",
-              artifactType: "sentient-operational-hf-working-fixture",
-              sourceSha,
-              sourceTree,
-              storageProvider: "EXTERNAL",
-              artifactUri: "pending://hugging-face/working-artifact",
-              providerRevision: null,
-              sha256: workingDigest,
-              sizeBytes: workingBytes.byteLength,
-              mediaType: "application/json",
-              datasetRevision: null,
-              parentModelRevision: null,
-              trainingRunId: null,
-              evaluationReceiptId: null,
-              createdAt,
-              createdBy: "SENTIENT_RUNTIME",
-              verificationStatus: "UNVERIFIED",
-              provenanceStatus: "VERIFIED",
-              policyStatus: "UNREVIEWED",
-              sentientAuthorization: "AUTHORIZED",
-              promotionStatus: "APPROVED",
-              privacyClass: "PUBLIC",
-              licenseClass: "OPEN",
-              usageRights: "ALLOWED",
-              secretScanStatus: "CLEAR",
-              piiStatus: "CLEAR",
-              permittedStorageVisibility: "PUBLIC",
-              retentionClass: "WORKING_ML",
-              runtimeEligible: false,
-              lifecycleStatus: "INGESTED",
-              references: Object.freeze([]),
-              retentionPinned: false,
-              retentionExpiresAt: null,
-              evidenceRefs,
-            });
-            const workingPolicy = evaluateExternalExportPolicyV1(provisionalWorking);
-            assert(workingPolicy.allowed, `working_policy_blocked:${workingPolicy.reasons.join(",")}`);
-            const workingExportAuthorized = Object.freeze({
-              ...provisionalWorking,
-              policyStatus: "ALLOWED",
-            });
-            const uploadedWorking = await storage.upload(
-              workingExportAuthorized,
-              WORKING_PATH,
-              workingBytes,
-            );
-            assert(uploadedWorking.providerRevision === null, "working_bucket_revision_must_be_null");
-            const workingRetrieved = await storage.retrieveVerified(uploadedWorking);
-            assert(
-              digestBytesV1(workingRetrieved) === workingDigest &&
-              workingRetrieved.byteLength === workingBytes.byteLength,
-              "working_roundtrip_verification_failed",
-            );
-            const trustedWorking = Object.freeze({
-              ...uploadedWorking,
-              verificationStatus: "VERIFIED",
-              provenanceStatus: "VERIFIED",
-              policyStatus: "ALLOWED",
-              sentientAuthorization: "AUTHORIZED",
-              promotionStatus: "APPROVED",
-              runtimeEligible: true,
-              lifecycleStatus: "APPROVED",
-            });
-            await registry.register(trustedWorking);
-            const persistedWorking = await registry.get(workingArtifactId);
-            assert(
-              persistedWorking?.artifactUri === trustedWorking.artifactUri &&
-              persistedWorking?.sha256 === workingDigest &&
-              persistedWorking?.providerRevision === null,
-              "working_postgres_binding_failed",
-            );
-
-            const cacheFirst = await materializeArtifactCacheV1(
-              trustedWorking,
-              CACHE_DIR,
-              () => storage.retrieveVerified(trustedWorking),
-            );
-            await evictArtifactCacheV1(cacheFirst);
-            const cacheSecond = await materializeArtifactCacheV1(
-              trustedWorking,
-              CACHE_DIR,
-              () => storage.retrieveVerified(trustedWorking),
-            );
-            assert(cacheFirst === cacheSecond, "cache_reconstruction_path_changed");
-            await evictArtifactCacheV1(cacheSecond);
-            await rm(CACHE_DIR, { recursive: true, force: true });
-
-            console.log(`VERSIONED_ARTIFACT_ID=${versioned.artifactId}`);
-            console.log(`WORKING_ARTIFACT_ID=${workingArtifactId}`);
-            console.log(`VERSIONED_PROVIDER_REVISION=${versioned.providerRevision}`);
-            console.log("FIRST_HF_ARTIFACT_ROUNDTRIP=PASS");
-            console.log("HF_VERSIONED_WRITE=PASS");
-            console.log("HF_WORKING_WRITE=PASS");
-            console.log("POSTGRES_ARTIFACT_BINDING=PASS");
-            console.log("DIGEST_VERIFICATION=PASS");
-            console.log("PROVENANCE_BINDING=PASS");
-            console.log("PRIVACY_GATE=PASS");
-            console.log("LICENSE_GATE=PASS");
-            console.log("SECRET_SCAN_GATE=PASS");
-            console.log("ROUNDTRIP_RETRIEVAL=PASS");
-            console.log("CACHE_RECONSTRUCTABLE=PASS");
-            console.log("REMOTE_URI_ALONE_NOT_AUTHORITY=true");
-            console.log("HF_PAID_INFERENCE_USED=false");
-            console.log("HF_PAID_TRAINING_USED=false");
-            console.log("SECRET_VALUES_EXPOSED=false");
-            console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
-          } catch (error) {
-            console.error(`HF_ROUNDTRIP_ERROR=${sanitize(error instanceof Error ? error.message : error, secrets)}`);
-            console.error("SECRET_VALUES_EXPOSED=false");
-            process.exitCode = 1;
-          } finally {
-            await repo.close().catch(() => undefined);
-          }
-          JS
-          script_b64="$(base64 -w0 /tmp/sentient-hf-roundtrip.mjs)"
+          test -f scripts/sentient-hf-live-artifact-roundtrip.mjs
+          script_b64="$(base64 -w0 scripts/sentient-hf-live-artifact-roundtrip.mjs)"
           remote="printf %s '$script_b64' | base64 -d >/tmp/sentient-hf-roundtrip.mjs && node /tmp/sentient-hf-roundtrip.mjs; rc=\$?; rm -f /tmp/sentient-hf-roundtrip.mjs; exit \$rc"
           set +e
           output="$(flyctl ssh console -a "$APP" --machine "${{ steps.fence.outputs.machine_id }}" -C "sh -lc \"$remote\"" 2>&1)"
@@ -311,7 +87,7 @@ jobs:
             ROUNDTRIP_RETRIEVAL=PASS \
             CACHE_RECONSTRUCTABLE=PASS \
             REMOTE_URI_ALONE_NOT_AUTHORITY=true \
-            HF_PAID_INFERENCE_USED=false \
+            HF_PAID_INFERENCE_USD=false \
             HF_PAID_TRAINING_USED=false \
             SECRET_VALUES_EXPOSED=false \
             PRIVATE_ACTIONS_BRIDGE_USED=false
