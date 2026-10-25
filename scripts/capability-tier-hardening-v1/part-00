@@ -1,0 +1,150 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
+function read(path) { return readFileSync(path, "utf8"); }
+function write(path, value) { writeFileSync(path, value); }
+function replaceOnce(path, needle, replacement) {
+  const source = read(path);
+  const first = source.indexOf(needle);
+  if (first < 0) throw new Error(`patch_missing:${path}:${needle.slice(0,80)}`);
+  if (source.indexOf(needle, first + needle.length) >= 0) throw new Error(`patch_ambiguous:${path}:${needle.slice(0,80)}`);
+  write(path, source.slice(0, first) + replacement + source.slice(first + needle.length));
+}
+function writeNew(path, value) {
+  if (existsSync(path)) throw new Error(`patch_target_exists:${path}`);
+  const slash = path.lastIndexOf("/");
+  if (slash >= 0) mkdirSync(path.slice(0, slash), { recursive: true });
+  write(path, value);
+}
+
+writeNew("src/authority/capability-tiers.ts", `export const CAPABILITY_TIER_POLICY_VERSION = "sentient-capability-tier/v1" as const;
+
+export type CapabilityTierV1 = 0 | 1 | 2 | 3 | 4;
+export type CapabilityActionTypeV1 =
+  | "repository_read"
+  | "postgres_read"
+  | "hf_artifact_read"
+  | "cache_mutation"
+  | "hf_working_write"
+  | "hf_versioned_write"
+  | "engineering_job_create"
+  | "source_mutation"
+  | "source_merge"
+  | "governor_deployment"
+  | "production_environment_mutation"
+  | "production_database_mutation"
+  | "model_promotion"
+  | "artifact_retention_change"
+  | "artifact_deletion"
+  | "resource_change"
+  | "paid_compute_enablement"
+  | "policy_modification"
+  | "destructive_database_operation"
+  | "secret_policy_change";
+
+const ACTION_TIERS: Readonly<Record<CapabilityActionTypeV1, CapabilityTierV1>> = Object.freeze({
+  repository_read: 0,
+  postgres_read: 0,
+  hf_artifact_read: 0,
+  cache_mutation: 1,
+  hf_working_write: 1,
+  hf_versioned_write: 1,
+  engineering_job_create: 2,
+  source_mutation: 2,
+  source_merge: 2,
+  governor_deployment: 3,
+  production_environment_mutation: 3,
+  production_database_mutation: 3,
+  model_promotion: 3,
+  artifact_retention_change: 4,
+  artifact_deletion: 4,
+  resource_change: 4,
+  paid_compute_enablement: 4,
+  policy_modification: 4,
+  destructive_database_operation: 4,
+  secret_policy_change: 4,
+});
+
+export interface CapabilityIdentityBindingV1 {
+  objectiveId: string;
+  actionId: string;
+  sourceSha?: string;
+  sourceTree?: string;
+  runtimeSha?: string;
+  runtimeTree?: string;
+  artifactId?: string;
+  resourceId?: string;
+  targetEnvironment?: string;
+}
+
+export interface CapabilityAuthorizationRequestV1 {
+  actionType: CapabilityActionTypeV1;
+  maxAuthorizedTier: CapabilityTierV1;
+  claimedTier?: CapabilityTierV1;
+  identity?: CapabilityIdentityBindingV1;
+  authorizationIdentity: string;
+  authorizationReason: string;
+  separateAuthority?: boolean;
+}
+
+export interface CapabilityAuthorizationDecisionV1 {
+  allowed: boolean;
+  requiredTier: CapabilityTierV1;
+  policyVersion: typeof CAPABILITY_TIER_POLICY_VERSION;
+  reasonCodes: readonly string[];
+}
+
+const SHA1 = /^[0-9a-f]{40}$/;
+const ID = /^[A-Za-z0-9._:/-]{1,200}$/;
+const PATH = /^[A-Za-z0-9._+@/-]{1,512}$/;
+
+export function requiredCapabilityTierV1(actionType: CapabilityActionTypeV1): CapabilityTierV1 {
+  return ACTION_TIERS[actionType];
+}
+
+export function evaluateCapabilityAuthorizationV1(
+  request: CapabilityAuthorizationRequestV1,
+): CapabilityAuthorizationDecisionV1 {
+  const requiredTier = requiredCapabilityTierV1(request.actionType);
+  const reasons: string[] = [];
+  if (
+    request.claimedTier !== undefined
+    && request.claimedTier < requiredTier
+  ) reasons.push("caller_tier_claim_below_software_classification");
+  if (request.maxAuthorizedTier < requiredTier) reasons.push("authority_tier_insufficient");
+  if (!ID.test(request.authorizationIdentity.trim())) reasons.push("authorization_identity_invalid");
+  if (!request.authorizationReason.trim()) reasons.push("authorization_reason_required");
+  if (requiredTier >= 2) {
+    const identity = request.identity;
+    if (identity === undefined) reasons.push("exact_identity_required");
+    else {
+      if (!ID.test(identity.objectiveId)) reasons.push("objective_identity_invalid");
+      if (!ID.test(identity.actionId)) reasons.push("action_identity_invalid");
+      const exactSource = SHA1.test(identity.sourceSha ?? "") && SHA1.test(identity.sourceTree ?? "");
+      const exactRuntime = SHA1.test(identity.runtimeSha ?? "") && SHA1.test(identity.runtimeTree ?? "");
+      if (
+        request.actionType === "engineering_job_create"
+        || request.actionType === "source_mutation"
+        || request.actionType === "source_merge"
+        || request.actionType === "governor_deployment"
+        || request.actionType === "production_environment_mutation"
+        || request.actionType === "production_database_mutation"
+        || request.actionType === "model_promotion"
+        || request.actionType === "policy_modification"
+      ) {
+        if (!exactSource && !exactRuntime) reasons.push("exact_source_or_runtime_identity_required");
+      }
+    }
+  }
+  if (requiredTier === 4 && request.separateAuthority !== true) {
+    reasons.push("separate_authority_required");
+  }
+  return Object.freeze({
+    allowed: reasons.length === 0,
+    requiredTier,
+    policyVersion: CAPABILITY_TIER_POLICY_VERSION,
+    reasonCodes: Object.freeze(reasons.length === 0 ? ["allowed"] : reasons),
+  });
+}
+
+export function maxCapabilityTierV1(...tiers: readonly CapabilityTierV1[]): CapabilityTierV1 {
+  return tiers.reduce<Capability
