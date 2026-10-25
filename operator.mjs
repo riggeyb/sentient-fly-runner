@@ -1,5 +1,6 @@
 const ENDPOINT = "https://sentient-ops-mcp.fly.dev/mcp";
 const PROTOCOL = "2026-07-28";
+const TIER_POLICY = "sentient-capability-tier/v1";
 const OPS = new Set(["health","tools_list","fly_machines_list","fly_machine_get","engineering_create","engineering_get","public_probe"]);
 const APPS = new Set(["sentient-deployment-governor","sentient-validation-runner"]);
 const BRANCH = new Map([["riggeyb/sentient","sentient-production-composition-20261017"],["riggeyb/director-studio-beta","sentient-staging-v0"]]);
@@ -27,8 +28,7 @@ if (operation === "public_probe") {
   try { res = await fetch(url,{method:"GET",redirect:"manual",signal:AbortSignal.timeout(20000)}); }
   catch(e) { bad(`PUBLIC_PROBE_UNREACHABLE_${code(e)}`); }
   const text = await res.text();
-  let body = text;
-  try { body = JSON.parse(text); } catch {}
+  let body = text; try { body = JSON.parse(text); } catch {}
   console.log(`HTTP_STATUS=${res.status}`);
   console.log(`DATA=${safeJson(body)}`);
   if (res.status !== 200 && !(args.target === "sentient_ready" && res.status === 503)) bad(`PUBLIC_PROBE_HTTP_${res.status}`);
@@ -86,39 +86,52 @@ console.log("SECRET_VALUES_EXPOSED=false");
 
 function parseArgs(raw){let v;try{v=JSON.parse(String(raw))}catch{bad("ARGUMENTS_MALFORMED_JSON")}if(!plain(v))bad("ARGUMENTS_MUST_BE_OBJECT");return v}
 function validate(op,v){
-  if(op==="health"||op==="tools_list")return keys(v,[]);
-  if(op==="public_probe"){keys(v,["target"]);if(typeof v.target!=="string"||!PROBES.has(v.target))bad("PUBLIC_PROBE_TARGET_NOT_ALLOWED");return}
-  if(op==="fly_machines_list"){keys(v,["app"]);app(v.app);return}
-  if(op==="fly_machine_get"){keys(v,["app","machineId"]);app(v.app);if(typeof v.machineId!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(v.machineId))bad("MACHINE_ID_INVALID");return}
-  if(op==="engineering_get"){keys(v,["jobId"]);if(typeof v.jobId!=="string"||!/^[A-Za-z0-9._:-]{1,200}$/.test(v.jobId))bad("JOB_ID_INVALID");return}
-  if(op==="engineering_create")return job(v);bad("UNKNOWN_OPERATION")
+  if(op==="health"||op==="tools_list")return exactKeys(v,[]);
+  if(op==="public_probe"){exactKeys(v,["target"]);if(typeof v.target!=="string"||!PROBES.has(v.target))bad("PUBLIC_PROBE_TARGET_NOT_ALLOWED");return}
+  if(op==="fly_machines_list"){exactKeys(v,["app"]);app(v.app);return}
+  if(op==="fly_machine_get"){exactKeys(v,["app","machineId"]);app(v.app);if(typeof v.machineId!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(v.machineId))bad("MACHINE_ID_INVALID");return}
+  if(op==="engineering_get"){exactKeys(v,["jobId"]);if(typeof v.jobId!=="string"||!/^[A-Za-z0-9._:-]{1,200}$/.test(v.jobId))bad("JOB_ID_INVALID");return}
+  if(op==="engineering_create")return job(v);
+  bad("UNKNOWN_OPERATION");
 }
 function app(v){if(typeof v!=="string"||!APPS.has(v))bad("FLY_APP_NOT_ALLOWLISTED")}
 function job(v){
-  keys(v,["repo","branch","expectedHead","objective","commands","commitMessage","timeoutMs"]);
+  const required=["repo","branch","expectedHead","expectedTree","objectiveId","actionId","authorizedPaths","authorizationIdentity","authorizationReason","policyVersion","objective","commands","commitMessage","timeoutMs"];
+  const allowed=new Set([...required,"idempotencyKey"]);
+  const actual=Object.keys(v);
+  if(actual.some(k=>!allowed.has(k))||required.some(k=>!(k in v)))bad("ENGINEERING_ARGUMENT_KEYS_INVALID");
   const b=BRANCH.get(v.repo);if(!b)bad("ENGINEERING_REPO_NOT_ALLOWED");
   if(v.branch==="main"||v.branch==="master"||v.branch!==b)bad("ENGINEERING_BRANCH_NOT_ALLOWED");
   if(typeof v.expectedHead!=="string"||!/^[0-9a-f]{40}$/.test(v.expectedHead))bad("ENGINEERING_EXPECTED_HEAD_INVALID");
+  if(typeof v.expectedTree!=="string"||!/^[0-9a-f]{40}$/.test(v.expectedTree))bad("ENGINEERING_EXPECTED_TREE_INVALID");
+  for(const [name,x] of [["objectiveId",v.objectiveId],["actionId",v.actionId],["authorizationIdentity",v.authorizationIdentity]]) {
+    if(typeof x!=="string"||!/^[A-Za-z0-9._:/-]{1,200}$/.test(x))bad(`ENGINEERING_${name.toUpperCase()}_INVALID`);
+  }
+  if(typeof v.authorizationReason!=="string"||v.authorizationReason.length<1||v.authorizationReason.length>1024)bad("ENGINEERING_AUTHORIZATION_REASON_INVALID");
+  if(v.policyVersion!==TIER_POLICY)bad("ENGINEERING_POLICY_VERSION_INVALID");
+  if(!Array.isArray(v.authorizedPaths)||v.authorizedPaths.length<1||v.authorizedPaths.length>64||v.authorizedPaths.some(x=>typeof x!=="string"||x.length<1||x.length>512||x.startsWith("/")||x.includes("..")))bad("ENGINEERING_AUTHORIZED_PATHS_INVALID");
+  if(v.idempotencyKey!==undefined&&(typeof v.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{1,200}$/.test(v.idempotencyKey)))bad("ENGINEERING_IDEMPOTENCY_KEY_INVALID");
   if(typeof v.objective!=="string"||v.objective.length<1||v.objective.length>4096)bad("ENGINEERING_OBJECTIVE_INVALID");
   if(!Array.isArray(v.commands)||v.commands.length<1||v.commands.length>32)bad("ENGINEERING_COMMANDS_INVALID");
   if(typeof v.commitMessage!=="string"||v.commitMessage.length<1||v.commitMessage.length>240||/[\r\n]/.test(v.commitMessage))bad("ENGINEERING_COMMIT_MESSAGE_INVALID");
   if(!num(v.timeoutMs,5000,1800000))bad("ENGINEERING_TIMEOUT_INVALID");
   let budget=0;
   for(const c of v.commands){
-    if(!plain(c))bad("ENGINEERING_COMMAND_INVALID");keys(c,["name","category","command","args","timeoutMs"]);
+    if(!plain(c))bad("ENGINEERING_COMMAND_INVALID");exactKeys(c,["name","category","command","args","timeoutMs"]);
     if(typeof c.name!=="string"||!c.name)bad("ENGINEERING_COMMAND_NAME_INVALID");
     if(!["inspect","edit","build","test","shell"].includes(c.category))bad("ENGINEERING_COMMAND_CATEGORY_INVALID");
     if(typeof c.command!=="string"||!/^[A-Za-z0-9._/+:-]{1,160}$/.test(c.command))bad("ENGINEERING_COMMAND_EXECUTABLE_INVALID");
     if(!Array.isArray(c.args)||c.args.length>64||c.args.some(x=>typeof x!=="string"||x.length>8192))bad("ENGINEERING_COMMAND_ARGS_INVALID");
     if(!num(c.timeoutMs,1000,600000))bad("ENGINEERING_COMMAND_TIMEOUT_INVALID");budget+=c.timeoutMs;
   }
+  if(v.commands.at(-1)?.category!=="test")bad("ENGINEERING_FINAL_VERIFICATION_TEST_REQUIRED");
   if(budget>v.timeoutMs)bad("ENGINEERING_COMMAND_BUDGET_EXCEEDS_JOB_TIMEOUT");
 }
-function keys(v,want){const a=Object.keys(v).sort(),b=[...want].sort();if(a.length!==b.length||a.some((x,i)=>x!==b[i]))bad("ARGUMENT_KEYS_INVALID")}
+function exactKeys(v,want){const a=Object.keys(v).sort(),b=[...want].sort();if(a.length!==b.length||a.some((x,i)=>x!==b[i]))bad("ARGUMENT_KEYS_INVALID")}
 async function tool(name,argumentsValue){return rpc("tools/call",{name,arguments:argumentsValue},name)}
 async function rpc(method,params,name=null){
   const headers={authorization:`Bearer ${token}`,accept:"application/json, text/event-stream","content-type":"application/json","mcp-protocol-version":PROTOCOL,"mcp-method":method};if(name)headers["mcp-name"]=name;
-  let res;try{res=await fetch(ENDPOINT,{method:"POST",headers,redirect:"manual",signal:AbortSignal.timeout(30000),body:JSON.stringify({jsonrpc:"2.0",id:id++,method,params:{...params,_meta:{"io.modelcontextprotocol/protocolVersion":PROTOCOL,"io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{name:"sentient-public-fly-runner",version:"1.1.0"}}}})})}catch(e){bad(`MCP_UNREACHABLE_${code(e)}`)}
+  let res;try{res=await fetch(ENDPOINT,{method:"POST",headers,redirect:"manual",signal:AbortSignal.timeout(30000),body:JSON.stringify({jsonrpc:"2.0",id:id++,method,params:{...params,_meta:{"io.modelcontextprotocol/protocolVersion":PROTOCOL,"io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{name:"sentient-public-fly-runner",version:"1.2.0"}}}})})}catch(e){bad(`MCP_UNREACHABLE_${code(e)}`)}
   if(res.status===401||res.status===403)bad("MCP_AUTH_FAILED");if(res.status>=300&&res.status<400)bad("MCP_REDIRECT_REJECTED");
   const parsed=parse(await res.text());if(!res.ok&&!parsed?.error)bad(`MCP_HTTP_${res.status}`);return parsed
 }
@@ -131,7 +144,7 @@ function ok(label,r){
 }
 function jobEvidence(v,includeSteps){
   const root=findRecord(v,x=>typeof x.jobId==="string"&&typeof x.status==="string")??{};
-  const allow=["contract","jobId","repo","branch","expectedHead","objective","status","startSha","startTree","startedAt","workerMachineId","buildResult","endSha","endTree","changedFiles","testResult","pushResult","deployResult","healthz","readyz","errorCode","createdAt","completedAt"];
+  const allow=["contract","jobId","repo","branch","expectedHead","objective","authorityReceipt","status","startSha","startTree","startedAt","workerMachineId","buildResult","endSha","endTree","changedFiles","testResult","pushResult","deployResult","healthz","readyz","errorCode","createdAt","completedAt"];
   const out={};for(const k of allow)if(k in root)out[k]=root[k];
   if(includeSteps&&Array.isArray(root.steps))out.steps=root.steps.slice(0,100).map(s=>plain(s)?({name:s.name??null,category:s.category??null,command:s.command??null,exitCode:s.exitCode??null,stdoutTruncated:s.stdoutTruncated??null,stderrTruncated:s.stderrTruncated??null,termination:s.termination??null,spawnError:s.spawnError??null,startedAt:s.startedAt??null,endedAt:s.endedAt??null}):null).filter(Boolean);
   return out
