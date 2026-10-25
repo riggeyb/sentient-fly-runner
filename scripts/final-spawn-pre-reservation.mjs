@@ -22,7 +22,11 @@ const targetConstraints=()=>({
 const ceilings={maxInputTokens:32000,maxOutputTokens:8000,maxTotalTokens:40000,maxCostMicros:0,currency:"USD",maxRuntimeMs:120000,maxToolRounds:8,maxToolActions:16,maxChildExecutions:4,maxRecursionDepth:1};
 try{
   let works;
-  try{works=(await repo.activeWork(sid,true)).filter(x=>x.objectiveId===oid&&x.workKey==="independent-analysis");pass("WORK",{count:works.length,statuses:works.map(x=>x.status)});}catch(e){fail("WORK",e)}
+  try{
+    const snapshot=await repo.snapshot();
+    works=(snapshot.collaborationActiveWork?.records??[]).filter(x=>x.objectiveId===oid&&x.workKey==="independent-analysis");
+    pass("WORK",{count:works.length,statuses:works.map(x=>x.status),sessions:[...new Set(works.map(x=>x.sessionId))]});
+  }catch(e){fail("WORK",e)}
   const work=[...works].sort((a,b)=>b.sessionSequence-a.sessionSequence)[0]; if(!work)throw new Error("work_missing");
   const requestId=work.participantId,rootId=`root:${oid}`;
   let root;try{root=await repo.getSpawnExecution(rootId);if(!root)throw new Error("root_missing");pass("ROOT",{status:root.identity.status,depth:root.identity.depth,remaining:root.remainingBudgets});}catch(e){fail("ROOT",e)}
@@ -64,6 +68,6 @@ try{
       budgetFailures:pairs.filter(([u,b])=>root.remainingBudgets[b]<r[u]).map(([u,b])=>({u,b}))
     });
   }catch(e){fail("RESERVE_PRE",e)}
-  console.log("PRE_RESERVATION_DIAGNOSTIC=PASS");
+  console.log("PRE_RESERVTTION_DIAGNOSTIC=PASS");
   console.log("SECRET_VALUES_EXPOSED=false");
 }finally{await repo.close().catch(()=>undefined)}
