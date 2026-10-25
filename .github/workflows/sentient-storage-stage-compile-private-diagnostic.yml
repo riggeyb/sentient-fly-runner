@@ -9,7 +9,7 @@ permissions:
 jobs:
   diagnostic:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "da4f11a0abd2f7553a9c1a4ce0f1450bc2d23e05"
+          test "$(git rev-parse HEAD)" = "d6d4a9a28ac55c139daf38672e588e0cd4a56bf4"
           test "$(git merge-base HEAD e9bd0c9135f05da2be337e5e7ac4077af0f4649d)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
           echo "SOURCE_IDENTITY_FENCE=PASS"
       - name: Install dependencies silently
@@ -46,3 +46,20 @@ jobs:
           echo "PRIVATE_SOURCE_LINES_EXPOSED=false"
           echo "SECRET_VALUES_EXPOSED=false"
           test "$rc" -eq 0
+      - name: Build production Docker image without push or deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          TREE="$(git rev-parse 'HEAD^{tree}')"
+          git bundle create sentient-source.bundle HEAD
+          docker build \
+            --build-arg "SENTIENT_RUNTIME_SHA=$SHA" \
+            --build-arg "SENTIENT_RUNTIME_TREE=$TREE" \
+            --build-arg "SENTIENT_SKILLS_SHA=unset" \
+            --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=e9bd0c9135f05da2be337e5e7ac4077af0f4649d" \
+            -t sentient-storage-readonly:"${SHA::12}" .
+          echo "DOCKER_BUILD=PASS"
+          echo "REGISTRY_PUSH=false"
+          echo "DEPLOYMENT=false"
+          echo "RESOURCE_ENVELOPE_CHANGES=none"
