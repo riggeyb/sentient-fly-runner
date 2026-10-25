@@ -13,7 +13,7 @@ concurrency:
 jobs:
   configure:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
@@ -23,121 +23,123 @@ jobs:
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Preflight exact machine and secret boundary
+      - name: Snapshot and fence
         shell: bash
         run: |
           set -euo pipefail
           flyctl machines list -a "$APP" --json > /tmp/before.json
-          flyctl secrets list -a "$APP" --json > /tmp/secrets.json
-          python3 - <<'PY'
-          import json
-          machines=json.load(open("/tmp/before.json"))
-          secrets=json.load(open("/tmp/secrets.json"))
-          if len(machines) != 1:
-              raise SystemExit("EXPECTED_EXACTLY_ONE_MACHINE")
-          names={
-              str(x.get("Name") or x.get("name") or "")
-              for x in secrets if isinstance(x,dict)
-          }
-          if "SENTIENT_HF_TOKEN" not in names:
-              raise SystemExit("SENTIENT_HF_TOKEN_SECRET_MISSING")
-          conflicts=[
-              name for name in (
-                  "SENTIENT_HF_NAMESPACE",
-                  "SENTIENT_HF_VERSIONED_REPOSITORY",
-                  "SENTIENT_HF_WORKING_BUCKET",
-              ) if name in names
-          ]
-          if conflicts:
-              raise SystemExit("HF_TARGET_ENV_SECRET_CONFLICT")
-          machine=machines[0]
-          print("MACHINE_COUNT_BEFORE=1")
-          print("HF_TOKEN_SECRET_PRESENT=true")
-          print("HF_TARGET_ENV_SECRET_CONFLICT=false")
-          print("MACHINE_ID=" + str(machine.get("id") or machine.get("ID") or ""))
-          print("SECRET_NAMES_EXPOSED=false")
-          print("SECRET_VALUES_EXPOSED=false")
-          PY
-          machine_id="$(python3 - <<'PY'
-          import json
-          m=json.load(open("/tmp/before.json"))[0]
-          print(m.get("id") or m.get("ID") or "")
-          PY
-          )"
-          test -n "$machine_id"
-          echo "MACHINE_ID=$machine_id" >> "$GITHUB_ENV"
+          flyctl secrets list -a "$APP" --json > /tmp/secrets-before.json
+          test "$(jq 'length' /tmp/before.json)" -eq 1
+          jq -e 'any(.[]; ((.Name // .name // "") == "SENTIENT_HF_TOKEN"))' /tmp/secrets-before.json >/dev/null
+          echo "MACHINE_ID=$(jq -r '.[0].id' /tmp/before.json)" >> "$GITHUB_ENV"
+          jq -c '.[0] | {
+            id, region, name,
+            image:.config.image,
+            guest:.config.guest,
+            mounts:(.config.mounts // []),
+            services:(.config.services // []),
+            restart:(.config.restart // {}),
+            schedule:(.config.schedule // null),
+            auto_destroy:(.config.auto_destroy // false),
+            standbys:(.config.standbys // [])
+          }' /tmp/before.json > /tmp/stable-before.json
+          jq -c '.[0].config.env // {} |
+            del(.SENTIENT_HF_NAMESPACE,.SENTIENT_HF_VERSIONED_REPOSITORY,.SENTIENT_HF_WORKING_BUCKET)' \
+            /tmp/before.json > /tmp/other-env-before.json
+          echo "HF_TOKEN_SECRET_PRESENT=true"
+          echo "SECRET_VALUES_EXPOSED=false"
 
-      - name: Set only approved non-secret Hugging Face environment
+      - name: Install ordinary HF environment before removing obsolete secrets
         shell: bash
         run: |
           set -euo pipefail
-          flyctl machine update "$MACHINE_ID" \
-            -a "$APP" \
-            --yes \
+          flyctl machine update "$MACHINE_ID" -a "$APP" --yes \
             --env "SENTIENT_HF_NAMESPACE=$HF_NAMESPACE" \
             --env "SENTIENT_HF_VERSIONED_REPOSITORY=$HF_VERSIONED_REPOSITORY" \
             --env "SENTIENT_HF_WORKING_BUCKET=$HF_WORKING_BUCKET" \
-            >/tmp/update.log 2>&1
-          echo "FLY_MACHINE_ENV_UPDATE=PASS"
-          echo "SECRET_VALUES_EXPOSED=false"
+            >/tmp/env-update.log 2>&1
+          flyctl machines list -a "$APP" --json > /tmp/after-env.json
+          test "$(jq 'length' /tmp/after-env.json)" -eq 1
+          test "$(jq -r '.[0].id' /tmp/after-env.json)" = "$MACHINE_ID"
+          jq -e --arg ns "$HF_NAMESPACE" --arg vr "$HF_VERSIONED_REPOSITORY" --arg wb "$HF_WORKING_BUCKET" '
+            .[0].config.env.SENTIENT_HF_NAMESPACE == $ns and
+            .[0].config.env.SENTIENT_HF_VERSIONED_REPOSITORY == $vr and
+            .[0].config.env.SENTIENT_HF_WORKING_BUCKET == $wb' /tmp/after-env.json >/dev/null
+          jq -c '.[0].config.env // {} |
+            del(.SENTIENT_HF_NAMESPACE,.SENTIENT_HF_VERSIONED_REPOSITORY,.SENTIENT_HF_WORKING_BUCKET)' \
+            /tmp/after-env.json > /tmp/other-env-after-env.json
+          cmp -s /tmp/other-env-before.json /tmp/other-env-after-env.json
+          jq -c '.[0] | {
+            id, region, name,
+            image:.config.image,
+            guest:.config.guest,
+            mounts:(.config.mounts // []),
+            services:(.config.services // []),
+            restart:(.config.restart // {}),
+            schedule:(.config.schedule // null),
+            auto_destroy:(.config.auto_destroy // false),
+            standbys:(.config.standbys // [])
+          }' /tmp/after-env.json > /tmp/stable-after-env.json
+          cmp -s /tmp/stable-before.json /tmp/stable-after-env.json
+          echo "ORDINARY_HF_ENV_INSTALLED=PASS"
+          echo "RESOURCE_ENVELOPE_CHANGES=NONE"
 
-      - name: Verify exact configuration and unchanged resource envelope
+      - name: Remove only obsolete HF target-name secrets
         shell: bash
         run: |
           set -euo pipefail
-          flyctl machines list -a "$APP" --json > /tmp/after.json
-          flyctl secrets list -a "$APP" --json > /tmp/secrets-after.json
-          python3 - <<'PY'
-          import json, os, copy
-          before=json.load(open("/tmp/before.json"))
-          after=json.load(open("/tmp/after.json"))
-          secrets=json.load(open("/tmp/secrets-after.json"))
-          if len(before) != 1 or len(after) != 1:
-              raise SystemExit("MACHINE_COUNT_CHANGED")
-          b,a=before[0],after[0]
-          bid=str(b.get("id") or b.get("ID") or "")
-          aid=str(a.get("id") or a.get("ID") or "")
-          if not bid or bid != aid:
-              raise SystemExit("MACHINE_ID_CHANGED")
-          bc=copy.deepcopy(b.get("config") or {})
-          ac=copy.deepcopy(a.get("config") or {})
-          be=dict(bc.pop("env",{}) or {})
-          ae=dict(ac.pop("env",{}) or {})
-          targets={
-              "SENTIENT_HF_NAMESPACE": os.environ["HF_NAMESPACE"],
-              "SENTIENT_HF_VERSIONED_REPOSITORY": os.environ["HF_VERSIONED_REPOSITORY"],
-              "SENTIENT_HF_WORKING_BUCKET": os.environ["HF_WORKING_BUCKET"],
-          }
-          for k,v in targets.items():
-              if ae.get(k) != v:
-                  raise SystemExit(f"TARGET_ENV_MISMATCH_{k}")
-          if {k:v for k,v in be.items() if k not in targets} != {k:v for k,v in ae.items() if k not in targets}:
-              raise SystemExit("UNRELATED_ENV_CHANGED")
-          if bc != ac:
-              raise SystemExit("NON_ENV_MACHINE_CONFIG_CHANGED")
-          for field in ("region","name"):
-              if b.get(field) != a.get(field):
-                  raise SystemExit(f"MACHINE_{field.upper()}_CHANGED")
-          names={
-              str(x.get("Name") or x.get("name") or "")
-              for x in secrets if isinstance(x,dict)
-          }
-          if "SENTIENT_HF_TOKEN" not in names:
-              raise SystemExit("SENTIENT_HF_TOKEN_SECRET_LOST")
-          for k in targets:
-              if k in names:
-                  raise SystemExit("HF_TARGET_ENV_BECAME_SECRET")
-          print("FLY_ENV_CONFIGURATION=PASS")
-          print("MACHINE_COUNT_AFTER=1")
-          print("RESOURCE_ENVELOPE_CHANGES=NONE")
-          print("UNRELATED_ENV_CHANGES=NONE")
-          print("HF_TOKEN_REMAINS_SECRET=true")
-          print("HF_NAMESPACE_CONFIGURED=true")
-          print("HF_VERSIONED_REPOSITORY_CONFIGURED=true")
-          print("HF_WORKING_BUCKET_CONFIGURED=true")
-          print("SECRET_NAMES_EXPOSED=false")
-          print("SECRET_VALUES_EXPOSED=false")
-          PY
+          flyctl secrets unset --stage -a "$APP" \
+            SENTIENT_HF_NAMESPACE \
+            SENTIENT_HF_VERSIONED_REPOSITORY \
+            SENTIENT_HF_WORKING_BUCKET \
+            >/tmp/secrets-unset.log 2>&1
+          flyctl secrets deploy -a "$APP" >/tmp/secrets-deploy.log 2>&1
+          echo "OBSOLETE_HF_TARGET_SECRETS_REMOVED=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
+
+      - name: Final verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl machines list -a "$APP" --json > /tmp/final.json
+          flyctl secrets list -a "$APP" --json > /tmp/secrets-final.json
+          test "$(jq 'length' /tmp/final.json)" -eq 1
+          test "$(jq -r '.[0].id' /tmp/final.json)" = "$MACHINE_ID"
+          jq -e --arg ns "$HF_NAMESPACE" --arg vr "$HF_VERSIONED_REPOSITORY" --arg wb "$HF_WORKING_BUCKET" '
+            .[0].config.env.SENTIENT_HF_NAMESPACE == $ns and
+            .[0].config.env.SENTIENT_HF_VERSIONED_REPOSITORY == $vr and
+            .[0].config.env.SENTIENT_HF_WORKING_BUCKET == $wb' /tmp/final.json >/dev/null
+          jq -e 'any(.[]; ((.Name // .name // "") == "SENTIENT_HF_TOKEN"))' /tmp/secrets-final.json >/dev/null
+          jq -e 'all(.[];
+            ((.Name // .name // "") != "SENTIENT_HF_NAMESPACE") and
+            ((.Name // .name // "") != "SENTIENT_HF_VERSIONED_REPOSITORY") and
+            ((.Name // .name // "") != "SENTIENT_HF_WORKING_BUCKET"))' /tmp/secrets-final.json >/dev/null
+          jq -c '.[0].config.env // {} |
+            del(.SENTIENT_HF_NAMESPACE,.SENTIENT_HF_VERSIONED_REPOSITORY,.SENTIENT_HF_WORKING_BUCKET)' \
+            /tmp/final.json > /tmp/other-env-final.json
+          cmp -s /tmp/other-env-before.json /tmp/other-env-final.json
+          jq -c '.[0] | {
+            id, region, name,
+            image:.config.image,
+            guest:.config.guest,
+            mounts:(.config.mounts // []),
+            services:(.config.services // []),
+            restart:(.config.restart // {}),
+            schedule:(.config.schedule // null),
+            auto_destroy:(.config.auto_destroy // false),
+            standbys:(.config.standbys // [])
+          }' /tmp/final.json > /tmp/stable-final.json
+          cmp -s /tmp/stable-before.json /tmp/stable-final.json
+          echo "FLY_ENV_CONFIGURATION=PASS"
+          echo "HF_WRITE_TOKEN_AVAILABLE=true"
+          echo "HF_NAMESPACE_CONFIGURED=true"
+          echo "HF_VERSIONED_REPOSITORY_CONFIGURED=true"
+          echo "HF_WORKING_BUCKET_CONFIGURED=true"
+          echo "HF_TOKEN_REMAINS_SECRET=true"
+          echo "RESOURCE_ENVELOPE_CHANGES=NONE"
+          echo "UNRELATED_ENV_CHANGES=NONE"
+          echo "SECRET_NAMES_EXPOSED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
           echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
           echo "GITHUB_ACTIONS_REQUIRED_FOR_RUNTIME=false"
           echo "HF_PAID_INFERENCE_USED=false"
