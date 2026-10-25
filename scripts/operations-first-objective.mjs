@@ -5,12 +5,7 @@ if (!oid || !sid || !token) throw new Error("OPERATIONAL_INGRESS_BINDING_MISSING
 
 const base = "http://127.0.0.1:8080";
 const auth = { authorization: "Bearer " + token };
-const request = [
-  "Examine the existing Sentient production repository and Fly configuration.",
-  "Identify avoidable storage consumption, resource inefficiencies, and operational costs.",
-  "Produce a prioritized report with concrete source references.",
-  "Do not modify source, databases, infrastructure, deployment configuration, or secrets."
-].join(" ");
+const request = "In the production repository, list tracked files in the certified revision so operations can identify tracked generated content. Read-only inspection only.";
 
 async function getObjective() {
   return fetch(base + "/v1/objectives/" + encodeURIComponent(oid), {
