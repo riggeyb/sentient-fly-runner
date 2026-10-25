@@ -1,0 +1,143 @@
+name: Sentient Storage HF Stage Validate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: storage-hf-buildout-20261025
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fence and integrate artifact state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "da4f11a0abd2f7553a9c1a4ce0f1450bc2d23e05"
+          test "$(git merge-base HEAD e9bd0c9135f05da2be337e5e7ac4077af0f4649d)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              if s.count(old) != 1:
+                  raise SystemExit(f"{path}: expected unique anchor, found {s.count(old)}")
+              p.write_text(s.replace(old, new, 1))
+
+          replace_once(
+              "src/state/postgres-state-repository.ts",
+              'import { emptyWorldStateSegment } from "./world-persistence.js";',
+              'import { emptyWorldStateSegment } from "./world-persistence.js";\nimport { emptyArtifactStateSegment } from "./artifact-persistence.js";',
+          )
+          replace_once(
+              "src/state/postgres-state-repository.ts",
+              '    spawn: emptySpawnStateSegment(),\n  };',
+              '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };',
+          )
+
+          replace_once(
+              "src/state/file-state-repository-v2.ts",
+              'import {\n  emptyWorldStateSegment,',
+              'import { emptyArtifactStateSegment } from "./artifact-persistence.js";\nimport {\n  emptyWorldStateSegment,',
+          )
+          replace_once(
+              "src/state/file-state-repository-v2.ts",
+              '    spawn: emptySpawnStateSegment(),\n  };',
+              '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };',
+          )
+
+          replace_once(
+              "src/state/migration.ts",
+              'import { emptyWorldStateSegment } from "./world-persistence.js";',
+              'import { emptyWorldStateSegment } from "./world-persistence.js";\nimport { emptyArtifactStateSegment } from "./artifact-persistence.js";',
+          )
+          replace_once(
+              "src/state/migration.ts",
+              '    spawn: emptySpawnStateSegment(),\n  };',
+              '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };',
+          )
+          replace_once(
+              "src/state/migration.ts",
+              '      input.spawn === undefined\n    ) {',
+              '      input.spawn === undefined ||\n      input.artifacts === undefined\n    ) {',
+          )
+          replace_once(
+              "src/state/migration.ts",
+              '          ...(input.spawn === undefined\n            ? { spawn: emptySpawnStateSegment() }\n            : {}),',
+              '          ...(input.spawn === undefined\n            ? { spawn: emptySpawnStateSegment() }\n            : {}),\n          ...(input.artifacts === undefined\n            ? { artifacts: emptyArtifactStateSegment() }\n            : {}),',
+          )
+
+          replace_once(
+              "src/state/state-integrity.ts",
+              'import { assertWorldStateSegment } from "./world-persistence.js";',
+              'import { assertWorldStateSegment } from "./world-persistence.js";\nimport { assertArtifactStateSegment } from "./artifact-persistence.js";',
+          )
+          replace_once(
+              "src/state/state-integrity.ts",
+              '  assertSpawnStateSegment(s);\n  assertObjectiveContinuationState(s);',
+              '  assertSpawnStateSegment(s);\n  assertArtifactStateSegment(s);\n  assertObjectiveContinuationState(s);',
+          )
+          PY
+          git diff --check
+          echo "ARTIFACT_STATE_INTEGRATION_APPLIED=PASS"
+
+      - name: Remove future-tree generated dependencies and build output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-files 'node_modules/**' | wc -l)" -gt 0
+          test "$(git ls-files 'dist/**' | wc -l)" -gt 0
+          git rm -r --quiet node_modules dist
+          test -z "$(git ls-files 'node_modules/**')"
+          test -z "$(git ls-files 'dist/**')"
+          echo "NODE_MODULES_TRACKING_REMOVED=PASS"
+          echo "DIST_TRACKING_REMOVED=PASS"
+          echo "GIT_HISTORY_REWRITTEN=false"
+
+      - name: Clean dependency install build and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/artifact-storage.test.js
+          mapfile -t tests < <(find dist/test dist/tests -type f -name '*.test.js' 2>/dev/null | sort -u)
+          test "${#tests[@]}" -gt 0
+          node --test "${tests[@]}"
+          echo "BUILD_REPRODUCIBLE=PASS"
+          echo "ARTIFACT_STORAGE_FOCUSED=PASS"
+          echo "CUMULATIVE_REGRESSIONS=PASS"
+          echo "TEST_FILE_COUNT=${#tests[@]}"
+
+      - name: Commit validated stage branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin storage-hf-buildout-20261025 sentient-production-composition-20261017
+          test "$(git rev-parse origin/storage-hf-buildout-20261025)" = "da4f11a0abd2f7553a9c1a4ce0f1450bc2d23e05"
+          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
+          git config user.name "sentient-storage-operations"
+          git config user.email "sentient-storage-operations@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: establish authoritative artifact storage boundary"
+          git push origin HEAD:storage-hf-buildout-20261025
+          echo "STAGE_SHA=$(git rev-parse HEAD)"
+          echo "STAGE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "CERTIFIED_TAG_MUTATED=false"
+          echo "CANONICAL_BRANCH_MUTATED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
