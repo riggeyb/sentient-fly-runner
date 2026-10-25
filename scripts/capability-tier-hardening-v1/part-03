@@ -1,0 +1,182 @@
+edTree?: unknown;
+    objectiveId?: unknown;
+    actionId?: unknown;
+    authorizedPaths?: unknown;
+    authorizationIdentity?: unknown;
+    authorizationReason?: unknown;
+    policyVersion?: unknown;
+  };
+  if (
+    typeof legacy.expectedTree !== "string"
+    || typeof legacy.objectiveId !== "string"
+    || typeof legacy.actionId !== "string"
+    || !Array.isArray(legacy.authorizedPaths)
+    || typeof legacy.authorizationIdentity !== "string"
+    || typeof legacy.authorizationReason !== "string"
+    || legacy.policyVersion !== "sentient-capability-tier/v1"
+  ) return null;
+  return Object.freeze({
+    objectiveId: legacy.objectiveId,
+    actionId: legacy.actionId,
+    actionType: "source_mutation",
+    capabilityTier: 2,
+    policyVersion: "sentient-capability-tier/v1",
+    authorizationIdentity: legacy.authorizationIdentity,
+    authorizationReason: legacy.authorizationReason,
+    authorizedPaths: Object.freeze(legacy.authorizedPaths.filter((path): path is string => typeof path === "string")),
+    sourceSha: rowExpected(input, "expectedHead"),
+    sourceTree: legacy.expectedTree,
+    verificationRequired: true,
+  });
+}
+
+function rowExpected(input: EngineeringJobInputV1, field: "expectedHead"): string {
+  return input[field];
+}
+
+function decode(row: StoredEngineeringJob): EngineeringJobRecordV1 {
+  return Object.freeze({
+`);
+
+replaceOnce("src/engineering/postgres-jobs.ts",
+`    expectedHead: row.expected_head,
+    objective: row.objective,
+    status: row.status,
+`,
+`    expectedHead: row.expected_head,
+    objective: row.objective,
+    authorityReceipt: authorityReceipt(row.input),
+    status: row.status,
+`);
+
+replaceOnce("src/spawn/execution-contracts.ts",
+`import type { JsonObject, JsonValue } from "../model/types.js";
+`,
+`import type { JsonObject, JsonValue } from "../model/types.js";
+import type { CapabilityTierV1 } from "../authority/capability-tiers.js";
+`);
+
+replaceOnce("src/spawn/execution-contracts.ts",
+`export interface SpawnEffectiveGrantV1 {
+  capabilities: readonly string[];
+`,
+`export interface SpawnEffectiveGrantV1 {
+  maxCapabilityTier?: CapabilityTierV1;
+  capabilities: readonly string[];
+`);
+
+replaceOnce("src/spawn/execution-contracts.ts",
+`  | "capability_not_delegated"
+  | "tool_scope_escalation"
+`,
+`  | "capability_not_delegated"
+  | "capability_tier_escalation"
+  | "tool_scope_escalation"
+`);
+
+replaceOnce("src/spawn/policy-authority.ts",
+`import type {
+`,
+`import {
+  maxCapabilityTierV1,
+  requestedEffectTierV1,
+  type CapabilityTierV1,
+} from "../authority/capability-tiers.js";
+import type {
+`);
+
+replaceOnce("src/spawn/policy-authority.ts",
+`export function requestsSpawnSelfAuthorityV1(
+`,
+`export function requestedSpawnCapabilityTierV1(
+  request: SpawnSentientRequestV1,
+): CapabilityTierV1 {
+  return requestedEffectTierV1({
+    capabilities: request.targetPolicy.requiredCapabilities,
+    tools: request.tools,
+    repositoryWritePaths: request.scopes.repositories.flatMap((scope) => scope.writePaths),
+    repositoryOperations: request.scopes.repositories.flatMap((scope) => scope.allowedOperations),
+  });
+}
+
+export function effectiveGrantCapabilityTierV1(
+  grant: SpawnEffectiveGrantV1,
+): CapabilityTierV1 {
+  if (grant.maxCapabilityTier !== undefined) return grant.maxCapabilityTier;
+  return requestedEffectTierV1({
+    capabilities: grant.capabilities,
+    tools: grant.tools,
+    repositoryWritePaths: grant.scopes.repositories.flatMap((scope) => scope.writePaths),
+    repositoryOperations: grant.scopes.repositories.flatMap((scope) => scope.allowedOperations),
+  });
+}
+
+export function spawnChildTierWithinParentV1(
+  request: SpawnSentientRequestV1,
+  parent: SpawnEffectiveGrantV1,
+): boolean {
+  return requestedSpawnCapabilityTierV1(request) <= effectiveGrantCapabilityTierV1(parent);
+}
+
+export function requestsSpawnSelfAuthorityV1(
+`);
+
+
+replaceOnce("src/spawn/policy-budgets.ts",
+`} from "./contracts.js";
+`,
+`} from "./contracts.js";
+import { requestedSpawnCapabilityTierV1 } from "./policy-authority.js";
+`);
+
+replaceOnce("src/spawn/policy-budgets.ts",
+`  return {
+    capabilities: [...request.targetPolicy.requiredCapabilities],
+`,
+`  return {
+    maxCapabilityTier: requestedSpawnCapabilityTierV1(request),
+    capabilities: [...request.targetPolicy.requiredCapabilities],
+`);
+
+replaceOnce("src/spawn/policy.ts",
+`  requestsSpawnSelfAuthorityV1,
+  stringsWithinSpawnGrantV1,
+`,
+`  requestsSpawnSelfAuthorityV1,
+  spawnChildTierWithinParentV1,
+  stringsWithinSpawnGrantV1,
+`);
+
+replaceOnce("src/spawn/policy.ts",
+`  if (
+    !stringsWithinSpawnGrantV1(
+      request.targetPolicy.requiredCapabilities,
+`,
+`  if (!spawnChildTierWithinParentV1(request, parent.effectiveGrant)) {
+    pushSpawnReasonV1(reasons, "capability_tier_escalation");
+  }
+  if (
+    !stringsWithinSpawnGrantV1(
+      request.targetPolicy.requiredCapabilities,
+`);
+
+replaceOnce("src/deployment-governor/policy.ts",
+`export const SENTIENT_DEPLOYMENT_REPOSITORY = "riggeyb/sentient" as const;
+`,
+`import {
+  CAPABILITY_TIER_POLICY_VERSION,
+  type CapabilityTierV1,
+} from "../authority/capability-tiers.js";
+
+export const SENTIENT_DEPLOYMENT_REPOSITORY = "riggeyb/sentient" as const;
+export const SENTIENT_DEPLOYMENT_CAPABILITY_TIER: CapabilityTierV1 = 3;
+export const SENTIENT_POLICY_CHANGE_CAPABILITY_TIER: CapabilityTierV1 = 4;
+export { CAPABILITY_TIER_POLICY_VERSION };
+`);
+
+replaceOnce("src/deployment-governor/ledger.ts",
+`  MAX_DEPLOYMENTS_PER_HOUR,
+  MAX_DEPLOYMENTS_PER_OBJECTIVE,
+`,
+`  CAPABILITY_TIER_POLICY_VERSION,
+  MAX
