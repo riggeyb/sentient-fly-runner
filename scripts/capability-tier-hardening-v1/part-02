@@ -1,0 +1,135 @@
+zationIdentity: string;
+  authorizationReason: string;
+  policyVersion: typeof CAPABILITY_TIER_POLICY_VERSION;
+  idempotencyKey?: string;
+  objective: string;
+  commands: readonly EngineeringCommandV1[];
+  commitMessage: string;
+  timeoutMs: number;
+}
+
+export interface EngineeringAuthorityReceiptV1 {
+  objectiveId: string;
+  actionId: string;
+  actionType: "source_mutation";
+  capabilityTier: 2;
+  policyVersion: typeof CAPABILITY_TIER_POLICY_VERSION;
+  authorizationIdentity: string;
+  authorizationReason: string;
+  authorizedPaths: readonly string[];
+  sourceSha: string;
+  sourceTree: string;
+  verificationRequired: true;
+}
+`);
+
+replaceOnce("src/engineering/contracts.ts",
+`  expectedHead: string;
+  objective: string;
+  status: EngineeringJobStatusV1;
+`,
+`  expectedHead: string;
+  objective: string;
+  authorityReceipt: EngineeringAuthorityReceiptV1 | null;
+  status: EngineeringJobStatusV1;
+`);
+
+replaceOnce("src/engineering/contracts.ts",
+`const SAFE_IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,200}$/;
+`,
+`const SAFE_IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,200}$/;
+const SAFE_AUTHORITY_ID = /^[A-Za-z0-9._:/-]{1,200}$/;
+`);
+
+replaceOnce("src/engineering/contracts.ts",
+`  const expectedHead = required(input.expectedHead, "expectedHead").toLowerCase();
+  if (!SHA1.test(expectedHead)) throw new Error("engineering_expected_head_must_be_exact_sha1");
+
+  const idempotencyKey`,
+`  const expectedHead = required(input.expectedHead, "expectedHead").toLowerCase();
+  if (!SHA1.test(expectedHead)) throw new Error("engineering_expected_head_must_be_exact_sha1");
+  const expectedTree = required(input.expectedTree, "expectedTree").toLowerCase();
+  if (!SHA1.test(expectedTree)) throw new Error("engineering_expected_tree_must_be_exact_sha1");
+
+  const objectiveId = required(input.objectiveId, "objectiveId");
+  const actionId = required(input.actionId, "actionId");
+  const authorizationIdentity = required(input.authorizationIdentity, "authorizationIdentity");
+  const authorizationReason = required(input.authorizationReason, "authorizationReason");
+  for (const [name, value] of Object.entries({ objectiveId, actionId, authorizationIdentity })) {
+    if (!SAFE_AUTHORITY_ID.test(value)) throw new Error(\`engineering_\${name}_invalid\`);
+  }
+  if (authorizationReason.length > 1_024) throw new Error("engineering_authorization_reason_too_large");
+  if (input.policyVersion !== CAPABILITY_TIER_POLICY_VERSION) throw new Error("engineering_capability_policy_version_mismatch");
+  if (!Array.isArray(input.authorizedPaths) || input.authorizedPaths.some((path) => typeof path !== "string")) {
+    throw new Error("engineering_authorized_paths_invalid");
+  }
+  const authorizedPaths = assertOrdinarySourceMutationScopeV1(input.authorizedPaths as string[]);
+
+  const idempotencyKey`);
+
+replaceOnce("src/engineering/contracts.ts",
+`  const timeoutMs = boundedInt(input.timeoutMs, 5_000, 30 * 60_000, "timeoutMs");
+  const commandBudget = commands.reduce((sum, command) => sum + command.timeoutMs, 0);
+  if (commandBudget > timeoutMs) throw new Error("engineering_command_budget_exceeds_job_timeout");
+
+  return Object.freeze({
+    repo,
+    branch,
+    expectedHead,
+`,
+`  const timeoutMs = boundedInt(input.timeoutMs, 5_000, 30 * 60_000, "timeoutMs");
+  const commandBudget = commands.reduce((sum, command) => sum + command.timeoutMs, 0);
+  if (commandBudget > timeoutMs) throw new Error("engineering_command_budget_exceeds_job_timeout");
+  if (commands.at(-1)?.category !== "test") throw new Error("engineering_final_verification_test_required");
+
+  return Object.freeze({
+    repo,
+    branch,
+    expectedHead,
+    expectedTree,
+    objectiveId,
+    actionId,
+    authorizedPaths,
+    authorizationIdentity,
+    authorizationReason,
+    policyVersion: CAPABILITY_TIER_POLICY_VERSION,
+`);
+
+replaceOnce("src/engineering/repository-worker.ts",
+`import { SENTIENT_SOURCE_CREDENTIAL } from "../deployment-governor/policy.js";
+`,
+`import { SENTIENT_SOURCE_CREDENTIAL } from "../deployment-governor/policy.js";
+import { assertChangedPathsAuthorizedV1 } from "../authority/capability-tiers.js";
+`);
+
+replaceOnce("src/engineering/repository-worker.ts",
+`      const startTree=sha(o.stdout.trim(),"start_tree"); await this.#jobs.setStartIdentity(jobId,start,startTree);
+`,
+`      const startTree=sha(o.stdout.trim(),"start_tree");
+      if(startTree!==i.expectedTree)throw new Error(\`engineering_expected_tree_mismatch:\${startTree}\`);
+      await this.#jobs.setStartIdentity(jobId,start,startTree);
+`);
+
+replaceOnce("src/engineering/repository-worker.ts",
+`      changedFiles=o.stdout.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);if(!changedFiles.length)throw new Error("engineering_commit_has_no_changed_files");
+      const pa=`,
+`      changedFiles=o.stdout.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);if(!changedFiles.length)throw new Error("engineering_commit_has_no_changed_files");
+      assertChangedPathsAuthorizedV1(changedFiles,i.authorizedPaths);
+      const pa=`);
+
+replaceOnce("src/engineering/postgres-jobs.ts",
+`  ENGINEERING_JOB_CONTRACT,
+  type EngineeringJobInputV1,
+`,
+`  ENGINEERING_JOB_CONTRACT,
+  type EngineeringAuthorityReceiptV1,
+  type EngineeringJobInputV1,
+`);
+
+replaceOnce("src/engineering/postgres-jobs.ts",
+`function decode(row: StoredEngineeringJob): EngineeringJobRecordV1 {
+  return Object.freeze({
+`,
+`function authorityReceipt(input: EngineeringJobInputV1): EngineeringAuthorityReceiptV1 | null {
+  const legacy = input as EngineeringJobInputV1 & {
+    expect
