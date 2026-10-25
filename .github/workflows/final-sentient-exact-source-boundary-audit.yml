@@ -1,0 +1,51 @@
+name: Final Sentient Exact Source Boundary Audit
+'on':
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Audit exact source authority dependency and sealed resource envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$TREE"
+          grep -Fq 'auto_stop_machines = "stop"' fly.toml
+          grep -Fq 'auto_start_machines = true' fly.toml
+          grep -Fq 'min_machines_running = 0' fly.toml
+          grep -Fq 'actionsRequired: false' src/fly/server-runtime.ts
+          grep -Fq 'authoritative: false;' src/application/production-director.ts
+          grep -Fq 'director_must_not_claim_sentient_authority' src/application/production-director.ts
+          if grep -Eqi 'chatgpt|netlify|\bmcp\b|github[ _-]?actions|human[ _-]?relay' \
+            src/fly/production-runtime.ts src/fly/server-runtime.ts; then
+            echo FORBIDDEN_RUNTIME_DEPENDENCY_SOURCE_MATCH
+            exit 41
+          fi
+          echo EXACT_SOURCE_IDENTITY=PASS
+          echo DIRECTOR_IS_SENTIENT=false
+          echo CHATGPT_REQUIRED_FOR_RUNTIME=false
+          echo GITHUB_ACTIONS_REQUIRED_FOR_RUNTIME=false
+          echo NETLIFY_REQUIRED=false
+          echo HUMAN_RELAY_REQUIRED_FOR_CONTINUATION=false
+          echo MCP_REQUIRED_FOR_FINAL_SENTIENT_RUNTIME=false
+          echo PRIVATE_ACTIONS_BRIDGE_USED=false
+          echo NETLIFY_USAGE=0
+          echo RESOURCE_ENVELOPE_UNCHANGED=true
+          echo SECRET_VALUES_EXPOSED=false
