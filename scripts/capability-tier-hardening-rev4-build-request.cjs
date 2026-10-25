@@ -19,16 +19,85 @@ const at=s.indexOf(old);if(at<0||s.indexOf(old,at+1)>=0)throw Error("REV4_ANCHOR
 s=s.slice(0,at)+neu+s.slice(at+old.length);
 const patch=Buffer.from(s),want=h(patch),chunks=[];for(let i=0;i<patch.length;i+=5000)chunks.push(patch.subarray(i,i+5000));
 if(chunks.length<2||chunks.length>8)throw Error("REV4_CHUNK_COUNT");
+const compat=`const f=require("fs");
+const r=(p,a,b)=>{let s=f.readFileSync(p,"utf8");const n=s.split(a).length-1;if(n!==1)throw Error("compat_anchor:"+p+":"+n);f.writeFileSync(p,s.replace(a,b));};
+r("src/fly/phase0-engineering-acceptance.ts",
+\`export function phase0AcceptanceJobInputV1(expectedHead: string): EngineeringJobInputV1 {
+  const sha = expectedHead.trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("phase0_acceptance_expected_head_invalid");
+\p,
+\`export function phase0AcceptanceJobInputV1(expectedHead: string, expectedTree: string): EngineeringJobInputV1 {
+  const sha = expectedHead.trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("phase0_acceptance_expected_head_invalid");
+  const tree = expectedTree.trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(tree)) throw new Error("phase0_acceptance_expected_tree_invalid");
+\p);
+r("src/fly/phase0-engineering-acceptance.ts",
+\`    expectedHead: sha,
+    objective: \\;phase0-42601-repair:\${sha}\\;,
+\p,
+\`    expectedHead: sha,
+    expectedTree: tree,
+    objectiveId: \\;phase0-42601-repair:\${sha}\\;,
+    actionId: \\;phase0-42601-source-mutation:\${sha}\\;,
+    authorizedPaths: Object.freeze(["scripts/bootstrap-bounded/cloud-db.mjs"]),
+    authorizationIdentity: "SENTIENT_RUNTIME",
+    authorizationReason: "bounded Phase0 PostgreSQL 42601 source repair",
+    policyVersion: "sentient-capability-tier/v1",
+    objective: \\;phase0-42601-repair:\${sha}\\;,
+\`);
+r("src/fly/phase0-engineering-acceptance.ts",
+\`  const input = phase0AcceptanceJobInputV1(options.identity.source.sha);
+\`,
+\`  const input = phase0AcceptanceJobInputV1(options.identity.source.sha, options.identity.source.tree);\n\`);
+r("test/job2-self-execution.test.ts",
+\`  expectedHead: SHA,
+  idempotencyKey: "objective:restart-proof:step-1",
+\`,
+\`  expectedHead: SHA,
+  expectedTree: TREE,
+  objectiveId: "restart-proof",
+  actionId: "restart-proof:source-mutation",
+  authorizedPaths: ["test/job2-self-execution.test.ts"],
+  authorizationIdentity: "SENTIENT_RUNTIME_TEST",
+  authorizationReason: "restart-safe engineering proof fixture",
+  policyVersion: "sentient-capability-tier/v1",
+  idempotencyKey: "objective:restart-proof:step-1",\\`);
+r("test/job2-self-execution.test.ts",
+\`   category: "inspect",\\`,
+\`   category: "test",\\`);
+r("test/job2-self-execution.test.ts",
+\`   expectedHead: JOB.expectedHead,
+    objective: JOB.objective,
+    status,\`,
+\`   expectedHead: JOB.expectedHead,
+    objective: JOB.objective,
+    authorityReceipt: {
+      objectiveId: JOB.objectiveId,
+      actionId: JOB.actionId,
+      actionType: "source_mutation",
+      capabilityTier: 2,
+      policyVersion: JOB.policyVersion,
+      authorizationIdentity: JOB.authorizationIdentity,
+      authorizationReason: JOB.authorizationReason,
+      authorizedPaths: JOB.authorizedPaths,
+      sourceSha: JOB.expectedHead,
+      sourceTree: JOB.expectedTree,
+      verificationRequired: true,
+    },
+    status,\\`);
+console.log("CAPABILITY_TIER_COMPATIBILITY_FIXTURES=APPLIED");`;
 const commands=[
 {name:"install",category:"shell",command:"npm",args:["ci","--ignore-scripts"],timeoutMs:300000},
 {name:"prebuild",category:"build",command:"npm",args:["run","build"],timeoutMs:120000},
 {name:"preflight-tests",category:"test",command:"node",args:["--test","dist/test/action-fabric-authority-reuse.test.js","dist/test/engineering-jobs.test.js","dist/test/deployment-governor-boundaries.test.js"],timeoutMs:180000},
 ...chunks.map((b,i)=>({name:`patch-${i}`,category:"edit",command:"node",args:["-e","require('fs').writeFileSync(process.argv[1],Buffer.from(process.argv[2],'base64'))",`/tmp/cap-tier.mjs.${i}`,b.toString("base64")],timeoutMs:30000})),
-{name:"assemble",category:"inspect",command:"node",args:["-e","const f=require('fs'),c=require('crypto'),n=+process.argv[1],w=process.argv[2],p=Buffer.concat(Array.from({length:n},(_,i)=>f.readFileSync('/tmp/cap-tier.mjs.'+i))),g=c.createHash('sha256').update(p).digest('hex');if(g!==w)throw Error('PATCH_DIGEST_MISMATCH');f.writeFileSync('/tmp/cap-tier.mjs',p)",String(chunks.length),want],timeoutMs:30000},
+{name:"assemble",category:"inspect",command:"node",args:["-e","const f=require('fs'),c=require('crypto'),x=+process.argv[1],w=process.argv[2],p=Buffer.concat(Array.from({length:x},(_,i)=>f.readFileSync('/tmp/cap-tier.mjs.'+i)),g=c.createHash('sha256').update(p).digest('hex');if(g!==w)throw Error('PATCH_DIGEST_MISMATCH');f.writeFileSync('/tmp/cap-tier.mjs',p)",String(chunks.length),want],timeoutMs:30000},
 {name:"apply",category:"edit",command:"node",args:["/tmp/cap-tier.mjs"],timeoutMs:60000},
+{name:"compatibility-fixtures",category:"edit",command:"node",args:["-e",compat],timeoutMs:30000},
 {name:"postbuild",category:"build",command:"npm",args:["run","build"],timeoutMs:180000},
-{name:"authority-tests",category:"test",command:"bash",args:["-lc","node --test dist/test/*capability*.test.js dist/test/action-fabric-authority-reuse.test.js dist/test/engineering-jobs.test.js dist/test/spawn-immutable-identity.test.js dist/test/deployment-governor-boundaries.test.js"],timeoutMs:240000},
+{name:"authority-tests",category:"test",command:"rash",args:["-lc","node --test dist/test/*capability*.test.js dist/test/action-fabric-authority-reuse.test.js dist/test/engineering-jobs.test.js dist/test/job2-self-execution.test.js dist/test/spawn-immutable-identity.test.js dist/test/deployment-governor-boundaries.test.js"],timeoutMs:240000},
 {name:"governor-tests",category:"test",command:"npm",args:["run","test:deployment-governor"],timeoutMs:240000},
 {name:"diff-check",category:"test",command:"git",args:["diff","--check"],timeoutMs:30000}
 ];
-process.stdout.write(JSON.stringify({repo:"riggeyb/sentient",branch:"sentient-production-composition-20261017",expectedHead:"5ce976089532a86ac262a2760367318b6f4b72a5",objective:"SENTIENT_CAPABILITY_TIER_AND_AUTHORITY_ENFORCEMENT_V1 bootstrap rev4 from verified rev2 bytes with one exact anchor rewrite under explicit user authorization. Fail closed on head/digest/build/test/diff failure. No deployment, resize, paid compute, secret exposure, or certification mutation.",commands,commitMessage:"feat: enforce capability tiers and authority bounds",timeoutMs:1600000}));
+process.stdout.write(JSON.stringify({repo:"riggeyb/sentient",branch:"sentient-production-composition-20261017",expectedHead:"5ce976089532a86ac262a2760367318b6f4b72a5",objective:"SENTIENT_CAPABILITY_TIER_AND_AUTHORITY_ENFORCEMENT_V1 bootstrap rev5: peer rev4 authority patch plus two compatibility fixture updates required by the new mandatory authority contract. Explicit user authorization. Fail closed on head/digest/build/test/diff failure. No deployment, resize, paid compute, secret exposure, or certification mutation.",commands,commitMessage:"feat: enforce capability tiers and authority bounds",timeoutMs:1600000}));
