@@ -133,9 +133,9 @@ jobs:
           print("UNRELATED_ENV_CHANGES=NONE")
           print("HF_TOKEN_REMAINS_SECRET=true")
           print("HF_NAMESPACE_CONFIGURED=true")
-          print("HF_VERSIONED_REPOSITORY_CONFIGURED=true")
+          print("HF_VERSIONED_REPOSITORY_CONFIGURED=true"
           print("HF_WORKING_BUCKET_CONFIGURED=true")
-          print("SECRET_NAMES_EXPOSED=false"
+          print("SECRET_NAMES_EXPOSED=false")
           print("SECRET_VALUES_EXPOSED=false")
           PY
           echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
