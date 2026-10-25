@@ -43,28 +43,15 @@ jobs:
           cat >/tmp/detail.mjs <<'NODE'
           import {PostgresSpawnObjectiveRepository as Repo} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
           const id=String(process.env.CERT_ID??"").trim();
-          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??").trim();
+          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!id||!db) throw new Error("CERT_DETAIL_BINDING_MISSING");
           const repo=new Repo({connectionString:db});
           const clean=(v,n=1000)=>String(v??"").replace(/[\r\n\0]/g," ").slice(0,n);
-          const scrub=(v,d=0)=>{
-            if(d>6)return "[truncated]";
-            if(v===null||typeof v==="boolean"||typeof v==="number")return v;
-            if(typeof v==="string")return clean(v);
-            if(Array.isArray(v))return v.slice(0,40).map(x=>scrub(x,d+1));
-            if(!v||typeof v!=="object")return clean(v);
-            const o={};
-            for(const [k,x] of Object.entries(v)){
-              o[k]=/(token|secret|password|credential|authorization|cookie|database|url)/i.test(k)?"[REDACTED]":scrub(x,d+1);
-            }
-            return o;
-          };
-          try{
-            const task=await repo.get("task",id);
-            if(task?.kind!=="task") throw new Error("CERT_DETAIL_TASK_MISSING");
-            const md=(task.metadata&&typeof task.metadata==="object"&&!Array.isArray(task.metadata))?task.metadata:{};
-            const root=await repo.getObjectiveContinuation(id);
-            const detail={
+         ÛÛœİØÜXJ‹L
+OOÂˆYŠŠ\™]\›ˆ–İ[˜Ø]YHÂˆYŠOO[[\[ÙˆOOH˜›ÛÛX[ˆŸ\[ÙˆOOH›[X™\ˆŠ\™]\›ˆÂˆYŠ\[ÙˆOOHœİš[™ÈŠ\™]\›ˆÛX[ŠŠNÂˆYŠ\œ˜^Kš\Ğ\œ˜^JŠJ\™]\›ˆ‹œÛXÙJ
+K›X\
+OœØÜXŠ
+ÌJJNÂˆYŠ]Ÿ\[ÙˆˆOOH›Øš™XİŠ\™]\›ˆÛX[ŠŠNÂˆ6öç7Bó×·Ó°¢f÷"†6öç7B¶²Ç…Òöbö&¦V7BæVçG&–W2‡b’—°¢õ¶µÓÒò‡Fö¶VçÇ6V7&WGÇ77v÷&GÆ7&VFVçF–ÇÆWF†÷&—¦F–öçÆ6öö¶–WÆFF&6WÇW&Â’ö’çFW7B†²“ò%µ$TD5DTEÒ#§67'V"‡‚ÆB³“°¢Ğ¢&WGW&âó°¢Ó°¢G'—°¢6öç7BF6³Öv—B&WòævWB‚'F6²"Æ–B“°¢–b‡F6³òæ¶–æBÓÒ'F6²"’F‡&÷ræWrW'&÷"‚$4U%EôDUD”ÅõD4µôÔ•54”är"“°¢½¹ÍĞµô¡Ñ…Í¬¹µ•Ñ…‘…Ñ„˜™ÑåÁ•½˜Ñ…Í¬¹µ•Ñ…‘…Ñ„ôôô‰½‰©•Ğˆ˜˜…ÉÉ…ä¹¥ÍÉÉ…ä¡Ñ…Í¬¹µ•Ñ…‘…Ñ„¤¤ıÑ…Í¬¹µ•Ñ…‘…Ñ„éíôì(€€€€€€€€€€€½¹ÍĞÉ½½Ğõ…İ…¥ĞÉ•Á¼¹•Ñ=‰©•Ñ¥Ù•½¹Ñ¥¹Õ…Ñ¥½¸¡¥¤ì(€€€€€€€€€€€const detail={
               taskStatus:task.status,
               taskError:md.error??null,
               result:md.result??null,
