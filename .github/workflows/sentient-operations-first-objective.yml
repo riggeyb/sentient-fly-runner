@@ -18,7 +18,7 @@ jobs:
       APP: sentient-validation-runner
       EXPECTED_SHA: e9bd0c9135f05da2be337e5e7ac4077af0f4649d
       EXPECTED_TREE: 0d5317a5434f20530d4814d748ae9fa9a7a520f3
-      OBJECTIVE_ID: sentient-operations-001
+      OBJECTIVE_ID: sentient-operations-002
       SESSION_ID: sentient-operations
     steps:
       - uses: actions/checkout@v4
