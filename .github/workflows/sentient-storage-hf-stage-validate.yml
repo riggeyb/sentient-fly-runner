@@ -54,7 +54,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
-          git fetch origin "${{ inputs.source_branch }}" sentient-production-composition-20261017
           test "$(git rev-parse "origin/${{ inputs.source_branch }}")" = "${{ inputs.source_sha }}"
           test "$(git merge-base HEAD origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
           test -z "$(git ls-files 'node_modules/**')"
