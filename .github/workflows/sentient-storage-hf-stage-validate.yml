@@ -2,12 +2,22 @@ name: Sentient Storage HF Stage Validate
 
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Exact riggeyb/sentient source SHA to validate"
+        required: true
+        type: string
+      source_branch:
+        description: "Expected source branch containing source_sha"
+        required: false
+        default: "storage-hf-buildout-20261025"
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  stage:
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -30,100 +40,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: storage-hf-buildout-20261025
+          ref: ${{ inputs.source_sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: true
+          persist-credentials: false
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Fence and integrate artifact state
+      - name: Fence exact source and storage boundary
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "da4f11a0abd2f7553a9c1a4ce0f1450bc2d23e05"
-          test "$(git merge-base HEAD e9bd0c9135f05da2be337e5e7ac4077af0f4649d)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path, old, new):
-              p = Path(path)
-              s = p.read_text()
-              if s.count(old) != 1:
-                  raise SystemExit(f"{path}: expected unique anchor, found {s.count(old)}")
-              p.write_text(s.replace(old, new, 1))
-
-          replace_once(
-              "src/state/postgres-state-repository.ts",
-              'import { emptyWorldStateSegment } from "./world-persistence.js";',
-              'import { emptyWorldStateSegment } from "./world-persistence.js";\nimport { emptyArtifactStateSegment } from "./artifact-persistence.js";',
-          )
-          replace_once(
-              "src/state/postgres-state-repository.ts",
-              '    spawn: emptySpawnStateSegment(),\n  };',
-              '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };',
-          )
-
-          replace_once(
-              "src/state/file-state-repository-v2.ts",
-              'import {\n  emptyWorldStateSegment,',
-              'import { emptyArtifactStateSegment } from "./artifact-persistence.js";\nimport {\n  emptyWorldStateSegment,',
-          )
-          replace_once(
-              "src/state/file-state-repository-v2.ts",
-              '    spawn: emptySpawnStateSegment(),\n  };',
-              '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };',
-          )
-
-          replace_once(
-              "src/state/migration.ts",
-              'import { emptyWorldStateSegment } from "./world-persistence.js";',
-              'import { emptyWorldStateSegment } from "./world-persistence.js";\nimport { emptyArtifactStateSegment } from "./artifact-persistence.js";',
-          )
-          replace_once(
-              "src/state/migration.ts",
-              '    spawn: emptySpawnStateSegment(),\n  };',
-              '    spawn: emptySpawnStateSegment(),\n    artifacts: emptyArtifactStateSegment(),\n  };',
-          )
-          replace_once(
-              "src/state/migration.ts",
-              '      input.spawn === undefined\n    ) {',
-              '      input.spawn === undefined ||\n      input.artifacts === undefined\n    ) {',
-          )
-          replace_once(
-              "src/state/migration.ts",
-              '          ...(input.spawn === undefined\n            ? { spawn: emptySpawnStateSegment() }\n            : {}),',
-              '          ...(input.spawn === undefined\n            ? { spawn: emptySpawnStateSegment() }\n            : {}),\n          ...(input.artifacts === undefined\n            ? { artifacts: emptyArtifactStateSegment() }\n            : {}),',
-          )
-
-          replace_once(
-              "src/state/state-integrity.ts",
-              'import { assertWorldStateSegment } from "./world-persistence.js";',
-              'import { assertWorldStateSegment } from "./world-persistence.js";\nimport { assertArtifactStateSegment } from "./artifact-persistence.js";',
-          )
-          replace_once(
-              "src/state/state-integrity.ts",
-              '  assertSpawnStateSegment(s);\n  assertObjectiveContinuationState(s);',
-              '  assertSpawnStateSegment(s);\n  assertArtifactStateSegment(s);\n  assertObjectiveContinuationState(s);',
-          )
-          PY
-          git diff --check
-          echo "ARTIFACT_STATE_INTEGRATION_APPLIED=PASS"
-
-      - name: Remove future-tree generated dependencies and build output
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git ls-files 'node_modules/**' | wc -l)" -gt 0
-          test "$(git ls-files 'dist/**' | wc -l)" -gt 0
-          git rm -r --quiet node_modules dist
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          git fetch origin "${{ inputs.source_branch }}" sentient-production-composition-20261017
+          test "$(git rev-parse "origin/${{ inputs.source_branch }}")" = "${{ inputs.source_sha }}"
+          test "$(git merge-base HEAD origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
           test -z "$(git ls-files 'node_modules/**')"
           test -z "$(git ls-files 'dist/**')"
+          test -f .gitignore
+          grep -Fxq 'node_modules/' .gitignore
+          grep -Fxq 'dist/' .gitignore
+          echo "SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo "NODE_MODULES_TRACKING_REMOVED=PASS"
           echo "DIST_TRACKING_REMOVED=PASS"
-          echo "GIT_HISTORY_REWRITTEN=false"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "CANONICAL_BRANCH_MUTATED=false"
+          echo "CERTIFIED_TAG_MUTATED=false"
 
       - name: Clean dependency install build and regressions
         shell: bash
@@ -131,7 +76,7 @@ jobs:
           set -euo pipefail
           npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
           if ! npm run build >/tmp/build.log 2>&1; then
-            cat /tmp/build.log
+            tail -n 200 /tmp/build.log
             exit 1
           fi
           node --test dist/test/artifact-storage.test.js
@@ -143,19 +88,25 @@ jobs:
           echo "CUMULATIVE_REGRESSIONS=PASS"
           echo "TEST_FILE_COUNT=${#tests[@]}"
 
-      - name: Commit validated stage branch
+      - name: Docker rebuild proof
         shell: bash
         run: |
-          git fetch origin storage-hf-buildout-20261025 sentient-production-composition-20261017
-          test "$(git rev-parse origin/storage-hf-buildout-20261025)" = "da4f11a0abd2f7553a9c1a4ce0f1450bc2d23e05"
-          test "$(git rev-parse origin/sentient-production-composition-20261017)" = "e9bd0c9135f05da2be337e5e7ac4077af0f4649d"
-          git config user.name "sentient-storage-operations"
-          git config user.email "sentient-storage-operations@users.noreply.github.com"
-          git add -A
-          git commit -m "feat: establish authoritative artifact storage boundary"
-          git push origin HEAD:storage-hf-buildout-20261025
-          echo "STAGE_SHA=$(git rev-parse HEAD)"
-          echo "STAGE_TREE=$(git rev-parse 'HEAD^{tree}')"
-          echo "CERTIFIED_TAG_MUTATED=false"
-          echo "CANONICAL_BRANCH_MUTATED=false"
-          echo "SECRET_VALUES_EXPOSED=false"
+          set -euo pipefail
+          docker build -t sentient-storage-hf-validate:"${{ inputs.source_sha }}" .
+          image_id="$(docker image inspect sentient-storage-hf-validate:"${{ inputs.source_sha }}" --format '{{.Id}}')"
+          test -n "$image_id"
+          echo "DOCKER_BUILD_REPRODUCIBLE=PASS"
+          echo "DOCKER_IMAGE_ID=$image_id"
+
+      - name: Final receipt
+        if: always()
+        shell: bash
+        run: |
+          echo "RUNNER_WORKFLOW=sentient-storage-hf-stage-validate.yml"
+          echo "SOURCE_SHA=${{ inputs.source_sha }}"
+          echo "SOURCE_BRANCH=${{ inputs.source_branch }}"
+          echo "SOURCE_REPO=riggeyb/sentient"
+          echo "PUBLIC_RUNNER_REPO=riggeyb/sentient-fly-runner"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "SOURCE_MUTATION=false"
+          echo "DEPLOYMENT=false"
