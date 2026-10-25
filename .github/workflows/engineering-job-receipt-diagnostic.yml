@@ -30,8 +30,8 @@ jobs:
           if(!db)throw new Error("GOVERNOR_LEDGER_DB_MISSING");
           const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
           const clean=(v,n=12000)=>String(v??"")
-            .replace(/gh[pousr_[A-Za-z0-9_]+/g,"[REDACTED]")
-            .replace(/flyv1_[A-Za-z0-9_-[/g,"[REDACTED]")
+            .replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]")
+            .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
             .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]")
             .replace(/[\0]/g,"").slice(0,n);
           try{
@@ -63,5 +63,6 @@ jobs:
             console.log("SECRET_VALUES_EXPOSED=false");
           }finally{await pool.end();}
           NODE
+          node --check /tmp/job-receipt.mjs
           B64="$(base64 -w0 /tmp/job-receipt.mjs)"
           flyctl ssh console -a sentient-deployment-governor -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/job-receipt.mjs && JOB_ID=$JOB_ID node /app/job-receipt.mjs; rc=\$?; rm -f /app/job-receipt.mjs; exit \$rc'"
