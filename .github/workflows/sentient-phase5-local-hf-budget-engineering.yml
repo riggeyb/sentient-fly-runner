@@ -1,0 +1,22 @@
+name: Sentient Phase5 Local HF Budget Engineering
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sentient-phase5-local-hf-budget-engineering
+  cancel-in-progress: false
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Submit bounded Phase5 local HF budget request through resident Governor
+        shell: bash
+        run: bash scripts/phase5-local-hf-budget-submit.sh
