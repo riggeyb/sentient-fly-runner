@@ -28,7 +28,7 @@ import {readFile} from "node:fs/promises";
 const token=String(process.env.SENTIENT_ENGINEERING_API_TOKEN??"").trim();
 if(!token) throw new Error("ENGINEERING_CREDENTIAL_MISSING");
 const request=JSON.parse(await readFile("/tmp/collaboration-output-budget-request.json","utf8"));
-const r=await fetch("http://127.0.0.1:8080/v1/engineering/hobs",{
+const r=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{
   method:"POST",
   headers:{authorization:"Bearer "+token,"content-type":"application/json"},
   body:JSON.stringify(request),
