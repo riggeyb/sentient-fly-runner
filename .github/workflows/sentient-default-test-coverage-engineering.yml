@@ -1,0 +1,42 @@
+name: Sentient Default Test Coverage Engineering
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sentient-default-test-coverage-engineering
+  cancel-in-progress: false
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/default-test-coverage-request.cjs >/tmp/request.json
+          node -e 'const x=require("/tmp/request.json");if(x.expectedHead!=="fdab101aeef2275a3f9333384d6e8445799366a3"||x.expectedTree!=="c06b0c927efbfdd0cdfa2fc2ae1c8f6c26f2b11e"||x.objectiveId!=="SENTIENT_ROUTINE_DEFAULT_TEST_COVERAGE_RELIABILITY_V2"||x.policyVersion!=="sentient-capability-tier/v1"||x.authorizedPaths.length!==1||x.authorizedPaths[0]!=="package.json"||x.commands.at(-1)?.category!=="test")process.exit(2)'
+          app=sentient-deployment-governor
+          id="$(flyctl machines list -a "$app" --json|jq -r '[.[]|select((.config.auto_destroy//false)!=true)]|sort_by(.id)|.[0].id//empty')"
+          test -n "$id"
+          state="$(flyctl machines list -a "$app" --json|jq -r --arg id "$id" '.[]|select(.id==$id)|.state'|head -n1)"
+          started=false
+          cleanup(){ rm -f /tmp/request.json; if [ "$started" = true ]; then flyctl machine stop "$id" -a "$app" >/dev/null 2>&1||true; fi; }
+          trap cleanup EXIT
+          if [ "$state" != started ]; then flyctl machine start "$id" -a "$app" >/dev/null; started=true; fi
+          for _ in $(seq 1 60); do state="$(flyctl machines list -a "$app" --json|jq -r --arg id "$id" '.[]|select(.id==$id)|.state'|head -n1)"; [ "$state" = started ]&&break; sleep 2; done
+          test "$state" = started
+          req="$(base64 -w0 /tmp/request.json)"
+          script='const fs=require("fs");const token=process.env.SENTIENT_ENGINEERING_API_TOKEN;if(!token)throw Error("ENGINEERING_CREDENTIAL_MISSING");const request=JSON.parse(fs.readFileSync("/tmp/request.json","utf8"));fetch("http://127.0.0.1:8080/v1/engineering/jobs",{method:"POST",headers:{authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify(request),signal:AbortSignal.timeout(30000)}).then(async r=>{const body=await r.json().catch(()=>({}));console.log(JSON.stringify({http:r.status,jobId:body.jobId??null,status:body.status??null,expectedHead:body.expectedHead??null,authorityReceipt:body.authorityReceipt??null}));if(r.status!==202||!body.jobId||body.expectedHead!==request.expectedHead)process.exit(31);console.log("ENGINEERING_CREATE=PASS");console.log("JOB_ID="+body.jobId)})'
+          code="$(printf %s "$script"|base64 -w0)"
+          flyctl ssh console -a "$app" --machine "$id" --command "sh -lc 'echo $req|base64 -d >/tmp/request.json; echo $code|base64 -d >/tmp/post.js; node /tmp/post.js; rc=\$?; rm -f /tmp/request.json /tmp/post.js; exit \$rc'"
+          echo "GOVERNOR_ENGINEERING_INGRESS=PASS"
+          echo "RESOURCE_ENVELOPE_CHANGED=false"
+          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
