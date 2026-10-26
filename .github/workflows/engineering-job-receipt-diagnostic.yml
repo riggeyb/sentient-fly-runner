@@ -29,11 +29,13 @@ jobs:
           const db=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
           if(!db)throw new Error("GOVERNOR_LEDGER_DB_MISSING");
           const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
-          const clean=(v,n=12000)=>String(v??"")
+          const redact=(v)=>String(v??"")
             .replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]")
             .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
             .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]")
-            .replace(/[\0]/g,"").slice(0,n);
+            .replace(/[\0]/g,"");
+          const clean=(v,n=12000)=>redact(v).slice(0,n);
+          const cleanTail=(v,n=12000)=>redact(v).slice(-n);
           try{
             const r=await pool.query(`
               select job_id,status,start_sha,start_tree,build_result,end_sha,end_tree,
@@ -54,7 +56,7 @@ jobs:
                 name:s.name,category:s.category,command:s.command,exitCode:s.exitCode,
                 termination:s.termination,spawnError:clean(s.spawnError,1000),
                 stdoutTruncated:s.stdoutTruncated,stderrTruncated:s.stderrTruncated,
-                stdout:clean(s.stdout),stderr:clean(s.stderr),
+                stdout:clean(s.stdout),stdoutTail:cleanTail(s.stdout),stderr:clean(s.stderr),stderrTail:cleanTail(s.stderr),
                 startedAt:s.startedAt,endedAt:s.endedAt
               }))
             };
