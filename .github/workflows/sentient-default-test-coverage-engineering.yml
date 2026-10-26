@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/default-test-coverage-request.cjs >/tmp/request.json
+          node scripts/default-test-coverage-normalize.cjs /tmp/request.json
           node -e 'const x=require("/tmp/request.json");if(x.expectedHead!=="fdab101aeef2275a3f9333384d6e8445799366a3"||x.expectedTree!=="c06b0c927efbfdd0cdfa2fc2ae1c8f6c26f2b11e"||x.objectiveId!=="SENTIENT_ROUTINE_HERMETIC_DEFAULT_TEST_SUITE_V1"||x.actionId!=="default-test-hermetic-suite-v1"||x.policyVersion!=="sentient-capability-tier/v1"||x.authorizedPaths.length!==2||x.authorizedPaths[0]!=="package.json"||x.authorizedPaths[1]!=="scripts/run-hermetic-tests.mjs"||x.commands.at(-1)?.category!=="test")process.exit(2)'
           app=sentient-deployment-governor
           id="$(flyctl machines list -a "$app" --json|jq -r '[.[]|select((.config.auto_destroy//false)!=true)]|sort_by(.id)|.[0].id//empty')"
