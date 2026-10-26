@@ -3,21 +3,11 @@ name: Sentient Private Engineering Request Submit
 "on":
   workflow_dispatch:
     inputs:
-      issue_number:
-        required: true
-        type: string
-      request_sha256:
-        required: true
-        type: string
-      expected_head:
-        required: true
-        type: string
-      expected_tree:
-        required: true
-        type: string
-      objective_id:
-        required: true
-        type: string
+      issue_number: {required: true, type: string}
+      request_sha256: {required: true, type: string}
+      expected_head: {required: true, type: string}
+      expected_tree: {required: true, type: string}
+      objective_id: {required: true, type: string}
 
 permissions:
   contents: read
@@ -40,90 +30,10 @@ jobs:
       EXPECTED_TREE: ${{ inputs.expected_tree }}
       OBJECTIVE_ID: ${{ inputs.objective_id }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Verify private request and submit through resident Governor
         shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$ISSUE_NUMBER" =~ ^[0-9]{1,10}$ ]]
-          [[ "$REQUEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:/-]{1,200}$ ]]
-          test -n "$SOURCE_GITHUB_TOKEN"
-
-          code="$(curl -sS -o /tmp/issue.json -w '%{http_code}' \
-            -H "Authorization: Bearer $SOURCE_GITHUB_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/riggeyb/sentient/issues/$ISSUE_NUMBER")"
-          test "$code" = 200
-
-          node > /tmp/request.gz.b64 <<'NODE'
-          const fs=require("node:fs"),z=require("node:zlib"),c=require("node:crypto");
-          const issue=JSON.parse(fs.readFileSync("/tmp/issue.json","utf8"));
-          const m=String(issue.body??"").match(/REQUEST_BASE64_BEGIN\s+([A-Za-z0-9+/=\s]+?)\s+REQUEST_BASE64_END/);
-          if(!m)throw Error("PRIVATE_REQUEST_PAYLOAD_MISSING");
-          const gz=Buffer.from(m[1].replace(/\s+/g,""),"base64"), bytes=z.gunzipSync(gz);
-          if(c.createHash("sha256").update(bytes).digest("hex")!==process.env.REQUEST_SHA256)throw Error("PRIVATE_REQUEST_DIGEST_MISMATCH");
-          const r=JSON.parse(bytes);
-          if(r.repo!=="riggeyb/sentient"||r.branch!=="sentient-production-composition-20261017")throw Error("PRIVATE_REQUEST_TARGET_MISMATCH");
-          if(r.expectedHead!==process.env.EXPECTED_HEAD||r.expectedTree!==process.env.EXPECTED_TREE)throw Error("PRIVATE_REQUEST_SOURCE_MISMATCH");
-          if(r.objectiveId!==process.env.OBJECTIVE_ID||r.policyVersion!=="sentient-capability-tier/v1")throw Error("PRIVATE_REQUEST_AUTHORITY_MISMATCH");
-          if(!Array.isArray(r.authorizedPaths)||r.authorizedPaths.length<1||r.authorizedPaths.length>16)throw Error("PRIVATE_REQUEST_SCOPE_INVALID");
-          if(!Array.isArray(r.commands)||r.commands.length<1||r.commands.at(-1)?.category!=="test")throw Error("PRIVATE_REQUEST_FINAL_TEST_REQUIRED");
-          process.stdout.write(gz.toString("base64"));
-          NODE
-          rm -f /tmp/issue.json
-
-          machines="$(flyctl machines list -a "$APP" --json)"
-          machine="$(jq -r '[.[]|select((.config.auto_destroy//false)!=true and .state=="started")][0].id//empty' <<<"$machines")"
-          test -n "$machine"
-
-          remote_req="/tmp/private-engineering-${GITHUB_RUN_ID}.b64"
-          remote_script="/tmp/private-engineering-${GITHUB_RUN_ID}.mjs"
-          cleanup() {
-            rm -f /tmp/request.gz.b64 /tmp/submit.mjs
-            flyctl ssh console -a "$APP" --machine "$machine" \
-              -C "sh -lc 'rm -f $remote_req $remote_script'" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          flyctl ssh console -a "$APP" --machine "$machine" \
-            -C "sh -lc ': > $remote_req'" >/dev/null
-
-          while IFS= read -r chunk; do
-            test -n "$chunk"
-            flyctl ssh console -a "$APP" --machine "$machine" \
-              -C "sh -lc \"printf '%s' '$chunk' >> $remote_req\"" >/dev/null
-          done < <(fold -w 3000 /tmp/request.gz.b64)
-
-          cat >/tmp/submit.mjs <<'NODE'
-          import {createHash} from "node:crypto";
-          import {gunzipSync} from "node:zlib";
-          import {readFile} from "node:fs/promises";
-          const need=n=>{const v=String(process.env[n]??"").trim();if(!v)throw Error(`${n}_MISSING`);return v};
-          const encoded=(await readFile(need("REQUEST_PATH"),"utf8")).trim();
-          const gz=Buffer.from(encoded,"base64"), bytes=gunzipSync(gz);
-          if(createHash("sha256").update(bytes).digest("hex")!==need("REQUEST_SHA256"))throw Error("PRIVATE_REQUEST_DIGEST_MISMATCH");
-          const r=JSON.parse(bytes);
-          if(r.expectedHead!==need("EXPECTED_HEAD")||r.expectedTree!==need("EXPECTED_TREE")||r.objectiveId!==need("OBJECTIVE_ID"))throw Error("PRIVATE_REQUEST_BINDING_MISMATCH");
-          const response=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{
-            method:"POST",
-            headers:{authorization:`Bearer ${need("SENTIENT_ENGINEERING_API_TOKEN")}`,"content-type":"application/json"},
-            body:JSON.stringify(r),
-            signal:AbortSignal.timeout(30000)
-          });
-          const result=await response.json().catch(()=>({}));
-          if(!response.ok)throw Error(`ENGINEERING_CREATE_HTTP_${response.status}`);
-          if(typeof result.jobId!=="string"||!result.jobId)throw Error("ENGINEERING_JOB_ID_MISSING");
-          console.log(`ENGINEERING_JOB_ID=${result.jobId}`);
-          console.log(`ENGINEERING_STATUS=${String(result.status??"unknown")}`);
-          console.log("PRIVATE_REQUEST_DIGEST=PASS");
-          console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
-          console.log("SECRET_VALUES_EXPOSED=false");
-          NODE
-          script="$(base64 -w0 /tmp/submit.mjs)"
-
-          flyctl ssh console -a "$APP" --machine "$machine" \
-            -C "sh -lc 'echo $script|base64 -d >$remote_script; REQUEST_PATH=$remote_req REQUEST_SHA256=$REQUEST_SHA256 EXPECTED_HEAD=$EXPECTED_HEAD EXPECTED_TREE=$EXPECTED_TREE OBJECTIVE_ID=$OBJECTIVE_ID node $remote_script'"
+        run: bash scripts/private-engineering-submit.sh
