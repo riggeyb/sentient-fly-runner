@@ -53,8 +53,7 @@ jobs:
         shell: bash
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
-          EXPECTED_TREE:
-            ${{ inputs.tree }}
+          EXPECTED_TREE: ${{ inputs.tree }}
         run: |
           set -euo pipefail
           node <<'NODE'
@@ -121,40 +120,45 @@ jobs:
           set -euo pipefail
           [[ "$PRIVATE_ISSUE" =~ ^[0-9]+$ ]]
           node <<'NODE'
-          const fs=require("node:fs");
-          const issue=String(process.env.PRIVATE_ISSUE);
-          const token=String(process.env.SOURCE_TOKEN??"");
-          if(!token) throw new Error("SOURCE_TOKEN_MISSING");
-          const report=JSON.parse(fs.readFileSync("/tmp/isolation-report.json","utf8"));
-          const body=[
-            "FULL_SUITE_READONLY_ISOLATION_RECEIPT_V1",
-            "SOURCE_SHA="+report.sourceSha,
-            "SOURCE_TREE="+report.sourceTree,
-            "TOTAL_TEST_FILES="+report.totalFiles,
-            "PASSED_TEST_FILES="+report.passedFiles,
-            "FAILED_TEST_FILES="+report.failedFiles,
-            "SOURCE_MUTATION=false",
-            "DEPLOYMENT=false",
-            "CERTIFICATION_REOPENED=false",
-            "LEARNING_JUSTIFIED=false",
-            "",
-            "DETAILED_FAILURES_JSON",
-            "```json",
-            JSON.stringify(report.failures,null,2),
-            "```"
-          ].join("\n");
-          const res=await fetch(`https://api.github.com/repos/riggeyb/sentient/issues/${issue}/comments`,{
-            method:"POST",
-            headers:{
-              "Authorization":`Bearer ${token}`,
-              "Accept":"application/vnd.github+json",
-              "X-GitHub-Api-Version":"2022-11-28",
-              "Content-Type":"application/json",
-              "User-Agent":"sentient-readonly-isolation"
-            },
-            body:JSON.stringify({body})
+          (async () => {
+            const fs=require("node:fs");
+            const issue=String(process.env.PRIVATE_ISSUE);
+            const token=String(process.env.SOURCE_TOKEN??"");
+            if(!token) throw new Error("SOURCE_TOKEN_MISSING");
+            const report=JSON.parse(fs.readFileSync("/tmp/isolation-report.json","utf8"));
+            const body=[
+              "FULL_SUITE_READONLY_ISOLATION_RECEIPT_V1",
+              "SOURCE_SHA="+report.sourceSha,
+              "SOURCE_TREE="+report.sourceTree,
+              "TOTAL_TEST_FILES="+report.totalFiles,
+              "PASSED_TEST_FILES="+report.passedFiles,
+              "FAILED_TEST_FILES="+report.failedFiles,
+              "SOURCE_MUTATION=false",
+              "DEPLOYMENT=false",
+              "CERTIFICATION_REOPENED=false",
+              "LEARNING_JUSTIFIED=false",
+              "",
+              "DETAILED_FAILURES_JSON",
+              "```json",
+              JSON.stringify(report.failures,null,2),
+              "```"
+            ].join("\n");
+            const res=await fetch(`https://api.github.com/repos/riggeyb/sentient/issues/${issue}/comments`,{
+              method:"POST",
+              headers:{
+                "Authorization":`Bearer ${token}`,
+                "Accept":"application/vnd.github+json",
+                "X-GitHub-Api-Version":"2022-11-28",
+                "Content-Type":"application/json",
+                "User-Agent":"sentient-readonly-isolation"
+              },
+              body:JSON.stringify({body})
+            });
+            if(!res.ok) throw new Error("PRIVATE_REPORT_POST_FAILED:"+res.status);
+            console.log("PRIVATE_REPORT_POSTED=true");
+            console.log("SECRET_VALUES_EXPOSED=false");
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
           });
-          if(!res.ok) throw new Error("PRIVATE_REPORT_POST_FAILED:"+res.status);
-          console.log("PRIVATE_REPORT_POSTED=true");
-          console.log("SECRET_VALUES_EXPOSED=false");
           NODE
