@@ -29,7 +29,7 @@ concurrency:
 jobs:
   submit:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
@@ -75,22 +75,45 @@ jobs:
           process.stdout.write(gz.toString("base64"));
           NODE
           rm -f /tmp/issue.json
-          payload="$(cat /tmp/request.gz.b64)"
-          rm -f /tmp/request.gz.b64
 
           machines="$(flyctl machines list -a "$APP" --json)"
           machine="$(jq -r '[.[]|select((.config.auto_destroy//false)!=true and .state=="started")][0].id//empty' <<<"$machines")"
           test -n "$machine"
 
+          remote_req="/tmp/private-engineering-${GITHUB_RUN_ID}.b64"
+          remote_script="/tmp/private-engineering-${GITHUB_RUN_ID}.mjs"
+          cleanup() {
+            rm -f /tmp/request.gz.b64 /tmp/submit.mjs
+            flyctl ssh console -a "$APP" --machine "$machine" \
+              -C "sh -lc 'rm -f $remote_req $remote_script'" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          flyctl ssh console -a "$APP" --machine "$machine" \
+            -C "sh -lc ': > $remote_req'" >/dev/null
+
+          while IFS= read -r chunk; do
+            test -n "$chunk"
+            flyctl ssh console -a "$APP" --machine "$machine" \
+              -C "sh -lc \"printf '%s' '$chunk' >> $remote_req\"" >/dev/null
+          done < <(fold -w 3000 /tmp/request.gz.b64)
+
           cat >/tmp/submit.mjs <<'NODE'
           import {createHash} from "node:crypto";
           import {gunzipSync} from "node:zlib";
+          import {readFile} from "node:fs/promises";
           const need=n=>{const v=String(process.env[n]??"").trim();if(!v)throw Error(`${n}_MISSING`);return v};
-          const gz=Buffer.from(need("REQUEST_GZIP_B64"),"base64"), bytes=gunzipSync(gz);
+          const encoded=(await readFile(need("REQUEST_PATH"),"utf8")).trim();
+          const gz=Buffer.from(encoded,"base64"), bytes=gunzipSync(gz);
           if(createHash("sha256").update(bytes).digest("hex")!==need("REQUEST_SHA256"))throw Error("PRIVATE_REQUEST_DIGEST_MISMATCH");
           const r=JSON.parse(bytes);
           if(r.expectedHead!==need("EXPECTED_HEAD")||r.expectedTree!==need("EXPECTED_TREE")||r.objectiveId!==need("OBJECTIVE_ID"))throw Error("PRIVATE_REQUEST_BINDING_MISMATCH");
-          const response=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{method:"POST",headers:{authorization:`Bearer ${need("SENTIENT_ENGINEERING_API_TOKEN")}`,"content-type":"application/json"},body:JSON.stringify(r),signal:AbortSignal.timeout(30000)});
+          const response=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{
+            method:"POST",
+            headers:{authorization:`Bearer ${need("SENTIENT_ENGINEERING_API_TOKEN")}`,"content-type":"application/json"},
+            body:JSON.stringify(r),
+            signal:AbortSignal.timeout(30000)
+          });
           const result=await response.json().catch(()=>({}));
           if(!response.ok)throw Error(`ENGINEERING_CREATE_HTTP_${response.status}`);
           if(typeof result.jobId!=="string"||!result.jobId)throw Error("ENGINEERING_JOB_ID_MISSING");
@@ -101,5 +124,6 @@ jobs:
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
           script="$(base64 -w0 /tmp/submit.mjs)"
-          rm -f /tmp/submit.mjs
-          flyctl ssh console -a "$APP" --machine "$machine" -C "sh -lc 'echo $script|base64 -d >/tmp/submit.mjs; REQUEST_GZIP_B64=$payload REQUEST_SHA256=$REQUEST_SHA256 EXPECTED_HEAD=$EXPECTED_HEAD EXPECTED_TREE=$EXPECTED_TREE OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/submit.mjs; rc=\$?; rm -f /tmp/submit.mjs; exit \$rc'"
+
+          flyctl ssh console -a "$APP" --machine "$machine" \
+            -C "sh -lc 'echo $script|base64 -d >$remote_script; REQUEST_PATH=$remote_req REQUEST_SHA256=$REQUEST_SHA256 EXPECTED_HEAD=$EXPECTED_HEAD EXPECTED_TREE=$EXPECTED_TREE OBJECTIVE_ID=$OBJECTIVE_ID node $remote_script'"
