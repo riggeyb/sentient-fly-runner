@@ -110,7 +110,8 @@ jobs:
           fs.writeFileSync("/tmp/isolation-counts.txt",`TOTAL_TEST_FILES=${files.length}\nPASSED_TEST_FILES=${passed}\nFAILED_TEST_FILES=${failures.length}\n`);
           NODE
           cat /tmp/isolation-counts.txt
-          echo "PUBLIC_TEST_DETAILS_EXPOSED=false"
+          node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/isolation-report.json","utf8")); console.log("FAILED_TEST_FILE_NAMES="+r.failures.map(x=>x.file).join(","));'
+          echo "PUBLIC_TEST_DETAILS_EXPOSED=filenames_only"
       - name: Post detailed report to private source issue
         shell: bash
         env:
