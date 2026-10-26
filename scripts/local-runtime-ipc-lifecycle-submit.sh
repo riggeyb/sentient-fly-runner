@@ -32,7 +32,7 @@ const r=await fetch("http://127.0.0.1:8080/v1/engineering/hobs",{
 });
 const raw=await r.text(); let body={}; try{body=JSON.parse(raw)}catch{}
 console.log(JSON.stringify({http:r.status,jobId:body.jobId??null,status:body.status??null,expectedHead:body.expectedHead??null,capabilityTier:body.authorityReceipt?.capabilityTier??null,policyVersion:body.authorityReceipt?.policyVersion??null}));
-if(r.status!==202||typeof body.jobId!=="string"!|!body.jobId)process.exit(31);
+if(r.status!==202||typeof body.jobId!=="string"||!body.jobId)process.exit(31);
 if(body.expectedHead!==request.expectedHead)process.exit(32);
 console.log("ENGINEERING_CREATE=PASS");
 console.log("ENGINEERING_JOB_ID="+body.jobId);
