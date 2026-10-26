@@ -1,0 +1,74 @@
+name: Sentient Routine Readonly Objective
+
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      objective_id:
+        required: true
+        type: string
+      request:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentient-routine-readonly-objective
+  cancel-in-progress: false
+
+jobs:
+  operate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+      OBJECTIVE_ID: ${{ inputs.objective_id }}
+      SESSION_ID: sentient-routine-operations
+      OBJECTIVE_REQUEST: ${{ inputs.request }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Wake and verify exact live runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          for _ in $(seq 1 90); do
+            r="$(curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" || true)"
+            if jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null 2>&1 <<<"$r"; then
+              echo LIVE_RUNTIME_IDENTITY=PASS
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Submit once and read durable state
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/routine-readonly-objective.mjs
+          code_b64="$(base64 -w0 scripts/routine-readonly-objective.mjs)"
+          request_b64="$(printf '%s' "$OBJECTIVE_REQUEST" | base64 -w0)"
+          set +e
+          timeout 900s flyctl ssh console -a "$APP" -C "sh -lc 'echo $code_b64 | base64 -d >/tmp/routine-readonly-objective.mjs && OBJECTIVE_ID=\"$OBJECTIVE_ID\" SESSION_ID=\"$SESSION_ID\" OBJECTIVE_REQUEST_B64=\"$request_b64\" node /tmp/routine-readonly-objective.mjs; rc=\$?; rm -f /tmp/routine-readonly-objective.mjs; exit \$rc'" | tee /tmp/objective.out
+          rc=${PIPESTATUS[0]}
+          set -e
+          grep -Fq 'OBJECTIVE_PERSISTED=true' /tmp/objective.out
+          grep -Fq 'DEPLOY_ON_SUCCESS=false' /tmp/objective.out
+          grep -Fq 'TIER=0' /tmp/objective.out
+          grep -Fq 'SECRET_VALUES_EXPOSED=false' /tmp/objective.out
+          exit "$rc"
