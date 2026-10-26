@@ -35,6 +35,10 @@ jobs:
           const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!connectionString) throw new Error("PHASE5_DATABASE_BINDING_MISSING");
           const repo=new PostgresSpawnObjectiveRepository({connectionString});
+          const normalizedFirstToken=(value)=>{
+            if(typeof value!=="string") return null;
+            return value.trim().split(/\s+/,1)[0]?.replace(/[^A-Za-z]/g,"").toUpperCase()??null;
+          };
           try{
             const snap=await repo.snapshot();
             const works=(snap.collaborationActiveWork?.records??[])
@@ -53,12 +57,29 @@ jobs:
                 reservationReconciled:x.reservationReconciled
               }));
             const executionIds=new Set(executions.map(x=>x.id));
+            const roleByExecution=new Map(executions.map(x=>[x.id,x.role]));
             const results=(spawn?.results??[])
               .filter(x=>executionIds.has(x.executionId))
-              .map(x=>({executionId:x.executionId,terminalStatus:x.result?.terminalStatus??null}));
+              .map(x=>{
+                const output=typeof x.result?.output==="string"?x.result.output:null;
+                return {
+                  executionId:x.executionId,
+                  role:roleByExecution.get(x.executionId)??null,
+                  terminalStatus:x.result?.terminalStatus??null,
+                  outputChars:output?.length??null,
+                  normalizedFirstToken:normalizedFirstToken(output),
+                  evidenceRefCount:Array.isArray(x.result?.evidenceRefs)?x.result.evidenceRefs.length:0,
+                  verifierResultRefCount:Array.isArray(x.result?.verifierResultRefs)?x.result.verifierResultRefs.length:0
+                };
+              });
             const episodes=(spawn?.episodes??[])
               .filter(x=>x.taskId===objectiveId)
-              .map(x=>({id:x.id,executionId:x.executionId,finalOutcome:x.finalOutcome??null}));
+              .map(x=>({
+                id:x.id,executionId:x.executionId,role:x.role,finalOutcome:x.finalOutcome??null,
+                verificationOutcome:x.verification?.outcome??null,
+                verificationReasonCodes:Array.isArray(x.verification?.reasonCodes)?x.verification.reasonCodes:[],
+                verificationEvidenceRefCount:Array.isArray(x.verification?.evidenceRefs)?x.verification.evidenceRefs.length:0
+              }));
             console.log("PHASE5_ACTIVE_WORK_SANITIZED="+JSON.stringify(works));
             console.log("PHASE5_SPAWN_EXECUTIONS_SANITIZED="+JSON.stringify(executions));
             console.log("PHASE5_SPAWN_RESULTS_SANITIZED="+JSON.stringify(results));
