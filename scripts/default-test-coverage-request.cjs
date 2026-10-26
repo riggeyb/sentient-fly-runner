@@ -1,5 +1,5 @@
 const request = {
-  repo: "rigggeyb/sentient",
+  repo: "riggeyb/sentient",
   branch: "sentient-production-composition-20261017",
   expectedHead: "fdab101aeef2275a3f9333384d6e8445799366a3",
   expectedTree: "c06b0c927efbfdd0cdfa2fc2ae1c8f6c26f2b11e",
