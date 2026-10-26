@@ -45,6 +45,7 @@ test("Phase 5 local-HF workers stay within the parent runtime budget and a conci
   assert.match(source, /maxRuntimeMs: PHASE5_PARENT_MAX_RUNTIME_MS_V1,/);
 });
 `;
+const writeTest = 'import { writeFileSync } from "node:fs"; writeFileSync("test/phase5-production-budget.test.ts", ' + JSON.stringify(testFile) + ');';
 
 const request = {
   repo:"riggeyb/sentient",
@@ -66,7 +67,7 @@ const request = {
     {name:"install",category:"build",command:"npm",args:["ci","--ignore-scripts","--no-audit","--no-fund"],timeoutMs:300000},
     {name:"prebuild",category:"build",command:"npm",args:["run","build"],timeoutMs:180000},
     {name:"edit-phase5-budget",category:"edit",command:"node",args:["--input-type=module","-e",edit],timeoutMs:30000},
-    {name:"write-phase5-budget-test",category:"edit",command:"node",args:["--input-type=module","-e",f'import {{ writeFileSync }} from "node:fs"; writeFileSync("test/phase5-production-budget.test.ts", {json.dumps(testFile)});'],timeoutMs:30000},
+    {name:"write-phase5-budget-test",category:"edit",command:"node",args:["--input-type=module","-e",writeTest],timeoutMs:30000},
     {name:"postbuild",category:"build",command:"npm",args:["run","build"],timeoutMs:180000},
     {name:"focused-phase5-tests",category:"test",command:"node",args:["--test","dist/test/phase5-production-budget.test.js","dist/test/phase5-collaborative-convergence.test.js","dist/test/production-collaboration-restart-recovery.test.js","dist/test/job2-production-convergence.test.js"],timeoutMs:240000},
     {name:"diff-check",category:"test",command:"git",args:["diff","--check"],timeoutMs:30000},
