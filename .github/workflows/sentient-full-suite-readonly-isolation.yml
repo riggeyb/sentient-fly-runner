@@ -1,0 +1,160 @@
+name: Sentient Full Suite Readonly Isolation
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact private source SHA
+        required: true
+        type: string
+      tree:
+        description: Exact private source tree
+        required: true
+        type: string
+      private_issue:
+        description: Private source issue number for detailed report
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Fence exact source identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          echo "SOURCE_IDENTITY=PASS"
+      - name: Build without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+          test -z "$(git status --porcelain)"
+          echo "BUILD_RESULT=PASS"
+          echo "SOURCE_MUTATION=false"
+      - name: Isolate compiled test failures privately
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE:
+            ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require("node:fs");
+          const path=require("node:path");
+          const {spawnSync}=require("node:child_process");
+          const testDir=path.join(process.cwd(),"dist","test");
+          const files=fs.readdirSync(testDir).filter(f=>f.endsWith(".test.js")).sort();
+          const clean=(v)=>String(v??"")
+            .replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]")
+            .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
+            .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]");
+          const failures=[];
+          let passed=0;
+          for(const file of files){
+            const full=path.join(testDir,file);
+            const started=Date.now();
+            const r=spawnSync(process.execPath,["--test",full],{
+              encoding:"utf8",
+              timeout:120000,
+              maxBuffer:4*512*1024,
+              env:{...process.env}
+            });
+            const durationMs=Date.now()-started;
+            if(r.status===0 && !r.error){
+              passed++;
+              continue;
+            }
+            const out=clean((r.stdout??"")+"\n"+(r.stderr??""));
+            failures.push({
+              file,
+              exitCode:r.status,
+              signal:r.signal??null,
+              error:r.error?.message??null,
+              durationMs,
+              tail:out.slice(-6000)
+            });
+          }
+          const report={
+            contract:"sentient-readonly-test-isolation/v1",
+            sourceSha:process.env.EXPECTED_SHA,
+            sourceTree:process.env.EXPECTED_TREE,
+            totalFiles:files.length,
+            passedFiles:passed,
+            failedFiles:failures.length,
+            failures,
+            sourceMutation:false,
+            deployment:false,
+            certificationReopened:false,
+            learningJustified:false,
+            createdAt:new Date().toISOString()
+          };
+          fs.writeFileSync("/tmp/isolation-report.json",JSON.stringify(report));
+          fs.writeFileSync("/tmp/isolation-counts.txt",`TOTAL_TEST_FILES=${files.length}\nPASSED_TEST_FILES=${passed}\nFAILED_TEST_FILES=${failures.length}\n`);
+          NODE
+          cat /tmp/isolation-counts.txt
+          echo "PUBLIC_TEST_DETAILS_EXPOSED=false"
+      - name: Post detailed report to private source issue
+        shell: bash
+        env:
+          SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          PRIVATE_ISSUE: ${{ inputs.private_issue }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_ISSUE" =~ ^[0-9]+$ ]]
+          node <<'NODE'
+          const fs=require("node:fs");
+          const issue=String(process.env.PRIVATE_ISSUE);
+          const token=String(process.env.SOURCE_TOKEN??"");
+          if(!token) throw new Error("SOURCE_TOKEN_MISSING");
+          const report=JSON.parse(fs.readFileSync("/tmp/isolation-report.json","utf8"));
+          const body=[
+            "FULL_SUITE_READONLY_ISOLATION_RECEIPT_V1",
+            "SOURCE_SHA="+report.sourceSha,
+            "SOURCE_TREE="+report.sourceTree,
+            "TOTAL_TEST_FILES="+report.totalFiles,
+            "PASSED_TEST_FILES="+report.passedFiles,
+            "FAILED_TEST_FILES="+report.failedFiles,
+            "SOURCE_MUTATION=false",
+            "DEPLOYMENT=false",
+            "CERTIFICATION_REOPENED=false",
+            "LEARNING_JUSTIFIED=false",
+            "",
+            "DETAILED_FAILURES_JSON",
+            "```json",
+            JSON.stringify(report.failures,null,2),
+            "```"
+          ].join("\n");
+          const res=await fetch(`https://api.github.com/repos/riggeyb/sentient/issues/${issue}/comments`,{
+            method:"POST",
+            headers:{
+              "Authorization":`Bearer ${token}`,
+              "Accept":"application/vnd.github+json",
+              "X-GitHub-Api-Version":"2022-11-28",
+              "Content-Type":"application/json",
+              "User-Agent":"sentient-readonly-isolation"
+            },
+            body:JSON.stringify({body})
+          });
+          if(!res.ok) throw new Error("PRIVATE_REPORT_POST_FAILED:"+res.status);
+          console.log("PRIVATE_REPORT_POSTED=true");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
