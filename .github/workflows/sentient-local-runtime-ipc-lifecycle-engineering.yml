@@ -1,0 +1,22 @@
+name: Sentient Local Runtime IPC Lifecycle Engineering
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sentient-local-runtime-ipc-lifecycle-engineering
+  cancel-in-progress: false
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Submit bounded IPC lifecycle request through resident Governor
+        shell: bash
+        run: bash scripts/local-runtime-ipc-lifecycle-submit.sh
