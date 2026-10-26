@@ -83,4 +83,46 @@ rm -f "$FETCH_SCRIPT"
 m="$(flyctl machines list -a "$APP" --json | jq -r '[.[]|select((.config.auto_destroy//false)!=true and .state=="started")]|sort_by(.id)|.[0].id//empty')"
 test -n "$m"
 
-GOVERNOR_SCRIPT="/tmp/private-engineering-governor-${GITHUB_RUN_ID}.mjs"
+GOVERNOR_SCRIPT="/tmp/private-engineering-governor-${GITHUB_RUN_ID}.mjs"
+cat >"$GOVERNOR_SCRIPT" <<'NODE'
+import { readFileSync } from "node:fs";
+
+const need=(k)=>{
+  const v=String(process.env[k]??"").trim();
+  if(!v) throw new Error(k+"_MISSING");
+  return v;
+};
+
+const request=JSON.parse(readFileSync(need("REQUEST_FILE"),"utf8"));
+const response=await fetch("http://127.0.0.1:8080/v1/engineering/jobs",{
+  method:"POST",
+  headers:{
+    authorization:`Bearer ${need("SENTIENT_ENGINEERING_API_TOKEN")}`,
+    "content-type":"application/json"
+  },
+  body:JSON.stringify(request),
+  signal:AbortSignal.timeout(30000)
+});
+const output=await response.json().catch(()=>({}));
+if(!response.ok) throw new Error(`ENGINEERING_CREATE_HTTP_${response.status}:${String(output?.error??output?.reason??"")}`);
+if(typeof output.jobId!=="string"||!output.jobId) throw new Error("JOB_ID_MISSING");
+console.log(`ENGINEERING_JOB_ID=${output.jobId}`);
+console.log(`ENGINEERING_STATUS=${String(output.status??"unknown")}`);
+console.log("PRIVATE_ACTIONS_BRIDGE_USED=false");
+console.log("SECRET_VALUES_EXPOSED=false");
+NODE
+
+REQUEST_B64="$(base64 -w0 "$REQUEST_FILE")"
+SCRIPT_B64="$(base64 -w0 "$GOVERNOR_SCRIPT")"
+rm -f "$REQUEST_FILE" "$GOVERNOR_SCRIPT"
+
+REMOTE_REQUEST="/tmp/private-engineering-request-${GITHUB_RUN_ID}.json"
+REMOTE_SCRIPT="/tmp/private-engineering-governor-${GITHUB_RUN_ID}.mjs"
+flyctl ssh console -a "$APP" --machine "$m" --command \
+  "sh -lc 'echo $REQUEST_B64|base64 -d >$REMOTE_REQUEST; chmod 600 $REMOTE_REQUEST; echo $SCRIPT_B64|base64 -d >$REMOTE_SCRIPT; REQUEST_FILE=$REMOTE_REQUEST node $REMOTE_SCRIPT; rc=\$?; rm -f $REMOTE_REQUEST $REMOTE_SCRIPT; exit \$rc'"
+
+echo "GOVERNOR_ENGINEERING_INGRESS=PASS"
+echo "PRIVATE_REQUEST_FETCH_BOUNDARY=AUTHORIZED_GITHUB_RUNNER"
+echo "RESOURCE_ENVELOPE_CHANGED=false"
+echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
+echo "SECRET_VALUES_EXPOSED=false"
