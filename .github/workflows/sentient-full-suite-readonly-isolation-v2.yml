@@ -1,0 +1,80 @@
+name: Sentient Full Suite Readonly Isolation V2
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Fence and build exact source
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          npm ci --ignore-scripts --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+          test -z "$(git status --porcelain)"
+          echo SOURCE_IDENTITY=PASS
+          echo BUILD_RESULT=PASS
+          echo SOURCE_MUTATION=false
+      - name: Print sanitized failing test files only
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require("node:fs");
+          const path=require("node:path");
+          const {spawnSync}=require("node:child_process");
+          const testDir=path.join(process.cwd(),"dist","test");
+          const files=fs.readdirSync(testDir).filter(f=>f.endsWith(".test.js")).sort();
+          const clean=(v)=>String(v??"")
+            .replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]")
+            .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
+            .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]");
+          let passed=0, failed=0;
+          for(const file of files){
+            const r=spawnSync(process.execPath,["--test",path.join(testDir,file)],{
+              encoding:"utf8",timeout:120000,maxBuffer:2*1024*1024,env:{...process.env}
+            });
+            if(r.status===0 && !r.error){passed++;continue;}
+            failed++;
+            const out=clean((r.stdout??"")+"\n"+(r.stderr??""));
+            console.log(`FAILED_TEST_FILE=${file}`);
+            console.log(`FAILED_TEST_EXIT=${r.status??"null"}`);
+            console.log(`FAILED_TEST_SIGNAL=${r.signal??"null"}`);
+            console.log("FAILED_TEST_TAIL_BEGIN");
+            console.log(out.slice(-5000));
+            console.log("FAILED_TEST_TAIL_END");
+          }
+          console.log(`TOTAL_TEST_FILES=${files.length}`);
+          console.log(`PASSED_TEST_FILES=${passed}`);
+          console.log(`FAILED_TEST_FILES=${failed}`);
+          console.log("SOURCE_MUTATION=false");
+          console.log("DEPLOYMENT=false");
+          console.log("CERTIFICATION_REOPENED=false");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
