@@ -52,7 +52,7 @@ const request={
     {name:"diff-check",category:"test",command:"git",args:["diff","--check"],timeoutMs:30000}
   ],
   commitMessage:"fix: bound production collaboration output budget",
-  timeoutMs:900000,
+  timeoutMs:1020000,
   idempotencyKey:"sentient-collaboration-output-budget-v1-fdab101a"
 };
 process.stdout.write(JSON.stringify(request));
