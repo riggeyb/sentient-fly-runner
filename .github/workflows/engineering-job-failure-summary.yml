@@ -1,0 +1,81 @@
+name: Engineering Job Failure Summary
+
+"on":
+  workflow_dispatch:
+    inputs:
+      job_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      JOB_ID: ${{ inputs.job_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Read sanitized failed-step context
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$JOB_ID" =~ ^[0-9a-f-]{36}$ ]]
+          cat >/tmp/failure-summary.mjs <<'NODE'
+          import pg from "/app/node_modules/pg/lib/index.js";
+          const {Pool}=pg;
+          const id=String(process.env.JOB_ID??"").trim();
+          const db=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
+          if(!db) throw new Error("GOVERNOR_LEDGER_DB_MISSING");
+          const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
+          const redact=(v)=>String(v??"")
+            .replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]")
+            .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
+            .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]")
+            .replace(/[\0]/g,"");
+          try {
+            const r=await pool.query(
+              `select status,error_code,steps from sentient_deployment_governor.engineering_jobs where job_id=$1`,
+              [id]
+            );
+            if(r.rows.length!==1) throw new Error("ENGINEERING_JOB_NOT_FOUND");
+            const row=r.rows[0];
+            const steps=Array.isArray(row.steps)?row.steps:[];
+            const failed=steps.filter(s=>Number(s.exitCode)!==0);
+            const summaries=failed.map(s=>{
+              const text=redact(String(s.stdout??"")+"\n"+String(s.stderr??""));
+              const lines=text.split("\n");
+              const hitIndexes=[];
+              for(let i=0;i<lines.length;i++){
+                if(/^not ok\b/.test(lines[i]) || /failureType:|AssertionError|ERR_|error:/.test(lines[i])) hitIndexes.push(i);
+              }
+              const selected=new Set();
+              for(const idx of hitIndexes){
+                for(let j=Math.max(0,idx-2);j<=Math.min(lines.length-1,idx+14);j++) selected.add(j);
+              }
+              return {
+                name:s.name,
+                exitCode:s.exitCode,
+                termination:s.termination??null,
+                contexts:[...selected].sort((a,b)=>a-b).map(i=>lines[i]).join("\n").slice(-16000),
+                totals:lines.filter(line=>/^# (tests|pass|fail|cancelled|skipped|todo|duration_ms)\b/.test(line)).slice(-10)
+              };
+            });
+            console.log("ENGINEERING_FAILURE_SUMMARY="+JSON.stringify({
+              job_id:id,status:row.status,error_code:row.error_code,summaries
+            }));
+            console.log("ENGINEERING_FAILURE_SUMMARY_DIAGNOSTIC=PASS");
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally {
+            await pool.end();
+          }
+          NODE
+          node --check /tmp/failure-summary.mjs
+          B64="$(base64 -w0 /tmp/failure-summary.mjs)"
+          APP=sentient-deployment-governor
+          MACHINE_ID="$(flyctl machines list -a "$APP" --json | jq -r '[.[]|select((.config.auto_destroy//false)!=true)]|sort_by(.id)|.[0].id//empty')"
+          test -n "$MACHINE_ID"
+          flyctl ssh console -a "$APP" --machine "$MACHINE_ID" --command "sh -lc 'cd /app && echo $B64 | base64 -d >/app/failure-summary.mjs && JOB_ID=$JOB_ID node /app/failure-summary.mjs; rc=\$?; rm -f /app/failure-summary.mjs; exit \$rc'"
