@@ -8,10 +8,11 @@ on:
       tree:
         required: true
         type: string
-
+      private_issue:
+        required: true
+        type: string
 permissions:
   contents: read
-
 jobs:
   isolate:
     runs-on: ubuntu-latest
@@ -24,7 +25,7 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Fence and build exact source
+      - name: Fence and build
         shell: bash
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
@@ -38,43 +39,62 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund >/dev/null
           npm run build >/dev/null
           test -z "$(git status --porcelain)"
-          echo SOURCE_IDENTITY=PASS
-          echo BUILD_RESULT=PASS
-          echo SOURCE_MUTATION=false
-      - name: Print sanitized failing test files only
+          echo "SOURCE_IDENTITY=PASS"
+          echo "BUILD_RESULT=PASS"
+          echo "SOURCE_MUTATION=false"
+      - name: Isolate failures without public details
         shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
         run: |
           set -euo pipefail
           node <<'NODE'
-          const fs=require("node:fs");
-          const path=require("node:path");
-          const {spawnSync}=require("node:child_process");
-          const testDir=path.join(process.cwd(),"dist","test");
-          const files=fs.readdirSync(testDir).filter(f=>f.endsWith(".test.js")).sort();
-          const clean=(v)=>String(v??"")
-            .replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]")
-            .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
-            .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]");
-          let passed=0, failed=0;
+          const fs=require("node:fs"),p=require("node:path"),{spawnSync}=require("node:child_process");
+          const dir=p.join(process.cwd(),"dist","test");
+          const files=fs.readdirSync(dir).filter(x=>x.endsWith(".test.js")).sort();
+          const clean=v=>String(v??"").replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]").replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]").replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]");
+          const failures=[]; let passed=0;
           for(const file of files){
-            const r=spawnSync(process.execPath,["--test",path.join(testDir,file)],{
-              encoding:"utf8",timeout:120000,maxBuffer:2*1024*1024,env:{...process.env}
-            });
-            if(r.status===0 && !r.error){passed++;continue;}
-            failed++;
-            const out=clean((r.stdout??"")+"\n"+(r.stderr??""));
-            console.log(`FAILED_TEST_FILE=${file}`);
-            console.log(`FAILED_TEST_EXIT=${r.status??"null"}`);
-            console.log(`FAILED_TEST_SIGNAL=${r.signal??"null"}`);
-            console.log("FAILED_TEST_TAIL_BEGIN");
-            console.log(out.slice(-5000));
-            console.log("FAILED_TEST_TAIL_END");
+            const t=Date.now();
+            const r=spawnSync(process.execPath,["--test",p.join(dir,file)],{encoding:"utf8",timeout:120000,maxBuffer:2097152,env:{...process.env}});
+            if(r.status===0&&!r.error){passed++;continue}
+            failures.push({file,exitCode:r.status,signal:r.signal??null,error:r.error?.message??null,durationMs:Date.now()-t,tail:clean((r.stdout??"")+"\n"+(r.stderr??"")).slice(-6000)});
           }
-          console.log(`TOTAL_TEST_FILES=${files.length}`);
-          console.log(`PASSED_TEST_FILES=${passed}`);
-          console.log(`FAILED_TEST_FILES=${failed}`);
-          console.log("SOURCE_MUTATION=false");
-          console.log("DEPLOYMENT=false");
-          console.log("CERTIFICATION_REOPENED=false");
-          console.log("SECRET_VALUES_EXPOSED=false");
+          const report={sourceSha:process.env.EXPECTED_SHA,sourceTree:process.env.EXPECTED_TREE,totalFiles:files.length,passedFiles:passed,failedFiles:failures.length,failures,sourceMutation:false,deployment:false,certificationReopened:false,learningJustified:false};
+          fs.writeFileSync("/tmp/report.json",JSON.stringify(report));
+          console.log("TOTAL_TEST_FILES="+files.length);
+          console.log("PASSED_TEST_FILES="+passed);
+          console.log("FAILED_TEST_FILES="+failures.length);
+          console.log("PUBLIC_TEST_DETAILS_EXPOSED=false");
           NODE
+      - name: Post details privately
+        shell: bash
+        env:
+          SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          PRIVATE_ISSUE: ${{ inputs.private_issue }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_ISSUE" =~ ^[0-9]+$ ]]
+          {
+            echo "FULL_SUITE_READONLY_ISOLATION_RECEIPT_V2"
+            node -e 'const r=require("/tmp/report.json"); for(const k of ["sourceSha","sourceTree","totalFiles","passedFiles","failedFiles"]) console.log(k.toUpperCase()+"="+r[k])'
+            echo "SOURCE_MUTATION=false"
+            echo "DEPLOYMENT=false"
+            echo "CERTIFICATION_REOPENED=false"
+            echo "LEARNING_JUSTIFIED=false"
+            echo
+            echo '```json'
+            node -e 'console.log(JSON.stringify(require("/tmp/report.json").failures,null,2))'
+            echo '```'
+          } >/tmp/body.txt
+          jq -Rs '{body:.}' </tmp/body.txt >/tmp/payload.json
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $SOURCE_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            -X POST "https://api.github.com/repos/riggeyb/sentient/issues/$PRIVATE_ISSUE/comments" \
+            --data-binary @/tmp/payload.json >/dev/null
+          echo "PRIVATE_REPORT_POSTED=true"
+          echo "SECRET_VALUES_EXPOSED=false"
