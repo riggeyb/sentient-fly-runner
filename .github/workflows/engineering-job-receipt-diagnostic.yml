@@ -65,4 +65,7 @@ jobs:
           NODE
           node --check /tmp/job-receipt.mjs
           B64="$(base64 -w0 /tmp/job-receipt.mjs)"
-          flyctl ssh console -a sentient-deployment-governor -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/job-receipt.mjs && JOB_ID=$JOB_ID node /app/job-receipt.mjs; rc=\$?; rm -f /app/job-receipt.mjs; exit \$rc'"
+          APP=sentient-deployment-governor
+          MACHINE_ID="$(flyctl machines list -a "$APP" --json | jq -r '[.[]|select((.config.auto_destroy//false)!=true)]|sort_by(.id)|.[0].id//empty')"
+          test -n "$MACHINE_ID"
+          flyctl ssh console -a "$APP" --machine "$MACHINE_ID" --command "sh -lc 'cd /app && echo $B64 | base64 -d >/app/job-receipt.mjs && JOB_ID=$JOB_ID node /app/job-receipt.mjs; rc=\$?; rm -f /app/job-receipt.mjs; exit \$rc'"
