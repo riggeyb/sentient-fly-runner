@@ -20,22 +20,22 @@ jobs:
           id="$(jq -r '[.[] | select((.config.auto_destroy // false) != true)] | sort_by(.id) | .[0].id // empty' <<<"$machines")"
           test -n "$id"
           cat >/tmp/lockdiag.mjs <<'NODE'
-          import pg from "/app/node_modules/pg/slib/index.js";
+          import pg from "/app/node_modules/pg/index.js";
           const {Pool}=pg;
           const db=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
           if(!db) throw new Error("GOVERNOR_LEDGER_DB_MISSING");
           const pool=new Pool({connectionString:db,max:1,connectionTimeoutMillis:10000});
           try {
             const locks=await pool.query(`
-              select count()::int as count
+              select count(*)::int as count
               from pg_locks
               where locktype='advisory' and granted=true
-                and objid=$1::bigint
-            `,[2026101701]);
+                and classid=0::oid and objid=2026101701::oid
+            `);
             const counts=await pool.query(`
               select
                 count(*) filter (where started_at >= now()-interval '1 hour')::int as hourly,
-                count() filter (where completed_at is null and result='ACTIVE')::int as active
+                count(*) filter (where completed_at is null and result='ACTIVE')::int as active
               from sentient_deployment_governor.deployment_attempts
             `);
             console.log("GOVERNOR_ADVISORY_LOCK_COUNT="+String(locks.rows[0]?.count??0));
