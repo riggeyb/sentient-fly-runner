@@ -1,4 +1,5 @@
 name: Director Studio Cloudflare Runtime Proof V4
+# mechanical lock receipt trigger
 "on":
   push:
     branches: [main]
