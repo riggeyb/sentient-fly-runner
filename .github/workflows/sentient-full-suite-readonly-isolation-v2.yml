@@ -1,4 +1,5 @@
-name: Sentient Full Suite Readonly Isolation V2
+name: Sentient Full Suite Readonly Isolation V3
+
 on:
   workflow_dispatch:
     inputs:
@@ -11,12 +12,32 @@ on:
       private_issue:
         required: true
         type: string
+
 permissions:
   contents: read
+
 jobs:
   isolate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
+      SENTIENT_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,50 +46,117 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Fence and build
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Exact candidate acceptance
         shell: bash
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
           EXPECTED_TREE: ${{ inputs.tree }}
         run: |
-          set -euo pipefail
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
-          npm ci --ignore-scripts --no-audit --no-fund >/dev/null
-          npm run build >/dev/null
-          test -z "$(git status --porcelain)"
-          echo "SOURCE_IDENTITY=PASS"
-          echo "BUILD_RESULT=PASS"
-          echo "SOURCE_MUTATION=false"
-      - name: Isolate failures without public details
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.sha }}
-          EXPECTED_TREE: ${{ inputs.tree }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const fs=require("node:fs"),p=require("node:path"),{spawnSync}=require("node:child_process");
-          const dir=p.join(process.cwd(),"dist","test");
-          const files=fs.readdirSync(dir).filter(x=>x.endsWith(".test.js")).sort();
-          const clean=v=>String(v??"").replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]").replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]").replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]");
-          const failures=[]; let passed=0;
-          for(const file of files){
-            const t=Date.now();
-            const r=spawnSync(process.execPath,["--test",p.join(dir,file)],{encoding:"utf8",timeout:120000,maxBuffer:2097152,env:{...process.env}});
-            if(r.status===0&&!r.error){passed++;continue}
-            failures.push({file,exitCode:r.status,signal:r.signal??null,error:r.error?.message??null,durationMs:Date.now()-t,tail:clean((r.stdout??"")+"\n"+(r.stderr??"")).slice(-6000)});
+          set +e
+          mkdir -p /tmp/exact
+          failed=0
+          run_step() {
+            label="$1"; shift
+            "$@" >"/tmp/exact/${label}.log" 2>&1
+            status=$?
+            echo "${label}=$status" >>/tmp/receipt.env
+            if [ "$status" -ne 0 ]; then failed=1; fi
           }
-          const report={sourceSha:process.env.EXPECTED_SHA,sourceTree:process.env.EXPECTED_TREE,totalFiles:files.length,passedFiles:passed,failedFiles:failures.length,failures,sourceMutation:false,deployment:false,certificationReopened:false,learningJustified:false};
-          fs.writeFileSync("/tmp/report.json",JSON.stringify(report));
-          console.log("TOTAL_TEST_FILES="+files.length);
-          console.log("PASSED_TEST_FILES="+passed);
-          console.log("FAILED_TEST_FILES="+failures.length);
-          console.log("PUBLIC_TEST_DETAILS_EXPOSED=false");
-          NODE
-      - name: Post details privately
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
+
+          {
+            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V3"
+            echo "SOURCE_SHA=$EXPECTED_SHA"
+            echo "SOURCE_TREE=$EXPECTED_TREE"
+            echo "RUNNER_OS=$(uname -srvmo)"
+            echo "NODE_VERSION=$(node --version)"
+            echo "NPM_VERSION=$(npm --version)"
+            echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_EXACT_CANDIDATE"
+            echo "DEPENDENCY_MANIFEST_IDENTITY=package.json:$(git rev-parse HEAD:package.json)"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >/tmp/receipt.env
+
+          run_step NPM_INSTALL npm install --no-audit --no-fund
+          run_step BUILD npm run build
+
+          mapfile -t compiled < <(find dist/test -type f -name '*.test.js' 2>/dev/null | sort)
+          echo "COMPILED_TEST_FILES=${#compiled[@]}" >>/tmp/receipt.env
+          if [ "${#compiled[@]}" -gt 0 ]; then
+            run_step COMPILED_TESTS node --test "${compiled[@]}"
+          else
+            echo "COMPILED_TESTS=2" >>/tmp/receipt.env
+            failed=1
+          fi
+
+          mapfile -t direct < <(find tests -type f -name '*.test.ts' 2>/dev/null | sort)
+          echo "DIRECT_TEST_FILES=${#direct[@]}" >>/tmp/receipt.env
+          if [ "${#direct[@]}" -gt 0 ]; then
+            run_step DIRECT_TESTS node --experimental-strip-types --test "${direct[@]}"
+          else
+            echo "DIRECT_TESTS=2" >>/tmp/receipt.env
+            failed=1
+          fi
+
+          run_step WORKER_A npx tsc -p tsconfig.worker-a.json --noEmit
+          run_step WORKER_C npx tsc -p tsconfig.worker-c.json --noEmit
+          run_step WORKER_D npx tsc -p tsconfig.worker-d.json --noEmit
+          run_step NPM_TEST npm test
+
+          for label in COMPILED_TESTS DIRECT_TESTS NPM_TEST; do
+            f="/tmp/exact/${label}.log"
+            [ -f "$f" ] || continue
+            tests="$(grep -E '^# tests [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            pass="$(grep -E '^# pass [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            fail="$(grep -E '^# fail [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            echo "${label}_TESTS=${tests:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_PASS=${pass:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_FAIL=${fail:-NOT_REPORTED}" >>/tmp/receipt.env
+          done
+
+          test -z "$(git status --porcelain)"
+          clean=$?
+          echo "SOURCE_MUTATION=$([ "$clean" -eq 0 ] && echo false || echo true)" >>/tmp/receipt.env
+          [ "$clean" -eq 0 ] || failed=1
+          echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>/tmp/receipt.env
+          echo "OVERALL_EXIT=$failed" >>/tmp/receipt.env
+
+          python3 - <<'PY'
+          import pathlib,re
+          out=[]
+          pats=[
+            (re.compile(r'gh[pousr]_[A-Za-z0-9_]+'),'[REDACTED]'),
+            (re.compile(r'flyv1_[A-Za-z0-9_-]+'),'[REDACTED]'),
+            (re.compile(r'(?i)(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+'),r'\1=[REDACTED]')
+          ]
+          for p in sorted(pathlib.Path('/tmp/exact').glob('*.log')):
+            t=p.read_text(errors='replace')
+            for rx,r in pats:t=rx.sub(r,t)
+            if 'error' in t.lower() or 'fail' in t.lower():
+              out.append(f"## {p.name}\n{t[-10000:]}")
+          pathlib.Path('/tmp/failures.txt').write_text('\n\n'.join(out))
+          PY
+          cat /tmp/receipt.env
+          exit "$failed"
+
+      - name: Upload non-secret receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentient-exact-${{ inputs.sha }}
+          path: /tmp/receipt.env
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Post private receipt
+        if: always()
         shell: bash
         env:
           SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
@@ -77,16 +165,18 @@ jobs:
           set -euo pipefail
           [[ "$PRIVATE_ISSUE" =~ ^[0-9]+$ ]]
           {
-            echo "FULL_SUITE_READONLY_ISOLATION_RECEIPT_V2"
-            node -e 'const r=require("/tmp/report.json"); for(const k of ["sourceSha","sourceTree","totalFiles","passedFiles","failedFiles"]) console.log(k.toUpperCase()+"="+r[k])'
-            echo "SOURCE_MUTATION=false"
-            echo "DEPLOYMENT=false"
-            echo "CERTIFICATION_REOPENED=false"
-            echo "LEARNING_JUSTIFIED=false"
-            echo
-            echo '```json'
-            node -e 'console.log(JSON.stringify(require("/tmp/report.json").failures,null,2))'
+            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V3"
+            echo '```text'
+            cat /tmp/receipt.env
             echo '```'
+            if [ -s /tmp/failures.txt ]; then
+              echo "Sanitized failure tails:"
+              echo '```text'
+              cat /tmp/failures.txt
+              echo '```'
+            fi
+            echo "PRODUCTION_DEPLOYMENT=false"
+            echo "SOURCE_MUTATION=false"
           } >/tmp/body.txt
           jq -Rs '{body:.}' </tmp/body.txt >/tmp/payload.json
           curl --fail --silent --show-error \
@@ -96,5 +186,3 @@ jobs:
             -H "Content-Type: application/json" \
             -X POST "https://api.github.com/repos/riggeyb/sentient/issues/$PRIVATE_ISSUE/comments" \
             --data-binary @/tmp/payload.json >/dev/null
-          echo "PRIVATE_REPORT_POSTED=true"
-          echo "SECRET_VALUES_EXPOSED=false"
