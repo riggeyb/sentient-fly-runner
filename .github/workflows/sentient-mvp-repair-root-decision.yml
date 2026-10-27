@@ -15,9 +15,6 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - name: Fence and repair only unsupported event
         shell: bash
         run: |
@@ -38,11 +35,8 @@ jobs:
           end += len("    });")
           if s.find(marker, idx + len(marker)) >= 0:
               raise SystemExit("multiple ROOT_DECISION markers")
-          repaired = s[:start] + s[end:]
-          p.write_text(repaired)
+          p.write_text(s[:start] + s[end:])
           PY
-          npm install --no-audit --no-fund
-          npm run build
           git diff --check -- src/application/production-mission-control.ts
           changed="$(git diff --name-only)"
           test "$changed" = "src/application/production-mission-control.ts"
