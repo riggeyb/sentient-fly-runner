@@ -8,10 +8,14 @@ on:
       tree:
         required: true
         type: string
+      skills_sha:
+        description: Exact accepted riggeyb/skills Mission Control commit SHA
+        required: true
+        type: string
       objective_id:
         description: Governor deployment objective/correlation id
         required: false
-        default: phase1-7-final-convergence
+        default: sentient-cloudflare-mission-control-live-v1
         type: string
 
 permissions:
@@ -25,7 +29,7 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       S: ${{ inputs.sha }}
       T: ${{ inputs.tree }}
-      K: d85eb820f18ad6d944ab93b03150d606273891a5
+      K: ${{ inputs.skills_sha }}
       O: ${{ inputs.objective_id }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
@@ -33,6 +37,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$S" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$T" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$K" =~ ^[0-9a-f]{40}$ ]]
           app=sentient-deployment-governor
           id="$(flyctl machines list -a "$app" --json | jq -r '.[0].id')"
           flyctl machine start "$id" -a "$app" >/dev/null || true
@@ -68,6 +75,7 @@ jobs:
           test "$ok" = true
           echo "RUNTIME_SHA=$S"
           echo "RUNTIME_TREE=$T"
+          echo "RUNTIME_SKILLS_SHA=$K"
           echo "RUNTIME_SHA_MATCH=PASS"
           echo "RUNTIME_TREE_MATCH=PASS"
           echo "HEALTHZ=PASS"
