@@ -189,7 +189,7 @@ jobs:
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
-          test "$(git rev-parse 'HED^{tree}')" = "$EXPECTED_TREE" || exit 2
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
 
           {
             echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V4"
