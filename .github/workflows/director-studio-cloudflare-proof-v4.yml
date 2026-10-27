@@ -1,5 +1,7 @@
 name: Director Studio Cloudflare Runtime Proof V4
 "on":
+  push:
+    branches: [main]
   workflow_dispatch: {}
 permissions:
   contents: read
