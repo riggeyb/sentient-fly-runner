@@ -53,9 +53,9 @@ jobs:
           const raw=await r.text();
           let b={};
           try{b=JSON.parse(raw)}catch{}
-          const allow=["DEPLOYMENT_ID","REQUESTED_SHA","REQUESTED_TREE","DEPLOYED_SHA","DEPLOYED_TREE","SKILLS_SHA","BUILD_RESULT","BUILD_FAILURE","READYZ_FAILURE","RETRY_LIMIT_STATE","RATE_LIMIT_STATE","RESOURCE_CHANGE_STATUS","RESOURCE_CHANGE_DETAIL"];
+          const allow=["error","reason","DEPLOYMENT_ID","REQUESTED_SHA","REQUESTED_TREE","DEPLOYED_SHA","DEPLOYED_TREE","SKILLS_SHA","BUILD_RESULT","BUILD_FAILURE","READYZ_FAILURE","RETRY_LIMIT_STATE","RATE_LIMIT_STATE","RESOURCE_CHANGE_STATUS","RESOURCE_CHANGE_DETAIL"];
           const out={HTTP_STATUS:r.status,OBJECTIVE_ID:objectiveId,REQUESTED_SKILLS_SHA:skillsSha};
-          for(const k of allow) if(k in b) out[k]=b[k];
+          for(const k of allow) if(k in b) out[k]=typeof b[k]==="string"?String(b[k]).slice(0,1000):b[k];
           if(b.HEALTHZ&&typeof b.HEALTHZ==="object") out.HEALTHZ={statusCode:b.HEALTHZ.statusCode??null,body:b.HEALTHZ.body??null};
           if(b.READYZ&&typeof b.READYZ==="object") out.READYZ={statusCode:b.READYZ.statusCode??null,body:b.READYZ.body??null};
           console.log(JSON.stringify(out));
