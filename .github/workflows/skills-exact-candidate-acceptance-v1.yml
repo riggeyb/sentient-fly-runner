@@ -1,0 +1,214 @@
+name: Skills Exact Candidate Acceptance V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact riggeyb/skills commit SHA
+        required: true
+        type: string
+      tree:
+        description: Exact riggeyb/skills tree SHA
+        required: true
+        type: string
+      private_issue:
+        description: Private riggeyb/skills PR/issue for receipt
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  exact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: ${{ inputs.sha }}
+          path: skills-source
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Exact Skills acceptance
+        shell: bash
+        working-directory: skills-source
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+          REMOTE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: |
+          set +e
+          mkdir -p /tmp/skills-exact
+          : >/tmp/skills-receipt.env
+          failed=0
+          run_step() {
+            label="$1"; shift
+            "$@" >"/tmp/skills-exact/${label}.log" 2>&1
+            status=$?
+            echo "${label}_EXIT=$status" >>/tmp/skills-receipt.env
+            if [ "$status" -ne 0 ]; then failed=1; fi
+          }
+
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
+
+          {
+            echo "EXACT_SKILLS_ACCEPTANCE_RECEIPT_V1"
+            echo "REPOSITORY=riggeyb/skills"
+            echo "SOURCE_SHA=$EXPECTED_SHA"
+            echo "SOURCE_TREE=$EXPECTED_TREE"
+            echo "RUNNER_OS=$(uname -srvmo)"
+            echo "PYTHON_VERSION=$(python --version 2>&1)"
+            echo "NODE_VERSION=$(node --version)"
+            echo "NPM_VERSION=$(npm --version)"
+            echo "REQUIREMENTS_IDENTITY=$(git rev-parse HEAD:requirements.txt 2>/dev/null || echo ABSENT)"
+            echo "ORCHESTRATOR_MANIFEST_IDENTITY=$(git rev-parse HEAD:sentient-orchestrator/package.json)"
+            echo "ORCHESTRATOR_LOCK_IDENTITY=ABSENT"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >>/tmp/skills-receipt.env
+
+          run_step PYTHON_DEPS pip install -r requirements.txt
+          run_step REGISTRY_STRUCTURE python scripts/validate_registry.py
+          run_step EVAL_DEFINITIONS python scripts/check_evals.py
+          run_step DURABLE_OBJECTIVE env PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+          run_step ACTIVE_WORK env PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+          run_step REPOSITORY_EDIT python scripts/test_repository_edit.py
+          run_step REPOSITORY_EDIT_GATEWAY python scripts/test_repository_edit_request.py
+          run_step ACTIONS_SCHEMA python scripts/validate_actions_schema.py
+          run_step NETLIFY_SCHEMA python scripts/validate_netlify_actions_schema.py
+
+          (
+            cd sentient-orchestrator || exit 1
+            npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+          ) >/tmp/skills-exact/NPM_INSTALL.log 2>&1
+          status=$?
+          echo "NPM_INSTALL_EXIT=$status" >>/tmp/skills-receipt.env
+          if [ "$status" -ne 0 ]; then failed=1; fi
+
+          (
+            cd sentient-orchestrator || exit 1
+            npm run typecheck
+          ) >/tmp/skills-exact/TYPECHECK.log 2>&1
+          status=$?
+          echo "TYPECHECK_EXIT=$status" >>/tmp/skills-receipt.env
+          if [ "$status" -ne 0 ]; then failed=1; fi
+
+          (
+            cd sentient-orchestrator || exit 1
+            npm run migrate
+          ) >/tmp/skills-exact/MIGRATE.log 2>&1
+          status=$?
+          echo "MIGRATE_EXIT=$status" >>/tmp/skills-receipt.env
+          if [ "$status" -ne 0 ]; then failed=1; fi
+
+          (
+            cd sentient-orchestrator || exit 1
+            npm test
+          ) >/tmp/skills-exact/TESTS.log 2>&1
+          status=$?
+          echo "TESTS_EXIT=$status" >>/tmp/skills-receipt.env
+          if [ "$status" -ne 0 ]; then failed=1; fi
+
+          tests="$(grep -E '^# tests [0-9]+' /tmp/skills-exact/TESTS.log | tail -1 | awk '{print $3}')"
+          pass="$(grep -E '^# pass [0-9]+' /tmp/skills-exact/TESTS.log | tail -1 | awk '{print $3}')"
+          fail="$(grep -E '^# fail [0-9]+' /tmp/skills-exact/TESTS.log | tail -1 | awk '{print $3}')"
+          echo "TESTS_TOTAL=${tests:-NOT_REPORTED}" >>/tmp/skills-receipt.env
+          echo "TESTS_PASS=${pass:-NOT_REPORTED}" >>/tmp/skills-receipt.env
+          echo "TESTS_FAIL=${fail:-NOT_REPORTED}" >>/tmp/skills-receipt.env
+
+          GITHUB_TOKEN="$REMOTE_GITHUB_TOKEN" python scripts/validate_registry.py --remote >/tmp/skills-exact/REGISTRY_REMOTE.log 2>&1
+          status=$?
+          echo "REGISTRY_REMOTE_EXIT=$status" >>/tmp/skills-receipt.env
+          if [ "$status" -ne 0 ]; then failed=1; fi
+
+          rm -rf sentient-orchestrator/node_modules
+          clean=0
+          test -z "$(git status --porcelain)" || clean=1
+          echo "SOURCE_MUTATION=$([ "$clean" -eq 0 ] && echo false || echo true)" >>/tmp/skills-receipt.env
+          [ "$clean" -eq 0 ] || failed=1
+          echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>/tmp/skills-receipt.env
+          echo "OVERALL_EXIT=$failed" >>/tmp/skills-receipt.env
+
+          python3 - <<'PY'
+          import pathlib,re
+          pats=[
+            (re.compile(r'gh[pousr]_[A-Za-z0-9_]+'),'[REDACTED]'),
+            (re.compile(r'flyv1_[A-Za-z0-9_-]+'),'[REDACTED]'),
+            (re.compile(r'(?i)(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+'),r'\1=[REDACTED]')
+          ]
+          out=[]
+          for p in sorted(pathlib.Path('/tmp/skills-exact').glob('*.log')):
+            t=p.read_text(errors='replace')
+            for rx,r in pats:t=rx.sub(r,t)
+            if 'error' in t.lower() or 'fail' in t.lower() or 'not ok' in t.lower():
+              out.append(f"## {p.name}\n{t[-12000:]}")
+          pathlib.Path('/tmp/skills-failures.txt').write_text('\n\n'.join(out))
+          PY
+
+          cat /tmp/skills-receipt.env
+          exit "$failed"
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-exact-${{ inputs.sha }}
+          path: /tmp/skills-receipt.env
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Post private receipt
+        if: always()
+        shell: bash
+        env:
+          SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          PRIVATE_ISSUE: ${{ inputs.private_issue }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_ISSUE" =~ ^[0-9]+$ ]]
+          {
+            echo "EXACT_SKILLS_ACCEPTANCE_RECEIPT_V1"
+            echo '```text'
+            cat /tmp/skills-receipt.env
+            echo '```'
+            if [ -s /tmp/skills-failures.txt ]; then
+              echo "Sanitized failure tails:"
+              echo '```text'
+              cat /tmp/skills-failures.txt
+              echo '```'
+            fi
+            echo "PRODUCTION_DEPLOYMENT=false"
+          } >/tmp/body.txt
+          jq -Rs '{body:.}' </tmp/body.txt >/tmp/payload.json
+          curl --fail --silent --show-error             -H "Authorization: Bearer $SOURCE_TOKEN"             -H "Accept: application/vnd.github+json"             -H "Content-Type: application/json"             -X POST "https://api.github.com/repos/riggeyb/skills/issues/$PRIVATE_ISSUE/comments"             --data-binary @/tmp/payload.json >/dev/null
