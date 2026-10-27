@@ -1,142 +1,38 @@
-name: Sentient Canonical Focused Diagnostic
+name: Mission Control Exact Typecheck Diagnostic
 on:
   workflow_dispatch:
     inputs:
       sha:
-        description: Exact candidate SHA to repair and validate
         required: true
         type: string
 permissions:
   contents: read
 jobs:
-  diagnostic:
+  typecheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: riggeyb/sentient
+          repository: riggeyb/skills
           ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: true
-          fetch-depth: 0
-      - name: Fence exact shared convergence candidate
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.sha }}
-        run: |
-          set -euo pipefail
-          test "$EXPECTED_SHA" = "5cfda8e6b8667d162d2683f58fd6668bad80f575"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          echo "SOURCE_IDENTITY=PASS"
-      - name: Apply only observed Phase 1 and Phase 7 repairs
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence exact Mission Control candidate
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          p1=Path("src/phase1/core-runtime.ts")
-          s=p1.read_text()
-          old='  evaluate({ rawResult, proposal }) {'
-          new='''  evaluate({ rawResult, proposal }: {
-    requirements: TaskRequirementsV1;
-    rawResult: unknown;
-    proposal: { text: string; provider?: string | undefined; model?: string | undefined };
-  }) {'''
-          if s.count(old)!=1: raise SystemExit(f"phase1 evaluate pattern count={s.count(old)}")
-          old2='    proposal: candidate,'
-          new2='    proposal: { text: candidate.text, provider: candidate.provider, model: candidate.model },'
-          if s.count(old2)!=1: raise SystemExit(f"phase1 proposal pattern count={s.count(old2)}")
-          p1.write_text(s.replace(old,new,1).replace(old2,new2,1))
-
-          p7=Path("src/application/production-model-improvement.ts")
-          s=p7.read_text()
-          typo="PHASE7_MINIMUM_IMPROVEMEMENT_V1"
-          if s.count(typo)!=2: raise SystemExit(f"phase7 typo count={s.count(typo)}")
-          bad='decisionOwner:"SENTIENT_RUNTIME as const,'
-          if s.count(bad)!=1: raise SystemExit(f"phase7 owner defect count={s.count(bad)}")
-          p7.write_text(s.replace(typo,"PHASE7_MINIMUM_IMPROVEMENT_V1").replace(bad,'decisionOwner:"SENTIENT_RUNTIME" as const,'))
-
-          t=Path("test/production-model-improvement.test.ts")
-          b=t.read_text()
-          marker='assert.equal(result.result.candidateScore, 1);'
-          if b.count(marker)!=1: raise SystemExit(f"phase7 result marker count={b.count(marker)}")
-          if 'assert.match(result.datasetId, /^phase7-dataset:sha256:' not in b:
-              lines=[
-                '  assert.match(result.datasetId, /^phase7-dataset:sha256:[0-9a-f]{64}$/);',
-                '  assert.match(result.baselineId, /^phase7-baseline:sha256:[0-9a-f]{64}$/);',
-                '  assert.match(result.candidateId ?? "", /^phase7-candidate:sha256:[0-9a-f]{64}$/);',
-                '  assert.match(result.evaluationId, /^phase7-evaluation:sha256:[0-9a-f]{64}$/);',
-                '  assert.equal(result.promotionPolicyId, "sentient-phase7-material-improvement-policy/v1");',
-                '  assert.equal(result.promotionThreshold, 0.01);',
-                '  assert.equal(result.promotionDecisionOwner, "SENTIENT_RUNTIME");',
-                '  assert.equal(result.modelMayProposeImprovement, true);',
-                '  assert.equal(result.modelMayPromoteItself, false);',
-                '  assert.deepEqual(result.evaluationEligibility, { heldOutDisjoint: true, bothLabels: true });',
-              ]
-              b=b.replace(marker, marker+"\n"+"\n".join(lines),1)
-          persisted='assert.equal(persisted.checkpoint?.baseRevision, PHASE7_HF_FEATURE_MODEL_REVISION_V1);'
-          if b.count(persisted)!=1: raise SystemExit(f"phase7 persisted marker count={b.count(persisted)}")
-          if 'const lifecycle = JSON.parse(artifact.content)' not in b:
-              lines=[
-                '  const lifecycle = JSON.parse(artifact.content) as {',
-                '    datasetId: string; baselineId: string; candidateId: string | null; evaluationId: string;',
-                '    promotionPolicy: { policyId: string; minimumImprovement: number; decisionOwner: string; modelMayProposeImprovement: boolean; modelMayPromoteItself: boolean };',
-                '    evaluationEligibility: { heldOutDisjoint: boolean; bothLabels: boolean };',
-                '  };',
-                '  assert.equal(lifecycle.datasetId, result.datasetId);',
-                '  assert.equal(lifecycle.baselineId, result.baselineId);',
-                '  assert.equal(lifecycle.candidateId, result.candidateId);',
-                '  assert.equal(lifecycle.evaluationId, result.evaluationId);',
-                '  assert.equal(lifecycle.promotionPolicy.decisionOwner, "SENTIENT_RUNTIME");',
-                '  assert.equal(lifecycle.promotionPolicy.modelMayProposeImprovement, true);',
-                '  assert.equal(lifecycle.promotionPolicy.modelMayPromoteItself, false);',
-                '  assert.deepEqual(lifecycle.evaluationEligibility, { heldOutDisjoint: true, bothLabels: true });',
-                '  assert.equal(artifact.metadata?.datasetId, result.datasetId);',
-                '  assert.equal(artifact.metadata?.baselineId, result.baselineId);',
-                '  assert.equal(artifact.metadata?.candidateId, result.candidateId);',
-                '  assert.equal(artifact.metadata?.evaluationId, result.evaluationId);',
-                '  assert.equal(artifact.metadata?.promotionDecisionOwner, "SENTIENT_RUNTIME");',
-                '  assert.equal(artifact.metadata?.modelMayProposeImprovement, true);',
-                '  assert.equal(artifact.metadata?.modelMayPromoteItself, false);',
-              ]
-              b=b.replace(persisted,persisted+"\n"+"\n".join(lines),1)
-          t.write_text(b)
-          PY
-      - name: Build exact repaired candidate
-        run: |
-          npm ci --no-audit --no-fund
-          npm run build
-      - name: Run cumulative Phase 1-7 and Phase-0 continuation regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --test \
-            dist/test/phase1-core-runtime.test.js \
-            dist/test/phase2-skill-execution.test.js \
-            dist/test/phase3-cognitive-components.test.js \
-            dist/test/phase3-local-hf-adapter.test.js \
-            dist/test/phase4-multistep-autonomy.test.js \
-            dist/test/phase5-collaborative-convergence.test.js \
-            dist/test/phase6-capability-integration.test.js \
-            dist/test/phase7-local-hf-feature-head.test.js \
-            dist/test/phase7-model-improvement.test.js \
-            dist/test/production-model-improvement.test.js \
-            dist/test/job2-self-execution.test.js \
-            dist/test/job2-production-convergence.test.js
-          echo "CUMULATIVE_TARGETED_TESTS=PASS"
-          echo "SECRET_VALUES_EXPOSED=false"
-      - name: Commit exact tested changes to shared convergence branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "sentient-convergence"
-          git config user.email "sentient-convergence@users.noreply.github.com"
-          git add src/phase1/core-runtime.ts src/application/production-model-improvement.ts test/production-model-improvement.test.ts
-          git diff --cached --quiet && { echo "NO_CHANGES_TO_COMMIT"; exit 1; }
-          git commit -m "Converge Phase 1 authority and Phase 7 learning evidence"
-          git push origin HEAD:sentient-phase1-7-convergence-20261023
-          echo "PUBLIC_RUNNER_USED=true"
-          echo "PRIVATE_ACTIONS_BRIDGE_USED=false"
-          echo "NETLIFY_USAGE=0"
+          test "$(git rev-parse HEAD)" = "${{ inputs.sha }}"
+          test "$(git rev-parse 'HEAD^{tree}')" = "d074b3170069b188fd71caf28c6ec11ef677f4ff"
+          echo "SOURCE_SHA=${{ inputs.sha }}"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - name: Install orchestrator dependencies
+        working-directory: sentient-orchestrator
+        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Typecheck exact candidate
+        working-directory: sentient-orchestrator
+        run: npm run typecheck
