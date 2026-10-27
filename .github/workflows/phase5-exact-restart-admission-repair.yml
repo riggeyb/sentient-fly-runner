@@ -1,238 +1,102 @@
-name: Phase5 Exact Restart Admission Repair
-"on":
+name: Skills Exact Candidate Validation
+on:
   workflow_dispatch:
     inputs:
-      sha: {required: true, type: string}
-      tree: {required: true, type: string}
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
 permissions:
   contents: read
-concurrency:
-  group: phase5-canonical-source-repair
-  cancel-in-progress: false
 jobs:
-  repair:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
-          POSTGRES_USER: sentient
-          POSTGRES_PASSWORD: sentient
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: sentient
-        ports: ["5432:5432"]
+        ports:
+          - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-cmd "pg_isready -U postgres -d sentient"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
       EXPECTED_SHA: ${{ inputs.sha }}
       EXPECTED_TREE: ${{ inputs.tree }}
-      TARGET_BRANCH: sentient-production-composition-20261017
-      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: riggeyb/sentient
+          repository: riggeyb/skills
           ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: true
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with: {node-version: "22"}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
       - name: Fence exact source
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
-          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_SHA"
-      - name: Atomically admit production objective state
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          echo "SOURCE_SHA=$EXPECTED_SHA"
+          echo "SOURCE_TREE=$EXPECTED_TREE"
+          echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_SOURCE"
+          echo "PYTHON_REQUIREMENTS_SHA=$(git rev-parse HEAD:requirements.txt)"
+          echo "ORCHESTRATOR_MANIFEST_SHA=$(git rev-parse HEAD:sentient-orchestrator/package.json)"
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: Validate registry structure
+        run: python scripts/validate_registry.py
+      - name: Validate eval definitions
+        run: python scripts/check_evals.py
+      - name: Validate durable objective continuation contract
+        run: PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+      - name: Validate active work disclosure contract
+        run: PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+      - name: Test deterministic repository edit preparation
+        run: python scripts/test_repository_edit.py
+      - name: Test deterministic repository edit request gateway
+        run: python scripts/test_repository_edit_request.py
+      - name: Validate GPT Actions schema compatibility
+        run: python scripts/validate_actions_schema.py
+      - name: Validate Netlify Actions schema compatibility
+        run: python scripts/validate_netlify_actions_schema.py
+      - name: Install Sentient orchestrator dependencies
+        working-directory: sentient-orchestrator
+        run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Typecheck Sentient orchestrator
+        working-directory: sentient-orchestrator
+        run: npm run typecheck
+      - name: Apply Sentient orchestrator migrations
+        working-directory: sentient-orchestrator
+        run: npm run migrate
+      - name: Test Sentient orchestrator
+        working-directory: sentient-orchestrator
+        run: npm test
+      - name: Validate GitHub repositories and entrypoints
+        env:
+          GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: python scripts/validate_registry.py --remote
+      - name: Source mutation guard
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path("src/application/production-state.ts")
-          s=p.read_text()
-          marker='import type { PostgresSpawnObjectiveRepository } from "../objective-continuation/postgres-spawn-repository.js";\n'
-          additions='import { sanitizeRecord } from "../state/sanitize.js";\nimport { assertPersistableRecord } from "../state/state-integrity.js";\n'
-          assert marker in s
-          if additions not in s:
-            s=s.replace(marker, marker+additions, 1)
-          start=s.index("export async function ensureProductionObjectiveStateV1(")
-          end=s.index("export async function completeProductionObjectiveStateV1(")
-          replacement='''export async function ensureProductionObjectiveStateV1(
-  repository: PostgresSpawnObjectiveRepository,
-  input: SentientObjectiveInput,
-  identity: SentientApplicationIdentity,
-): Promise<void> {
-  const now = new Date().toISOString();
-  const version = {
-    schemaVersion: STATE_SCHEMA_VERSION,
-    applicationVersion: SENTIENT_APPLICATION_CONTRACT,
-    repository: identity.source.repository,
-    commitSha: identity.source.sha,
-  } as const;
-
-  await repository.withSnapshotTransaction((snapshot) => {
-    const taskIndex = snapshot.records.tasks.findIndex((record) => record.id === input.objectiveId);
-    const currentTask = taskIndex < 0 ? undefined : snapshot.records.tasks[taskIndex];
-    const task = sanitizeRecord<SentientTask>(currentTask === undefined
-      ? {
-          kind: "task",
-          id: input.objectiveId,
-          createdAt: now,
-          updatedAt: now,
-          provenance: { actor: "user" },
-          version,
-          title: input.request,
-          status: "running",
-        }
-      : {
-          ...currentTask,
-          title: input.request,
-          status: "running",
-          updatedAt: now,
-          version,
-        });
-    assertPersistableRecord(snapshot, task);
-    if (taskIndex < 0) snapshot.records.tasks.push(task);
-    else snapshot.records.tasks[taskIndex] = task;
-
-    const sessionIndex = snapshot.records.sessions.findIndex((record) => record.id === input.sessionId);
-    const currentSession = sessionIndex < 0 ? undefined : snapshot.records.sessions[sessionIndex];
-    const session = sanitizeRecord<Session>(currentSession === undefined
-      ? {
-          kind: "session",
-          id: input.sessionId,
-          createdAt: now,
-          updatedAt: now,
-          provenance: { actor: "sentient" },
-          version,
-          taskId: input.objectiveId,
-          label: "sentient-objective-session",
-        }
-      : {
-          ...currentSession,
-          taskId: input.objectiveId,
-          updatedAt: now,
-          version,
-        });
-    assertPersistableRecord(snapshot, session);
-    if (sessionIndex < 0) snapshot.records.sessions.push(session);
-    else snapshot.records.sessions[sessionIndex] = session;
-
-    return { result: undefined, changed: true };
-  });
-}
-
-'''
-          s=s[:start]+replacement+s[end:]
-          p.write_text(s)
-
-          t=Path("test/phase5-fly-restart-lease-retry.test.ts")
-          q=t.read_text()
-          old='''test("restart recovery paces admission without waiting for a previous objective lifetime", async () => {
-  const source = await readFile("src/fly/self-execution.ts", "utf8");
-  assert.ok(source.includes("this.#scheduleInheritedRestart(task.id)"));
-  assert.ok(source.includes("PHASE5_RESTART_ADMISSION_PACING_MS = 1_000"));
-  assert.ok(source.includes("this.#schedule(objectiveId, true)"));
-  assert.ok(source.includes("setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)"));
-  assert.ok(!source.includes("if (work !== undefined) await work"));
-  assert.ok(source.includes("#schedule(objectiveId: string, inheritedRestart = false)"));
-  assert.ok(source.includes("inheritedRestart\\n      ? await runObjectiveWithInheritedPhase5LeaseRetryV1"));
-});
-'''
-          new='''test("restart recovery serializes inherited objectives while fresh admission remains independently schedulable", async () => {
-  const source = await readFile("src/fly/self-execution.ts", "utf8");
-  assert.ok(source.includes("this.#scheduleInheritedRestart(task.id)"));
-  assert.ok(source.includes("PHASE5_RESTART_ADMISSION_PACING_MS = 1_000"));
-  assert.ok(source.includes("await this.#schedule(objectiveId, true)"));
-  assert.ok(source.includes("setTimeout(resolve, PHASE5_RESTART_ADMISSION_PACING_MS)"));
-  assert.ok(source.includes("setImmediate(() => this.#schedule(input.objectiveId))"));
-  assert.ok(source.includes("#schedule(objectiveId: string, inheritedRestart = false)"));
-  assert.ok(source.includes("inheritedRestart\\n      ? await runObjectiveWithInheritedPhase5LeaseRetryV1"));
-});
-'''
-          assert old in q, "stale restart regression contract not found"
-          t.write_text(q.replace(old,new,1))
-
-          r=Path("test/final-cert-objective-admission-atomicity.test.ts")
-          r.write_text('''import test from "node:test";
-import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-
-test("production objective admission persists task and session in one snapshot transaction", async () => {
-  const source = await readFile("src/application/production-state.ts", "utf8");
-  const start = source.indexOf("export async function ensureProductionObjectiveStateV1(");
-  const end = source.indexOf("export async function completeProductionObjectiveStateV1(");
-  assert.ok(start >= 0 && end > start);
-  const admission = source.slice(start, end);
-  assert.ok(admission.includes("repository.withSnapshotTransaction"));
-  assert.ok(admission.includes("snapshot.records.tasks"));
-  assert.ok(admission.includes("snapshot.records.sessions"));
-  assert.ok(admission.includes("sanitizeRecord<SentientTask>"));
-  assert.ok(admission.includes("sanitizeRecord<Session>"));
-  assert.ok(admission.includes("assertPersistableRecord(snapshot, task)"));
-  assert.ok(admission.includes("assertPersistableRecord(snapshot, session)");
-  assert.ok(!admission.includes('repository.get("pask"'));
-  assert.ok(!admission.includes('repository.get("session"'));
-  assert.ok(!admission.includes("repository.insert("));
-  assert.ok(!admission.includes("repository.replace("));
-});
-''')
-          PY
-          git diff --check
-      - name: Build and focused regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --no-audit --no-fund
-          npm run build
-          node --test \
-            dist/test/final-cert-objective-admission-atomicity.test.js \
-            dist/test/final-cert-restart-backlog-serialization.test.js \
-            dist/test/phase5-fly-restart-lease-retry.test.js \
-            dist/test/production-collaboration-restart-recovery.test.js \
-            dist/test/active-work-expiry-fencing.test.js \
-            dist/test/job2-self-execution.test.js \
-            dist/test/permanent-continuation-http.test.js \
-            dist/test/permanent-continuation-multiprocess.test.js
-      - name: Cumulative Phase 1-7 regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --test \
-            dist/test/phase0-control-recovery.test.js \
-            dist/test/phase0-engineering-readiness.test.js \
-            dist/test/phase1-core-runtime.test.js \
-            dist/test/phase1-acceptance-policy.test.js \
-            dist/test/phase2-skill-execution.test.js \
-            dist/test/phase3-cognitive-components.test.js \
-            dist/test/phase3-local-hf-adapter.test.js \
-            dist/test/production-phase3-cognition.test.js \
-            dist/test/phase4-multistep-autonomy.test.js \
-            dist/test/phase5-collaborative-convergence.test.js \
-            dist/test/phase6-capability-integration.test.js \
-            dist/test/phase7-local-hf-feature-head.test.js \
-            dist/test/phase7-model-improvement.test.js \
-            dist/test/production-model-improvement.test.js \
-            dist/test/job2-production-convergence.test.js
-      - name: Commit tested repair
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_SHA"
-          git config user.name sentient-final-cert-convergence
-          git config user.email sentient-final-cert-convergence@users.noreply.github.com
-          git add src/application/production-state.ts test/phase5-fly-restart-lease-retry.test.ts test/final-cert-objective-admission-atomicity.test.ts
-          git diff --cached --check
-          git commit -m "fix: atomically admit production objective state"
-          echo "END_SHA=$(git rev-parse HEAD)"
-          echo "END_TREE=$(git rev-parse 'HEAD^{tree}')"
-          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
-          echo PHASE5_SOURCE_PUSH=PASS
-          echo SECRET_VALUES_EXPOSED=false
+          test -z "$(git status --porcelain)"
+          echo "SOURCE_MUTATION=false"
+          echo "VALIDATION_RESULT=PASS"
