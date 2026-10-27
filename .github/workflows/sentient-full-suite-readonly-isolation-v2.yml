@@ -1,4 +1,4 @@
-name: Mission Control Exact Failure Diagnostic V2
+name: Mission Control Exact Failure Diagnostic V3
 
 on:
   workflow_dispatch:
@@ -48,16 +48,12 @@ jobs:
           echo "DIAGNOSTIC_SOURCE_SHA=$EXPECTED_SHA"
           echo "DIAGNOSTIC_SOURCE_TREE=$EXPECTED_TREE"
           cd sentient-orchestrator
-          npm install --ignore-scripts --no-audit --no-fund --no-package-lock >/tmp/npm-install.log 2>&1
-          install_rc=$?
-          echo "NPM_INSTALL_EXIT=$install_rc"
-          if [ "$install_rc" -ne 0 ]; then
-            tail -n 100 /tmp/npm-install.log \
-              | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]+[^[:space:]]+/\1=[REDACTED]/Ig'
-            exit "$install_rc"
-          fi
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+          npm run migrate
+          set +e
           npm test >/tmp/mission-control-tests.log 2>&1
           test_rc=$?
+          set -e
           echo "NPM_TEST_EXIT=$test_rc"
           python3 - <<'PY'
           from pathlib import Path
@@ -67,7 +63,7 @@ jobs:
           print(f"FAILURE_COUNT={len(failure_ix)}")
           for n, i in enumerate(failure_ix, 1):
               start = max(0, i - 3)
-              end = min(len(lines), i + 45)
+              end = min(len(lines), i + 52)
               print(f"--- FAILURE_{n}_BEGIN ---")
               for line in lines[start:end]:
                   line = re.sub(r'gh[pousr]_[A-Za-z0-9_]+', '[REDACTED]', line)
