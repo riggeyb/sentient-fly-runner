@@ -1,0 +1,97 @@
+name: Sentient V4 Transparent Diagnostic V3
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Transparent V4 lock-preserving diagnostic
+        shell: bash
+        run: |
+          set +e
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
+          mkdir -p /tmp/v4
+          failed=0
+          runx() {
+            label="$1"; shift
+            "$@" >"/tmp/v4/${label}.log" 2>&1
+            rc=$?
+            echo "${label}_RC=${rc}"
+            if [ "$rc" -ne 0 ]; then
+              failed=1
+              echo "::group::${label} failure tail"
+              tail -n 160 "/tmp/v4/${label}.log" | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g'
+              echo "::endgroup::"
+            fi
+          }
+          runx NPM_CI npm ci --no-audit --no-fund
+          runx BUILD npm run build
+          runx CONTINUATION node --test dist/test/objective-continuation.test.js dist/test/objective-continuation-readiness.test.js dist/test/active-work-core.test.js dist/test/active-work-persistence.test.js
+          runx PERMANENT_CONTINUATION bash -lc "node --test dist/test/permanent-continuation-*.test.js"
+          runx OPERROUTER node --test dist/src/model/providers/openrouter.test.js
+          runx LIBRECHAT node --test dist/src/lab/librechat/bridge.test.js
+          runx WORKER_A npx tsc -p tsconfig.worker-a.json --noEmit
+          runx WORKER_C npx tsc -p tsconfig.worker-c.json --noEmit
+          runx WORKER_D npx tsc -p tsconfig.worker-d.json --noEmit
+          runx WORKER_D_ACCEPTANCE bash -lc "node --test dist/test/lab/*.test.js"
+          runx WORKER_A_RUNTIME bash -lc "node --experimental-strip-types --test tests/*.test.ts"
+          runx WORKER_C_RETRIEVAL bash -lc "node --experimental-strip-types --test tests/retrieval/*.test.ts"
+          runx WORKER_B_PERSISTENCE node --test dist/test/persistence.test.js
+          runx NPM_TEST npm test
+          if [ -f dist/test/spawn-mission-control-context.test.js ]; then
+            runx MC_COMPILED node --test dist/test/spawn-mission-control-context.test.js
+          else
+            echo "MC_COMPILED_RC=2"; failed=1
+          fi
+          if [ -f tests/spawn-mission-control-context.test.ts ]; then
+            runx MC_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
+          else
+            echo "MC_DIRECT_RC=2"; failed=1
+          fi
+          git diff --quiet && git diff --cached --quiet
+          rc=$?
+          echo "TRACKED_SOURCE_MUTATION_RC=${rc}"
+          [ "$rc" -eq 0 ] || failed=1
+          echo "DIAGNOSTIC_OVERALL=${failed}"
+          exit "$failed"
