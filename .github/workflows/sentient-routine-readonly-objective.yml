@@ -1,6 +1,6 @@
 name: Sentient Exact Spawn Acceptance V3
 
-" on":
+"on":
   workflow_dispatch:
     inputs:
       sha: {required: true, type: string}
