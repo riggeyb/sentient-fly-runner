@@ -1,0 +1,56 @@
+name: MVP Ack Before Work Repair
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient/mvp-ack-before-work-v1
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence and defer objective execution until ack can flush
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "63d89cbcd8c2f8d6ad1fc2a26ae12260f5f28062"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/fly/self-execution.ts")
+          s=p.read_text()
+          old="setImmediate(() => this.#schedule(input.objectiveId));"
+          n=s.count(old)
+          if n != 2:
+              raise SystemExit(f"expected_2_schedule_sites_found_{n}")
+          new="setTimeout(() => { void this.#schedule(input.objectiveId); }, 250);"
+          p.write_text(s.replace(old,new))
+          PY
+          test "$(git diff --name-only)" = "src/fly/self-execution.ts"
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run build
+          npm test
+      - name: Commit bounded successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-mvp-activation"
+          git config user.email "sentient-mvp-activation@users.noreply.github.com"
+          git add src/fly/self-execution.ts
+          test "$(git diff --cached --name-only)" = "src/fly/self-execution.ts"
+          git commit -m "mvp: acknowledge objectives before scheduling work"
+          git push origin HEAD:sentient/mvp-ack-before-work-v1
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git rev-parse 'HEAD^{tree}')"
