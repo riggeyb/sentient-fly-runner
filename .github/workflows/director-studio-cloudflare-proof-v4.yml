@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
-          ref: 51d2b8e61248ce4c5608af47da2a42ab43204138
+          ref: ed2be6442d98b248d8003a851dcca92edac09425
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           fetch-depth: 0
 
@@ -23,13 +23,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "51d2b8e61248ce4c5608af47da2a42ab43204138"
-          test "$(git rev-parse 'HEAD^{tree}')" = "2a64f91d805d5b7a234c91e6962315835a5d9976"
+          test "$(git rev-parse HEAD)" = "ed2be6442d98b248d8003a851dcca92edac09425"
+          test "$(git rev-parse 'HEAD^{tree}')" = "a4de82ea5eac6b7715b2c7642dcb727d2713da49"
           git fetch origin sentient-ui-activation-v1
-          test "$(git rev-parse origin/sentient-ui-activation-v1)" = "51d2b8e61248ce4c5608af47da2a42ab43204138"
-          git checkout -B sentient-ui-activation-v1 "51d2b8e61248ce4c5608af47da2a42ab43204138"
-          echo "INITIAL_DIRECTOR_SHA=51d2b8e61248ce4c5608af47da2a42ab43204138"
-          echo "INITIAL_DIRECTOR_TREE=2a64f91d805d5b7a234c91e6962315835a5d9976"
+          test "$(git rev-parse origin/sentient-ui-activation-v1)" = "ed2be6442d98b248d8003a851dcca92edac09425"
+          git checkout -B sentient-ui-activation-v1 "ed2be6442d98b248d8003a851dcca92edac09425"
+          echo "INITIAL_DIRECTOR_SHA=ed2be6442d98b248d8003a851dcca92edac09425"
+          echo "INITIAL_DIRECTOR_TREE=a4de82ea5eac6b7715b2c7642dcb727d2713da49"
           echo "PROOF_CANDIDATE_IDENTITY=PASS"
 
       - uses: actions/setup-node@v4
@@ -69,6 +69,16 @@ jobs:
           fi
           echo "CLERK_DEPENDENCY_PRESENT=false"
 
+      - name: Verify no active Clerk or Netlify target references
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json package-lock.json app lib proxy.ts tests scripts .env.example
+          ! grep -q '"netlify' package.json
+          ! grep -q '\.netlify\.app' .env.example
+          echo "CLERK_RUNTIME_REFERENCES=0"
+          echo "NETLIFY_TARGET_REFERENCES=0"
+
       - name: Focused Cloudflare security and target contract tests
         shell: bash
         run: |
@@ -78,6 +88,13 @@ jobs:
             tests/cloudflare-target-contract.test.ts \
             tests/sentient-cloudflare-contract.test.ts
           echo "CLOUDFLARE_TARGET_CONTRACT_TESTS=PASS"
+
+      - name: Full unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          echo "DIRECTOR_UNIT_TESTS=PASS"
 
       - name: Typecheck Director Studio
         shell: bash
@@ -127,21 +144,8 @@ jobs:
           echo "TEMPORARY_WORKER_DEPLOY=PASS"
           echo "PRODUCTION_DEPLOYMENT=false"
           echo "CANONICAL_HOST_CHANGE=false"
-          # Never print raw deploy output: it may contain a short-lived claim URL.
 
-      - name: Start real-time Worker tail
-        id: tail
-        shell: bash
-        run: |
-          set -euo pipefail
-          tail_out="${RUNNER_TEMP}/director-cf-tail.jsonl"
-          tail_err="${RUNNER_TEMP}/director-cf-tail.err"
-          (timeout 60s npx wrangler tail --format json >"$tail_out" 2>"$tail_err") &
-          echo "$!" > "${RUNNER_TEMP}/director-cf-tail.pid"
-          sleep 5
-          echo "tail_out=$tail_out" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke real Worker and capture invocations
+      - name: Smoke real Worker
         shell: bash
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
@@ -155,70 +159,14 @@ jobs:
             --data '{"objective":"read-only test"}' \
             "$WORKER_URL/api/sentient/objectives")"
           test "$code" = "401"
-          sleep 5
           echo "TEMPORARY_WORKER_SMOKE=PASS"
           echo "UNAUTHENTICATED_OBJECTIVE_BLOCK=PASS"
 
-      - name: Stop tail and summarize authoritative CPU fields
+      - name: Receipt
         if: always()
         shell: bash
         run: |
-          set -uo pipefail
-          pid_file="${RUNNER_TEMP}/director-cf-tail.pid"
-          if [ -f "$pid_file" ]; then
-            kill "$(cat "$pid_file")" 2>/dev/null || true
-          fi
-          wait 2>/dev/null || true
-          tail_out="${RUNNER_TEMP}/director-cf-tail.jsonl"
-          python3 - "$tail_out" <<'PY'
-          import json, math, pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          values = []
-          exceeded = 0
-          def walk(x):
-              global exceeded
-              if isinstance(x, dict):
-                  for k, v in x.items():
-                      if k in {"cpuTimeMs", "CPUTimeMs"} and isinstance(v, (int, float)):
-                          values.append(float(v))
-                      if k == "exceededCpu" and v is True:
-                          exceeded += 1
-                      walk(v)
-              elif isinstance(x, list):
-                  for v in x:
-                      walk(v)
-          if p.exists():
-              for line in p.read_text(errors="replace").splitlines():
-                  try:
-                      walk(json.loads(line))
-                  except Exception:
-                      pass
-          values.sort()
-          def pct(q):
-              if not values:
-                  return None
-              pos=(len(values)-1)*q
-              lo=math.floor(pos); hi=math.ceil(pos)
-              if lo == hi: return values[lo]
-              return values[lo] + (values[hi]-values[lo])*(pos-lo)
-          print(f"CPU_SAMPLE_COUNT={len(values)}")
-          if values:
-              print(f"CPU_P50_MS={pct(.50):.6g}")
-              print(f"CPU_P95_MS={pct(.95):.6g}")
-              print(f"CPU_P99_MS={pct(.99):.6g}")
-              print(f"CPU_MAX_MS={max(values):.6g}")
-              print(f"CPU_EXCEEDED_10MS_COUNT={sum(v>10 for v in values)}")
-              print(f"EXCEEDED_CPU_COUNT={exceeded}")
-          else:
-              print("CPU_P50_MS=NOT_VERIFIED")
-              print("CPU_P95_MS=NOT_VERIFIED")
-              print("CPU_P99_MS=NOT_VERIFIED")
-              print("CPU_MAX_MS=NOT_VERIFIED")
-              print("CPU_EXCEEDED_10MS_COUNT=NOT_VERIFIED")
-              print("EXCEEDED_CPU_COUNT=NOT_VERIFIED")
-          PY
           echo "DIRECTOR_FINAL_SHA=${{ steps.lock.outputs.candidate_sha }}"
           echo "DIRECTOR_FINAL_TREE=${{ steps.lock.outputs.candidate_tree }}"
           echo "PRODUCTION_DEPLOYMENT=false"
-          echo "CANONICAL_HOST_CHANGE=false"
           echo "SECRET_VALUES_EXPOSED=false"
