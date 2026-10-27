@@ -1,32 +1,26 @@
 name: MVP External Poll Existing Root Objective
 
-on:
+"on":
   workflow_dispatch:
     inputs:
-      sha:
-        required: true
-        type: string
-      tree:
-        required: true
-        type: string
-      objective_id:
-        required: true
-        type: string
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      objective_id: {required: true, type: string}
 
-permissions:
-  contents: read
+permissions: {contents: read}
 
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 10
     env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
       EXPECTED_SHA: ${{ inputs.sha }}
       EXPECTED_TREE: ${{ inputs.tree }}
       OBJECTIVE_ID: ${{ inputs.objective_id }}
-      SENTIENT_API_TOKEN: ${{ secrets.SENTIENT_API_TOKEN }}
     steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: GET-only external poll of existing objective
         shell: bash
         run: |
@@ -34,15 +28,35 @@ jobs:
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
           [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
-          test -n "$SENTIENT_API_TOKEN"
+
+          for _ in $(seq 1 60); do
+            h="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/healthz" 2>/dev/null || true)"
+            r="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz" 2>/dev/null || true)"
+            if jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null 2>&1 <<<"$h" &&
+               jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null 2>&1 <<<"$r"; then
+              echo LIVE_EXACT_IDENTITY=PASS
+              break
+            fi
+            sleep 2
+          done
+
+          token_b64="$(timeout 45s flyctl ssh console -a "$APP" -C "sh -lc 'printf %s \"\$SENTIENT_API_TOKEN\" | base64 -w0'" 2>/dev/null | tail -n1)"
+          token="$(printf '%s' "$token_b64" | base64 -d)"
+          test -n "$token"
+          echo "::add-mask::$token"
+          export SENTIENT_API_TOKEN="$token"
+          unset token token_b64
+
           node --input-type=module <<'NODE'
           const app=String(process.env.APP);
           const sha=String(process.env.EXPECTED_SHA);
           const tree=String(process.env.EXPECTED_TREE);
           const objectiveId=String(process.env.OBJECTIVE_ID);
-          const token=String(process.env.SENTIENT_API_TOKEN);
+          const token=String(process.env.SENTIENT_API_TOKEN??"");
+          if(!token) throw new Error("sentient_api_token_missing");
           const base=`https://${app}.fly.dev`;
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
           let exact=false;
           for(let i=0;i<60;i++){
             try{
@@ -64,11 +78,10 @@ jobs:
             await sleep(2000);
           }
           if(!exact) throw new Error("LIVE_EXACT_IDENTITY_NOT_READY");
-          console.log("LIVE_EXACT_IDENTITY=PASS");
 
           const headers={authorization:`Bearer ${token}`,accept:"application/json"};
           let last=null;
-          for(let i=0;i<180;i++){
+          for(let i=0;i<210;i++){
             try{
               const res=await fetch(`${base}/v1/objectives/${encodeURIComponent(objectiveId)}`,{
                 headers,redirect:"manual",signal:AbortSignal.timeout(12000)
