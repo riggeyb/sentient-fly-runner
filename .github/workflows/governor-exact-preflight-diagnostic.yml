@@ -14,6 +14,7 @@ jobs:
     env:
       S: ${{ inputs.sha }}
       BASE: 3ce2b2e2104a1000a7a82b4cb0e465bdc1789282
+      EXPECTED_INTEGRATION: ac212168daa84d56af7a1e0e3d8d0277af571db2
       TARGET_TREE: f4cebc41c4775b09ce5f0279b5cb12d4cad52a01
       BRANCH: integration/mission-control-production-75ba9c28
     steps:
@@ -24,16 +25,17 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
-      - name: Integrate accepted source while preserving production Fly envelope
+      - name: Replace defective integration with accepted source and preserved Fly config
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$BASE"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_INTEGRATION"
           test "$(git rev-parse "$S^{tree}")" = "$TARGET_TREE"
           git show "$BASE:fly.toml" > "$RUNNER_TEMP/production-fly.toml"
           production_fly_sha="$(sha256sum "$RUNNER_TEMP/production-fly.toml" | awk '{print $1}')"
           git config user.name sentient-mission-control-integrator
           git config user.email sentient-mission-control-integrator@users.noreply.github.com
+          git checkout -B clean-mission-control-integration "$BASE"
           git merge --no-ff --no-edit "$S"
           git checkout "$BASE" -- fly.toml
           git add fly.toml
@@ -45,7 +47,7 @@ jobs:
           test "$(sha256sum fly.toml | awk '{print $1}')" = "$production_fly_sha"
           merged="$(git rev-parse HEAD)"
           tree="$(git rev-parse 'HEAD^{tree}')"
-          git push --force-with-lease="refs/heads/$BRANCH:$BASE" origin "HEAD:refs/heads/$BRANCH"
+          git push --force-with-lease="refs/heads/$BRANCH:$EXPECTED_INTEGRATION" origin "HEAD:refs/heads/$BRANCH"
           echo "INTEGRATION_BRANCH=$BRANCH"
           echo "INTEGRATION_SHA=$merged"
           echo "INTEGRATION_TREE=$tree"
