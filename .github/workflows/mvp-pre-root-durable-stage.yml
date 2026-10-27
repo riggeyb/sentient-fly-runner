@@ -1,0 +1,47 @@
+name: MVP Pre-Root Durable Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      objective_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      OID: ${{ inputs.objective_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect pre-Root durable artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          cat >"$RUNNER_TEMP/pre-root.mjs" <<'NODE'
+          import { PostgresSpawnObjectiveRepository } from "file:///app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const oid=process.env.OID;
+          const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!oid||!cs) throw new Error("binding_missing");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString:cs});
+          try {
+            const task=await repo.get("task",oid);
+            const root=await repo.getSpawnExecution(`root:${oid}`);
+            const continuation=await repo.getObjectiveContinuation(oid);
+            console.log("TASK_STATUS="+String(task?.kind==="task"?task.status:"missing"));
+            console.log("SPAWN_ROOT_PRESENT="+String(Boolean(root)));
+            console.log("SPAWN_ROOT_STATUS="+String(root?.identity?.status??"none"));
+            console.log("CONTINUATION_PRESENT="+String(Boolean(continuation)));
+            console.log("CONTINUATION_STATUS="+String(continuation?.status??"none"));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally { await repo.close(); }
+          NODE
+          B64="$(base64 -w0 "$RUNNER_TEMP/pre-root.mjs")"
+          timeout 120s flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/tmp/pre-root.mjs && OID=$OID node /tmp/pre-root.mjs; rc=\$?; rm -f /tmp/pre-root.mjs; exit \$rc'"
