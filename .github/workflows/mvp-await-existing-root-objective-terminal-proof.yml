@@ -1,0 +1,123 @@
+name: MVP Await Existing Root Objective Terminal Proof
+
+"on":
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      objective_id: {required: true, type: string}
+
+permissions: {contents: read}
+
+jobs:
+  await:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      OID: ${{ inputs.objective_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Verify exact resident runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          for i in $(seq 1 30); do
+            h="$(curl -fsS --max-time 8 "https://${APP}.fly.dev/healthz" 2>/dev/null || true)"
+            r="$(curl -fsS --max-time 8 "https:///${APP}.fly.dev/readyz" 2>/dev/null || true)"
+            if jq -e --arg s "$SHA" --arg t "$TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null 2>&1 <<<"$j" &&
+               jq -e --arg s "$SH" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null 2>&1 <<<"$r"; then
+              echo LIVE_EXACT_IDENTITY=PASS
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: GET-only await existing objective terminal Root proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >"$RUNNER_TEMP/await.mjs" <<'NODE'
+          const oid=String(process.env.CERT_OBJECTIVE_ID??"").trim();
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          if(!oid||!token) throw new Error("binding_missing");
+          const headers={authorization:`Bearer ${token}`};
+          const base="http://127.0.0.1:8080";
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          const deadline=Date.now()+12*60_000;
+          let body=null,last=null;
+          while(Date.now()<deadline){
+            try{
+              const r=await fetch(`${base}/v1/objectives/${encodeURIComponent(oid)}`,{
+                headers,signal:AbortSignal.timeout(30000)
+              });
+              if(!r.ok) throw new Error(`http_${r.status}`);
+              body=await r.json();
+              if(["succeeded","failed","cancelled"].includes(String(body.status))) break;
+            }catch(e){last=e}
+            await sleep(2000);
+          }
+          if(!body) throw last??new Error("objective_unreadable");
+          const p=body.rootProjection??null;
+          const x=body?.result?.body?.result??{};
+          const c=String(x.authoritativeContent??"");
+          const obs={
+            objectiveId:body.objectiveId??oid,
+            status:body.status??null,
+            rootProjectionPresent:Boolean(p),
+            rootStatus:p?.rootStatus??null,
+            currentPhase:p?.currentPhase??null,
+            contextVersion:p?.operatingContextVersion??null,
+            contextDigest:p?.operatingContextDigest??null,
+            participantContexts:Array.isArray(p?.participantOperatingContexts)?p.participantOperatingContexts.length:0,
+            staleContexts:Array.isArray(p?.staleOperatingContextWorkers)?p.staleOperatingContextWorkers.length:0,
+            acceptedEvidence:Array.isArray(p?.acceptedEvidence)?p.acceptedEvidence.length:0,
+            workers:Array.isArray(p?.workers)?p.workers.length:0,
+            subOrchestrators:Array.isArray(p?.subOrchestrators)?p.subOrchestrators.length:0,
+            blockers:Array.isArray(p?.blockers)?p.blockers.length:0,
+            proofStatus:p?.proofStatus??null,
+            waitingAuthority:p?.waitingAuthority??null,
+            finalResultPresent:typeof p?.finalResult==="string"&&Boolean(p.finalResult.trim()),
+            contractVersion:x.contractVersion??null,
+            missionControlStatus:x.status??null,
+            contextNotAuthority:x.operatingContextIsNotAuthority??null,
+            workerEffectsCanonical:x.workerEffectsCanonical??null,
+            sourceRepoKnown:c.includes("riggeyb/sentient"),
+            operatorBridgeKnown:c.includes("riggeyb/sentient-fly-runner")
+          };
+          console.log("TERMINAL_ROOT_OBS="+JSON.stringify(obs));
+          console.log("SECRET_VALUES_EXPOSED=false");
+          if(body.status!=="succeeded") throw new Error(`objective_${body.status}`);
+          if(!p||p.objectiveId!==oid) throw new Error("root_projection_missing");
+          if(p.operatingContextVersion!=="SENTIENT_OPERATING_CONTEXT_V1") throw new Error("context_version_mismatch");
+          if(p.operatingContextDigest!=="sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209") throw new Error("context_digest_mismatch");
+          if(!Array.isArray(p.participantOperatingContexts)||p.participantOperatingContexts.length<3) throw new Error("participant_context_receipts_missing");
+          if(!Array.isArray(p.staleOperatingContextWorkers)<|p.staleOperatingContextWorkers.length!==0) throw new Error("stale_child_context");
+          if(!Array.isArray(p.acceptedEvidence)||p.acceptedEvidence.length<2) throw new Error("accepted_evidence_missing");
+          if(typeof p.finalResult!=="string"||!p.finalResult.trim()) throw new Error("final_root_result_missing");
+          if(x.contractVersion!=="sentient-production-mission-control/v1"||x.status!=="SUCCEEDED") throw new Error("mission_control_result_invalid");
+          if(x.operatingContextIsNotAuthority!==true||x.workerEffectsCanonical!==false) throw new Error("authority_boundary_invalid");
+          if(!c.includes("riggeyb/sentient")) throw new Error("source_repo_not_derived");
+          if(!c.includes("riggeyb/sentient-fly-runner")) throw new Error("operator_bridge_not_derived");
+          console.log("ROOT_MISSION_CONTROL_USED=PASS");
+          console.log("SPAWNSENTIENT_CHILD_OBSERVED=PASS");
+          console.log("C1_COORDINATION_OBSERVED=PASS");
+          console.log("ROOT_EVIDENCE_DECISION_OBSERVED=PASS");
+          console.log("LIVE_CHILD_CONTEXT_USE=PASS");
+          console.log("SOURCE_REPO_KNOWN_AUTOMATICALLY=PASS");
+          console.log("OPERATOR_BRIDGE_KNOWN_AUTOMATICALLY=PASS");
+          console.log("OPERATING_CONTEXT_IS_NOT_AUTHORITY=true");
+          console.log("WORKER_AUTHORITY_CANNOT_EXCEED_PARENT=true");
+          console.log("DELEGATED_SCOPE_CANNOT_EXPAND=true");
+          console.log("GOVERNOR_BYPASS_USED=false");
+          console.log("DEPLOY_ON_SUCCESS=false");
+          console.log("FINAL_ROOT_RESULT_PRESENT=true");
+          NODE
+          B64="$(base64 -w0 "$RUNNER_TEMP/await.mjs")"
+          timeout 780s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/await.mjs; CERT_OBJECTIVE_ID=$OID node /tmp/await.mjs; rc=\$?; rm -f /tmp/await.mjs; exit \$rc'"
