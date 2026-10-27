@@ -1,0 +1,123 @@
+name: MVP Reschedule Existing Root Objective
+
+"on":
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      objective_id: {required: true, type: string}
+
+permissions: {contents: read}
+
+jobs:
+  reschedule:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      OID: ${{ inputs.objective_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Verify exact resident runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          for i in $(seq 1 30); do
+            h="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/healthz" 2>/dev/null || true)"
+            r="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz" 2>/dev/null || true)"
+            if jq -e --arg s "$SHA" --arg t "$TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null 2>&1 <<<"$h" &&
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null 2>&1 <<<"$r"; then
+              echo LIVE_EXACT_IDENTITY=PASS
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Idempotently reschedule same durable objective
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >"$RUNNER_TEMP/reschedule.mjs" <<'NODE'
+          const oid=String(process.env.CERT_OBJECTIVE_ID??"").trim();
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          if(!oid||!token) throw new Error("binding_missing");
+          const headers={authorization:`Bearer ${token}`,"content-type":"application/json"};
+          const request=[
+            "Inspect your current production system and tell me the highest-value improvement you can safely make next.",
+            "Use inherited operating context, not facts copied into this delegated task, to identify the authoritative source repository and normal operator bridge.",
+            "Read-only TIER_0 proof: do not edit source, open a PR, deploy, or mutate external systems."
+          ].join(" ");
+          const base="http://127.0.0.1:8080";
+          const before=await fetch(`${base}/v1/objectives/${encodeURIComponent(oid)}`,{headers,signal:AbortSignal.timeout(30000)});
+          if(!before.ok) throw new Error(`pre_status_${before.status}`);
+          const prior=await before.json();
+          if(prior.objectiveId!==oid) throw new Error("pre_objective_identity_mismatch");
+          if(["succeeded","failed","cancelled"].includes(String(prior.status))){
+            console.log("RESCHEDULE_SKIPPED_TERMINAL=true");
+            console.log("TERMINAL_STATUS="+prior.status);
+            process.exit(0);
+          }
+          const post=await fetch(base+"/v1/objectives",{
+            method:"POST",headers,
+            body:JSON.stringify({
+              objectiveId:oid,
+              sessionId:`session:${oid}`,
+              request,
+              mode:"collaborative",
+              privacy:"private",
+              deployOnSuccess:false
+            }),
+            signal:AbortSignal.timeout(60000)
+          });
+          const receipt=await post.json();
+          if(post.status!==202||receipt.objectiveId!==oid) throw new Error(`reschedule_${post.status}`);
+          console.log("SAME_OBJECTIVE_RESCHEDULED=true");
+          console.log("NEW_OBJECTIVE_CREATED=false");
+          console.log("DEPLOY_ON_SUCCESS=false");
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B64="$(base64 -w0 "$RUNNER_TEMP/reschedule.mjs")"
+          timeout 150s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/reschedule.mjs; CERT_OBJECTIVE_ID=$OID node /tmp/reschedule.mjs; rc=\$?; rm -f /tmp/reschedule.mjs; exit \$rc'"
+
+      - name: Observe same objective after reschedule
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >"$RUNNER_TEMP/read.mjs" <<'NODE'
+          const oid=String(process.env.CERT_OBJECTIVE_ID??"").trim();
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          const headers={authorization:`Bearer ${token}`};
+          const base="http://127.0.0.1:8080";
+          let body=null,last=null;
+          for(let i=0;i<120;i++){
+            try{
+              const r=await fetch(`${base}/v1/objectives/${encodeURIComponent(oid)}`,{headers,signal:AbortSignal.timeout(30000)});
+              if(!r.ok) throw new Error(`status_${r.status}`);
+              body=await r.json();
+              if(body.status!=="pending" || body.rootProjection) break;
+            }catch(e){last=e}
+            await new Promise(r=>setTimeout(r,1000));
+          }
+          if(!body) throw last??new Error("objective_unreadable");
+          const p=body.rootProjection??null;
+          console.log("POST_RESCHEDULE_OBS="+JSON.stringify({
+            objectiveId:body.objectiveId??oid,
+            status:body.status??null,
+            rootProjectionPresent:Boolean(p),
+            contextVersion:p?.operatingContextVersion??null,
+            contextDigest:p?.operatingContextDigest??null,
+            participantContexts:Array.isArray(p?.participantOperatingContexts)?p.participantOperatingContexts.length:0,
+            staleContexts:Array.isArray(p?.staleOperatingContextWorkers)?p.staleOperatingContextWorkers.length:0,
+            acceptedEvidence:Array.isArray(p?.acceptedEvidence)?p.acceptedEvidence.length:0,
+            finalResultPresent:typeof p?.finalResult==="string"&&Boolean(p.finalResult.trim())
+          }));
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B64="$(base64 -w0 "$RUNNER_TEMP/read.mjs")"
+          timeout 240s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/read.mjs; CERT_OBJECTIVE_ID=$OID node /tmp/read.mjs; rc=\$?; rm -f /tmp/read.mjs; exit \$rc'"
