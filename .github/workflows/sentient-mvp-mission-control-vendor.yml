@@ -1,0 +1,142 @@
+name: Prepare exact Mission Control vendor for Sentient MVP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout accepted Skills source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: b3df9b32b47370a7140d6fe814eeba97564663ab
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: skills
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify accepted Skills identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd skills
+          test "$(git rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
+          test "$(git rev-parse 'HEAD^{tree}')" = "3173ee3cb2e39038921d3b125f1a74ecd783ff30"
+          echo "SKILLS_IDENTITY=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Compile accepted sentient-orchestrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd skills/sentient-orchestrator
+          npm ci --no-audit --no-fund
+          cat > tsconfig.vendor.json <<'JSON'
+          {
+            "compilerOptions": {
+              "target": "ES2022",
+              "module": "NodeNext",
+              "moduleResolution": "NodeNext",
+              "strict": true,
+              "esModuleInterop": true,
+              "skipLibCheck": true,
+              "types": ["node"],
+              "rootDir": "src",
+              "outDir": "dist",
+              "declaration": true,
+              "sourceMap": false,
+              "declarationMap": false,
+              "noEmit": false
+            },
+            "include": ["src/**/*.ts"]
+          }
+          JSON
+          npx tsc -p tsconfig.vendor.json
+          test -f dist/mission-control-context.js
+          test -f dist/mission-control.js
+          test -f dist/mission-control-coordination.js
+          test -f dist/mission-control-projection.js
+          test -f dist/team-coordination.js
+          test -f dist/team-coordination-postgres.js
+
+      - name: Checkout canonical Sentient MVP successor
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient/mvp-mission-control-integration-v1
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Fence successor base
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sentient
+          test "$(git rev-parse HEAD)" = "61be773dd834b42d459ef3c51f9e72436f1a2e80"
+          test "$(git rev-parse 'HEAD^{tree}')" = "af44cb0275942e97f08209f0b957f0706ee15051"
+
+      - name: Install exact compiled Mission Control vendor and regenerate lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf sentient/vendor/sentient-orchestrator
+          mkdir -p sentient/vendor/sentient-orchestrator
+          cp -R skills/sentient-orchestrator/dist sentient/vendor/sentient-orchestrator/dist
+          if [ -d skills/sentient-orchestrator/migrations ]; then
+            cp -R skills/sentient-orchestrator/migrations sentient/vendor/sentient-orchestrator/migrations
+          fi
+          cat > sentient/vendor/sentient-orchestrator/package.json <<'JSON'
+          {
+            "name": "sentient-orchestrator",
+            "version": "0.2.0-exact-b3df9b32",
+            "private": true,
+            "type": "module",
+            "exports": {"./*": "./dist/*.js"},
+            "dependencies": {"pg": "^8.16.3", "yaml": "^2.8.1"},
+            "sentientExactSource": {
+              "repository": "riggeyb/skills",
+              "sha": "b3df9b32b47370a7140d6fe814eeba97564663ab",
+              "tree": "3173ee3cb2e39038921d3b125f1a74ecd783ff30",
+              "operatingContextVersion": "SENTIENT_OPERATING_CONTEXT_V1",
+              "operatingContextDigest": "sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209"
+            }
+          }
+          JSON
+          cat > sentient/vendor/sentient-orchestrator/EXACT_SOURCE_RECEIPT.json <<'JSON'
+          {
+            "repository": "riggeyb/skills",
+            "sha": "b3df9b32b47370a7140d6fe814eeba97564663ab",
+            "tree": "3173ee3cb2e39038921d3b125f1a74ecd783ff30",
+            "artifact": "compiled sentient-orchestrator source snapshot",
+            "authority": "none",
+            "operatingContextVersion": "SENTIENT_OPERATING_CONTEXT_V1",
+            "operatingContextDigest": "sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209"
+          }
+          JSON
+          cd sentient
+          npm pkg set 'dependencies.sentient-orchestrator=file:vendor/sentient-orchestrator'
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Commit exact derived vendor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sentient
+          git config user.name "sentient-mvp-activation"
+          git config user.email "sentient-mvp-activation@users.noreply.github.com"
+          git add package.json package-lock.json vendor/sentient-orchestrator
+          git commit -m "mvp: bind accepted Mission Control package"
+          git push origin HEAD:sentient/mvp-mission-control-integration-v1
+          echo "VENDOR_COMMIT_SHA=$(git rev-parse HEAD)"
+          echo "VENDOR_COMMIT_TREE=$(git rev-parse 'HEAD^{tree}')"
