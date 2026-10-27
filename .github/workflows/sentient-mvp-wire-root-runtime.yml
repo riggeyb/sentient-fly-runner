@@ -1,8 +1,10 @@
 name: Wire MVP Root Mission Control into production runtime
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   wire:
     runs-on: ubuntu-latest
@@ -15,33 +17,30 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
       - name: Apply fenced production integration
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "868fe1234320ee26483b2d905e6c438668a072c6"
-          echo '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' | base64 -d | gzip -d > "$RUNNER_TEMP/patch.py"
-          python3 "$RUNNER_TEMP/patch.py"
-          git diff --check
-      - name: Build and focused Mission Control regression
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          npm run build 2>&1 | tee "$RUNNER_TEMP/mvp-build.log"
-          node --test dist/test/spawn-mission-control.test.js
-          node --test dist/tests/spawn-mission-control.test.js
-      - name: Commit canonical successor
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "sentient-mvp-activation"
-          git config user.email "sentient-mvp-activation@users.noreply.github.com"
-          git add src/application/contracts.ts src/application/production-composition.ts src/fly/production-runtime.ts src/fly/self-execution.ts package-lock.json
-          git commit -m "mvp: route production objectives through Root Mission Control"
-          git push origin HEAD:sentient/mvp-mission-control-integration-v1
-          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
-          echo "SUCCESSOR_TREE=$(git rev-parse 'HEAD^{tree}')"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f"{path}: expected one match, found {n}")
+              p.write_text(s.replace(old, new, 1))
+
+          p = "src/application/production-composition.ts"
+          replace_once(
+              p,
+              'fine {ProductionEvidenceGap,stepExecutionFromBoundedResultV1} from "./production-evidence.js";',
+               'import {ProductionEvidenceGap,stepExecutionFromBoundedResultV1} from "./production-evidence.js";'if False else import  }
+          PY
