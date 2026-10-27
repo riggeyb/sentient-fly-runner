@@ -1,16 +1,6 @@
-name: Governor Resident Deploy Exact V1
+name: Mission Control Exact Governor Activation V1
 on:
   workflow_dispatch:
-    inputs:
-      sha:
-        required: true
-        type: string
-      tree:
-        required: true
-        type: string
-      objective_id:
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -21,19 +11,19 @@ jobs:
     timeout-minutes: 20
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      S: ${{ inputs.sha }}
-      T: ${{ inputs.tree }}
-      O: ${{ inputs.objective_id }}
-      K: d85eb820f18ad6d944ab93b03150d606273891a5
+      S: 75ba9c282b73df74e2f2fa50289d17ecd0597687
+      T: f4cebc41c4775b09ce5f0279b5cb12d4cad52a01
+      K: b3df9b32b47370a7140d6fe814eeba97564663ab
+      O: SENTIENT_CLOUDFLARE_MISSION_CONTROL_LIVE_V1-activate-75ba9c28
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Deploy exact candidate through resident Governor
+      - name: Deploy accepted exact candidates through resident Governor
         shell: bash
         run: |
           set -euo pipefail
           [[ "$S" =~ ^[0-9a-f]{40}$ ]]
           [[ "$T" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$O" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          [[ "$K" =~ ^[0-9a-f]{40}$ ]]
           cat >/tmp/deploy.mjs <<'NODE'
           const sha=process.env.S, tree=process.env.T, objectiveId=process.env.O, skillsSha=process.env.K;
           const token=String(process.env.SENTIENT_DEPLOYMENT_API_TOKEN??"").trim();
@@ -57,19 +47,20 @@ jobs:
           if(b.HEALTHZ&&typeof b.HEALTHZ==="object") out.HEALTHZ={statusCode:b.HEALTHZ.statusCode??null,body:b.HEALTHZ.body??null};
           if(b.READYZ&&typeof b.READYZ==="object") out.READYZ={statusCode:b.READYZ.statusCode??null,body:b.READYZ.body??null};
           console.log(JSON.stringify(out));
-          if(!r.ok || b.REQUESTED_SHA!==sha || b.REQUESTED_TREE!==tree || b.DEPLOYED_SHA!==sha || b.DEPLOYED_TREE!==tree || b.BUILD_RESULT!=="SUCCEEDED") process.exit(21);
+          if(!r.ok || b.REQUESTED_SHA!==sha || b.REQUESTED_TREE!==tree || b.DEPLOYED_SHA!==sha || b.DEPLOYED_TREE!==tree || b.SKILLS_SHA!==skillsSha || b.BUILD_RESULT!=="SUCCEEDED") process.exit(21);
           if(b.RESOURCE_CHANGE_STATUS!=="APPROVED_BASELINE") process.exit(22);
           if(b.HEALTHZ?.statusCode!==200 || b.READYZ?.statusCode!==200 || b.READYZ_FAILURE!==null) process.exit(23);
           console.log("GOVERNOR_DEPLOY_EXACT=PASS");
           console.log("AUTHORIZATION_BOUND_TO_IDENTITY=PASS");
-          console.log("HIGH_TIER_ACTION_REQUIRES_VERIFICATION_RECEIPT=PASS");
           console.log("RESOURCE_ENVELOPE_CHANGED=false");
+          console.log("NEW_FLY_MACHINE=false");
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
           b64="$(base64 -w0 /tmp/deploy.mjs)"
           app=sentient-deployment-governor
           id="$(flyctl machines list -a "$app" --json | jq -r '.[0].id // empty')"
           test -n "$id"
+          before="$(flyctl machines list -a sentient-validation-runner --json | jq -c '[.[]|{id,config:{guest:.config.guest}}]')"
           flyctl machine start "$id" -a "$app" >/dev/null || true
           for _ in $(seq 1 60); do
             st="$(flyctl machines list -a "$app" --json | jq -r --arg id "$id" '.[]|select(.id==$id)|.state' | head -n1)"
@@ -77,6 +68,11 @@ jobs:
             sleep 2
           done
           test "$st" = started
-          flyctl ssh console -a "$app" -C "sh -lc 'echo $b64 | base64 -d >/tmp/deploy.mjs && S=TS T=$T O=$O K=$K node /tmp/deploy.mjs; rc=\$?; rm -f /tmp/deploy.mjs; exit \$rc'"
+          flyctl ssh console -a "$app" -C "sh -lc 'echo $b64 | base64 -d >/tmp/deploy.mjs && S=$S T=$T O=$O K=$K node /tmp/deploy.mjs; rc=\$?; rm -f /tmp/deploy.mjs; exit \$rc'"
+          after="$(flyctl machines list -a sentient-validation-runner --json | jq -c '[.[]|{id,config:{guest:.config.guest}}]')"
+          test "$before" = "$after"
           rm -f /tmp/deploy.mjs
+          echo "SENTIENT_DEPLOY_SHA=$S"
+          echo "SENTIENT_DEPLOY_TREE=$T"
+          echo "SKILLS_DEPLOY_SHA=$K"
           echo "RESULT=PASS"
