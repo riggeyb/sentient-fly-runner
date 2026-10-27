@@ -1,0 +1,80 @@
+name: MVP Durable Runner State V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      objective_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      OID: ${{ inputs.objective_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect sanitized durable runner state
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          mid="$(flyctl machines list -a "$APP" --json | jq -er '.[0].id')"
+          state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
+          [ "$state" = started ] || flyctl machine start "$mid" -a "$APP" >/dev/null
+          cat >"$RUNNER_TEMP/diag.mjs" <<'NODE'
+          import { PostgresSpawnObjectiveRepository } from "./dist/src/objective-continuation/postgres-spawn-repository.js";
+          const oid=String(process.env.OID??"").trim();
+          const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!cs) throw new Error("DB_BINDING_MISSING");
+          const repo=new PostgresSpawnObjectiveRepository({connectionString:cs});
+          try {
+            const tasks=await repo.list("task");
+            const active=tasks
+              .filter(t=>t.kind==="task" && ["pending","running"].includes(t.status))
+              .map(t=>{
+                const m=t.metadata??{};
+                return {
+                  id:t.id,
+                  status:t.status,
+                  updatedAt:t.updatedAt,
+                  contract:m.contract??null,
+                  sessionId:m.sessionId??null,
+                  error:m.error??null
+                };
+              });
+            console.log("ACTIVE_TASK_COUNT="+active.length);
+            console.log("ACTIVE_TASKS="+JSON.stringify(active));
+            const target=await repo.get("task",oid);
+            if(!target || target.kind!=="task") throw new Error("TARGET_TASK_MISSING");
+            const m=target.metadata??{};
+            console.log("TARGET_STATUS="+target.status);
+            console.log("TARGET_UPDATED_AT="+target.updatedAt);
+            console.log("TARGET_ERROR="+String(m.error??"sïne"));
+            const sessionId=typeof m.sessionId==="string" ? m.sessionId : null;
+            if(sessionId){
+              const work=await repo.activeWork(sessionId,true);
+              console.log("ACTIVE_WORK_COUNT="+work.length);
+              console.log("ACTIVE_WORK="+JSON.stringify(work.map(x=>({
+                workKey:x.workKey,
+                status:x.status,
+                leaseExpiresAt:x.leaseExpiresAt,
+                reclaimCount:x.reclaimCount
+              })));
+            } else {
+              console.log("ACTIVE_WORK_COUNT=0");
+              console.log("ACTIVE_WORK=");
+            }
+          } finally {
+            await repo.close();
+          }
+          NODE
+          B64="$(base64 -w0 "$RUNNER_TEMP/diag.mjs")"
+          timeout 120s flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/mvp-diag.mjs && OID=$OID node /app/mvp-diag.mjs; rc=\$?; rm -f /app/mvp-diag.mjs; exit \$rc'"
+          echo SECRET_VALUES_EXPOSED=false
