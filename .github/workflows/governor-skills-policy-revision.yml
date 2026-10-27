@@ -1,0 +1,66 @@
+name: Governor Skills Policy Revision
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        type: string
+      expected_head:
+        required: true
+        type: string
+      skills_sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  revise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Apply exact bounded policy revision
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          SKILLS_SHA: ${{ inputs.skills_sha }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SKILLS_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BRANCH" =~ ^integration/governor-skills-[0-9a-f]{8}-v[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          p = Path("src/deployment-governor/policy.ts")
+          s = p.read_text()
+          old = re.findall(r'export const SENTIENT_DEPLOYMENT_SKILLS_SHA = "([0-9a-f]{40})" as const;', s)
+          assert old == ["d85eb820f18ad6d944ab93b03150d606273891a5"], old
+          new = os.environ["SKILLS_SHA"]
+          s2 = s.replace(old[0], new, 1)
+          assert s2.count(new) == 1
+          p.write_text(s2)
+          PY
+          test "$(git diff --name-only)" = "src/deployment-governor/policy.ts"
+          git diff --check
+          git diff --exit-code "$EXPECTED_HEAD" -- fly.toml
+          git diff -- src/deployment-governor/policy.ts
+          git config user.name "sentient-governor-policy-revision"
+          git config user.email "sentient-governor-policy-revision@users.noreply.github.com"
+          git add src/deployment-governor/policy.ts
+          git commit -m "governor: approve accepted Mission Control skills revision"
+          git push origin "HEAD:refs/heads/$BRANCH"
+          echo "POLICY_REVISION_SHA=$(git rev-parse HEAD)"
+          echo "POLICY_REVISION_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "CHANGED_PATHS=$(git diff --name-only "$EXPECTED_HEAD"..HEAD | paste -sd, -)"
+          echo "FLY_RESOURCE_ENVELOPE_CHANGED=false"
