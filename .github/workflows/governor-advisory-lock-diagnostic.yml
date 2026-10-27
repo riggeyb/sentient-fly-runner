@@ -20,7 +20,7 @@ jobs:
           id="$(jq -r '[.[] | select((.config.auto_destroy // false) != true)] | sort_by(.id) | .[0].id // empty' <<<"$machines")"
           test -n "$id"
           cat >/tmp/lockdiag.mjs <<'NODE'
-          import pg from "/app/node_modules/pg/index.js";
+          import pg from "pg";
           const {Pool}=pg;
           const db=String(process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
           if(!db) throw new Error("GOVERNOR_LEDGER_DB_MISSING");
@@ -45,4 +45,4 @@ jobs:
           } finally { await pool.end(); }
           NODE
           b64="$(base64 -w0 /tmp/lockdiag.mjs)"
-          flyctl ssh console -a "$app" --machine "$id" -C "sh -lc 'echo $b64 | base64 -d >/tmp/lockdiag.mjs && node /tmp/lockdiag.mjs; rc=\$?; rm -f /tmp/lockdiag.mjs; exit \$rc'"
+          flyctl ssh console -a "$app" --machine "$id" -C "sh -lc 'cd /app && echo $b64 | base64 -d >lockdiag.mjs && node lockdiag.mjs; rc=\$?; rm -f lockdiag.mjs; exit \$rc'"
