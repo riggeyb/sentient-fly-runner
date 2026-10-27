@@ -36,7 +36,10 @@ jobs:
           const repo=new PostgresSpawnObjectiveRepository({connectionString:cs});
           try{
             const tasks=await repo.list("task");
-            const active=tasks.filter(t=>t.kind==="task"&&["pending","running"].includes(t.status)).map(t=>{const m=t.metadata??{};return{id:t.id,status:t.status,updatedAt:t.updatedAt,contract:m.contract??null,sessionId:m.sessionId??null,error:m.error??null}});
+            const active=tasks.filter(t=>t.kind==="task"&&["pending","running"].includes(t.status)).map(t=>{
+              const m=t.metadata??{};
+              return{id:t.id,status:t.status,updatedAt:t.updatedAt,contract:m.contract??null,sessionId:m.sessionId??null,error:m.error??null};
+            });
             console.log("ACTIVE_TASK_COUNT="+active.length);
             console.log("ACTIVE_TASKS="+JSON.stringify(active));
             const target=await repo.get("task",oid);
@@ -44,12 +47,12 @@ jobs:
             const m=target.metadata??{};
             console.log("TARGET_STATUS="+target.status);
             console.log("TARGET_UPDATED_AT="+target.updatedAt);
-            console.log("TARGET_ERROR="+String(m.error??"sïne"));
+            console.log("TARGET_ERROR="+String(m.error??"none"));
             const sessionId=typeof m.sessionId==="string"?m.sessionId:null;
             if(sessionId){
               const work=await repo.activeWork(sessionId,true);
               console.log("ACTIVE_WORK_COUNT="+work.length);
-              console.log("ACTIVE_WORK="+JSON.stringify(work.map(x=>({workKey:x.workKey,status:x.status,leaseExpiresAt:x.leaseExpiresAt,reclaimCount:x.reclaimCount})));
+              console.log("ACTIVE_WORK="+JSON.stringify(work.map(x=>({workKey:x.workKey,status:x.status,leaseExpiresAt:x.leaseExpiresAt,reclaimCount:x.reclaimCount}))));
             }
           }finally{await repo.close()}
           NODE
