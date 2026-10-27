@@ -1,43 +1,166 @@
-name: Director Studio Vinext Compatibility
+name: Director Studio Cloudflare Exact Acceptance
+
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
-  check:
+  acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    env:
+      EXPECTED_SHA: 267cb30f9cebd996f387535c67dc629420351bc7
+      EXPECTED_TREE: 9e95ccf990d6f0986424b8257adef7e8d8e68411
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact Director Studio candidate
+        uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
-          ref: 082e9e39ac797118668b02b2d159ca5b5151d747
+          ref: ${{ env.EXPECTED_SHA }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 1
-      - name: Fence exact source
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Fence exact source identity
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "082e9e39ac797118668b02b2d159ca5b5151d747"
-          test "$(git rev-parse 'HEAD^{tree}')" = "1b5c1abad16092878eb325d5f3b0663758469a60"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
           echo "DIRECTOR_SOURCE_IDENTITY=PASS"
+          echo "DIRECTOR_INITIAL_SHA=$EXPECTED_SHA"
+          echo "DIRECTOR_INITIAL_TREE=$EXPECTED_TREE"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-      - name: Install exact dependencies
-        run: npm ci --no-audit --no-fund
-      - name: Vinext compatibility check
+
+      - name: Regenerate dependency lock if required
+        id: lock
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes vinext@latest check
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if git diff --quiet -- package-lock.json; then
+            echo "PACKAGE_LOCK_CHANGED=false"
+          else
+            git config user.name "sentient-cloudflare-acceptance"
+            git config user.email "sentient-cloudflare-acceptance@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "cloudflare: regenerate vinext dependency lock"
+            git push origin HEAD:sentient-ui-activation-v1
+            echo "PACKAGE_LOCK_CHANGED=true"
+          fi
+          echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "candidate_tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          echo "DIRECTOR_CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "DIRECTOR_CANDIDATE_TREE=$(git rev-parse 'HEAD^{tree}')"
+
+      - name: Install locked dependencies and prove Clerk absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          if npm ls @clerk/nextjs --all --json 2>/dev/null | grep -Fq '"@clerk/nextjs"'; then
+            echo "CLERK_DEPENDENCY_PRESENT=true"
+            exit 1
+          fi
+          echo "CLERK_DEPENDENCY_PRESENT=false"
+
+      - name: Cloudflare Access and target contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsx --test \
+            tests/cloudflare-access.test.ts \
+            tests/cloudflare-target-contract.test.ts \
+            tests/sentient-cloudflare-contract.test.ts
+          echo "ACCESS_JWT_VALIDATION=PASS"
+          echo "CLOUDFLARE_TARGET_CONTRACT=PASS"
+
+      - name: Typecheck
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          echo "DIRECTOR_TYPECHECK=PASS"
+
+      - name: Vinext compatibility
+        run: |
+          set -euo pipefail
+          npm run check:vinext
           echo "VINEXT_COMPATIBILITY=PASS"
-      - name: Inspect initializer contract
+
+      - name: Cloudflare type generation
+        run: |
+          set -euo pipefail
+          npm run cf-typegen
+          echo "CLOUDFLARE_TYPEGEN=PASS"
+
+      - name: Vinext production build
+        run: |
+          set -euo pipefail
+          npm run build:vinext
+          echo "VINEXT_BUILD=PASS"
+
+      - name: Wrangler dry run
+        run: |
+          set -euo pipefail
+          npx @vinext/cloudflare deploy --dry-run
+          echo "WRANGLER_DRY_RUN=PASS"
+
+      - name: Report live deployment credential availability
+        id: creds
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes vinext@latest init --help
-          test -z "$(git status --porcelain)"
-          echo "SOURCE_MUTATION=false"
+          if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "CLOUDFLARE_DEPLOY_CREDENTIALS=AVAILABLE"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "CLOUDFLARE_DEPLOY_CREDENTIALS=MISSING"
+          fi
+
+      - name: Deploy temporary Worker when authorized
+        if: steps.creds.outputs.available == 'true'
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/director-deploy.txt"
+          npx wrangler deploy --temporary >"$out" 2>&1
+          url="$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' "$out" | tail -n1)"
+          test -n "$url"
+          echo "worker_url=$url" >> "$GITHUB_OUTPUT"
+          echo "WRANGLER_DEPLOY=PASS"
+          echo "WORKER_URL=$url"
+
+      - name: Smoke unauthenticated objective boundary
+        if: steps.deploy.outputs.worker_url != ''
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/objective-response.txt -w '%{http_code}' --max-time 20 \
+            -X POST -H 'content-type: application/json' \
+            --data '{"objective":"read-only acceptance probe"}' \
+            "$WORKER_URL/api/sentient/objectives")"
+          test "$code" = "401"
+          echo "UNAUTHENTICATED_OBJECTIVE_BLOCK=PASS"
+
+      - name: Final source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet
+          git diff --cached --quiet
+          echo "DIRECTOR_FINAL_SHA=$(git rev-parse HEAD)"
+          echo "DIRECTOR_FINAL_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "SOURCE_MUTATION_AFTER_LOCK=false"
+          echo "NETLIFY_FALLBACK_USED=false"
+          echo "CLERK_FALLBACK_USED=false"
