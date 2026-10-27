@@ -28,11 +28,17 @@ jobs:
           test "$(git rev-parse HEAD)" = "ae939533aa2daac5ce488a47bb0eb5c61d45d437"
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          p=Path("src/fly/self-execution.ts")
-          s=p.read_text()
-          pattern=r'''  public async resumeUnfinished\(\): Promise<number> \zh¸¨ÿ\n  \}\n\n  #scheduleInheritedRestart'''
-          replacement='''  public async resumeUnfinished(): Promise<number> {
+          p = Path("src/fly/self-execution.ts")
+          s = p.read_text()
+          start_marker = "  public async resumeUnfinished(): Promise<number> {"
+          end_marker = "\n  #scheduleInheritedRestart"
+          start = s.find(start_marker)
+          if start < 0:
+              raise SystemExit("resume_start_missing")
+          end = s.find(end_marker, start)
+          if end < 0:
+              raise SystemExit("resume_end_missing")
+          replacement = '''  public async resumeUnfinished(): Promise<number> {
             const tasks = (await this.#state.list("task"))
               .filter((task) =>
                 task.kind === "task"
@@ -45,14 +51,13 @@ jobs:
             for (const task of tasks) this.#scheduleInheritedRestart(task.id);
             return tasks.length;
           }
-
-          #scheduleInheritedRestart'''
-          s2,n=re.subn(pattern,replacement,s,count=1,flags=re.S)
-          if n != 1: raise SystemExit(f"resume_matches={n}")
-          old="        void this.#schedule(objectiveId, true);"
-          new="        await this.#schedule(objectiveId, true);"
-          if s2.count(old) != 1: raise SystemExit(f"schedule_matches={s2.count(old)}")
-          p.write_text(s2.replace(old,new,1))
+          '''
+          s = s[:start] + replacement + s[end:]
+          old = "        void this.#schedule(objectiveId, true);"
+          new = "        await this.#schedule(objectiveId, true);"
+          if s.count(old) != 1:
+              raise SystemExit(f"schedule_matches={s.count(old)}")
+          p.write_text(s.replace(old, new, 1))
           PY
           git diff --check
           test "$(git diff --name-only)" = "src/fly/self-execution.ts"
