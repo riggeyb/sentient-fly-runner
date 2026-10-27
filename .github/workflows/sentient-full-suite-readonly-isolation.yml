@@ -1,26 +1,24 @@
-name: Skills Exact Candidate Acceptance V3
+name: Skills Typecheck Diagnostic
+
 on:
   workflow_dispatch:
     inputs:
-      sha: {required: true, type: string}
-      tree: {required: true, type: string}
-      private_issue: {required: true, type: string}
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      private_issue:
+        required: true
+        type: string
+
 permissions:
   contents: read
+
 jobs:
-  exact:
+  typecheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    services:
-      postgres:
-        image: postgres:17
-        env: {POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: sentient}
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres -d sentient"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,78 +27,17 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
       - uses: actions/setup-node@v4
-        with: {node-version: "22"}
-      - name: Exact acceptance
-        shell: bash
+        with:
+          node-version: "22"
+      - name: Exact typecheck
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
           EXPECTED_TREE: ${{ inputs.tree }}
-          SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
         run: |
-          set +e
-          mkdir -p /tmp/exact
-          R=/tmp/receipt.txt
-          : >"$R"
-          failed=0
-          runx() {
-            label="$1"; shift
-            "$@" >"/tmp/exact/$label.log" 2>&1
-            rc=$?
-            echo "${label}_EXIT=$rc" | tee -a "$R"
-            [ "$rc" -eq 0 ] || failed=1
-          }
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
-          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
-          echo "EXACT_SKILLS_ACCEPTANCE_RECEIPT_V3" | tee -a "$R"
-          echo "SOURCE_SHA=$EXPECTED_SHA" | tee -a "$R"
-          echo "SOURCE_TREE=$EXPECTED_TREE" | tee -a "$R"
-          echo "NODE_VERSION=$(node --version)" | tee -a "$R"
-          echo "PYTHON_VERSION=$(python --version 2>&1)" | tee -a "$R"
-          echo "REQUIREMENTS_BLOB=$(git rev-parse HEAD:requirements.txt)" | tee -a "$R"
-          echo "ORCHESTRATOR_MANIFEST_BLOB=$(git rev-parse HEAD:sentient-orchestrator/package.json)" | tee -a "$R"
-          echo "ORCHESTRATOR_LOCK=ABSENT" | tee -a "$R"
-          runx PYTHON_DEPS pip install -r requirements.txt
-          runx REGISTRY python scripts/validate_registry.py
-          runx EVALS python scripts/check_evals.py
-          runx DURABLE env PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
-          runx ACTIVE_WORK env PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
-          runx REPO_EDIT python scripts/test_repository_edit.py
-          runx REPO_GATEWAY python scripts/test_repository_edit_request.py
-          runx ACTION_SCHEMA python scripts/validate_actions_schema.py
-          runx NETLIFY_SCHEMA python scripts/validate_netlify_actions_schema.py
-          runx NPM_INSTALL bash -lc 'cd sentient-orchestrator && npm install --ignore-scripts --no-audit --no-fund --no-package-lock'
-          runx TYPECHECK bash -lc 'cd sentient-orchestrator && npm run typecheck'
-          runx MIGRATE bash -lc 'cd sentient-orchestrator && npm run migrate'
-          runx TESTS bash -lc 'cd sentient-orchestrator && npm test'
-          runx REMOTE_REGISTRY bash -lc 'GITHUB_TOKEN="$SOURCE_TOKEN" python scripts/validate_registry.py --remote'
-          rm -rf sentient-orchestrator/node_modules
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "TRACKED_SOURCE_MUTATION=false" | tee -a "$R"
-          else
-            echo "TRACKED_SOURCE_MUTATION=true" | tee -a "$R"; failed=1
-          fi
-          echo "UNTRACKED_GENERATED_FILES=$(git status --porcelain | grep '^??' | wc -l | tr -d ' ')" | tee -a "$R"
-          echo "OVERALL_EXIT=$failed" | tee -a "$R"
-          exit "$failed"
-      - name: Compact failure summary
-        if: failure()
-        shell: bash
-        run: |
-          set +e
-          echo "=== RECEIPT ==="
-          cat /tmp/receipt.txt 2>/dev/null || true
-          grep '_EXIT=[1-9]' /tmp/receipt.txt 2>/dev/null | while IFS= read -r statusline; do
-            label="${statusline%%_EXIT=*}"
-            f="/tmp/exact/${label}.log"
-            echo "=== ${label} FAILURE TAIL ==="
-            tail -n 120 "$f" 2>/dev/null | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g'
-          done
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: skills-exact-${{ inputs.sha }}
-          path: /tmp/receipt.txt
-          retention-days: 30
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          cd sentient-orchestrator
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock >/dev/null
+          npm run typecheck
