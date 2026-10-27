@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      EXPECTED_SHA: 267cb30f9cebd996f387535c67dc629420351bc7
-      EXPECTED_TREE: 9e95ccf990d6f0986424b8257adef7e8d8e68411
+      EXPECTED_SHA: 3d9b0735ce744e640c177c3e83d2eb5cfacdce88
+      EXPECTED_TREE: 12acbca22c7aaaeaccf303a252d5dba35bf03668
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
@@ -162,5 +162,5 @@ jobs:
           echo "DIRECTOR_FINAL_SHA=$(git rev-parse HEAD)"
           echo "DIRECTOR_FINAL_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo "SOURCE_MUTATION_AFTER_LOCK=false"
-          echo "NETLIFY_FALLBACK_USED=false"
-          echo "CLERK_FALLBACK_USED=false"
+          echo "NETLIFY_FALLACK_USED=false"
+          echo "CLERK_FALLACK_USED=false"
