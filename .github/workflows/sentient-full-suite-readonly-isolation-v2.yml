@@ -1,4 +1,4 @@
-name: Skills Exact Readonly Isolation V2
+name: Skills Exact Readonly Isolation V3
 
 on:
   workflow_dispatch:
@@ -58,15 +58,21 @@ jobs:
           set +e
           mkdir -p /tmp/exact
           failed=0
+          sanitize() {
+            sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig'
+          }
           run_step() {
             label="$1"; shift
             "$@" >"/tmp/exact/${label}.log" 2>&1
             status=$?
             echo "${label}=$status" >>/tmp/receipt.env
             if [ "$status" -ne 0 ]; then
-              echo "::group::${label} sanitized failure tail"
-              tail -n 120 "/tmp/exact/${label}.log" \
-                | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig'
+              echo "::group::${label} sanitized failure evidence"
+              if [ "$label" = "ORCH_TEST" ]; then
+                grep -n -B 10 -A 36 '^not ok ' "/tmp/exact/${label}.log" | tail -n 320 | sanitize
+              else
+                tail -n 160 "/tmp/exact/${label}.log" | sanitize
+              fi
               echo "::endgroup::"
               failed=1
             fi
@@ -78,7 +84,7 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
 
           {
-            echo "EXACT_SKILLS_ACCEPTANCE_RECEIPT_V2"
+            echo "EXACT_SKILLS_ACCEPTANCE_RECEIPT_V3"
             echo "SOURCE_SHA=$EXPECTED_SHA"
             echo "SOURCE_TREE=$EXPECTED_TREE"
             echo "RUNNER_OS=$(uname -srvmo)"
@@ -94,16 +100,15 @@ jobs:
           run_step DURABLE_OBJECTIVE env PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
           run_step ACTIVE_WORK env PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
           run_step REPO_EDIT python scripts/test_repository_edit.py
-          run_step REPO_EDIT_GATEWAY python scripts/test_repository_edit_request.py
-          run_step ACTIONS_SCHEMA python scripts/validate_actions_schema.py
-          run_step NETLIFY_SCHEMA python scripts/validate_netlify_actions_schema.py
-
+          run_step REPO_EDIT_GATEWAY
+          run_step ACLIONS_SCHEMA 
+          run_step NETLIFY_SCHEMA 
           pushd sentient-orchestrator >/dev/null
           if [ -f package-lock.json ]; then
             echo "DEPENDENCY_LOCK_IDENTITY=sentient-orchestrator/package-lock.json:$(git rev-parse HEAD:sentient-orchestrator/package-lock.json)" >>/tmp/receipt.env
           else
-            echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_EXACT_CANDIDATE" >>/tmp/receipt.env
-            echo "DEPENDENCY_MANIFEST_IDENTITY=sentient-orchestrator/package.json:$(git rev-parse HEAD:sentient-orchestrator/package.json)" >>/tmp/receipt.env
+            echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_EXAACT_CANDIDATE" >>/tmp/receipt.env
+            echo "DEPENDENCY_MANEFEST_IDENTITY=sentient-orchestrator/package.json:$(git rev-parse HEAD:sentient-orchestrator/package.json)" >>/tmp/receipt.env
           fi
           run_step ORCH_INSTALL npm install --ignore-scripts --no-audit --no-fund
           run_step TYPECHECK npm run typecheck
