@@ -1,114 +1,40 @@
 name: Director Studio Cloudflare Runtime Proof V4
-# mechanical lock receipt trigger
-"on":
-  push:
-    branches: [main]
-  workflow_dispatch: {}
+on:
+  workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   proof:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DIRECTOR_MANIFEST_B64: "ewogICJuYW1lIjogImRpcmVjdG9yLXN0dWRpby1jdXN0b21lci1wb3J0YWwiLAogICJ2ZXJzaW9uIjogIjAuMS4wIiwKICAicHJpdmF0ZSI6IHRydWUsCiAgInR5cGUiOiAibW9kdWxlIiwKICAic2NyaXB0cyI6IHsKICAgICJkZXYiOiAibmV4dCBkZXYgLS1ob3N0bmFtZSAxMjcuMC4wLjEgLS1wb3J0IDMwNDgiLAogICAgImJ1aWxkIjogInByaXNtYSBnZW5lcmF0ZSAmJiBub2RlIHNjcmlwdHMvZW1pdC1zb21jcC1yZWNlaXB0LWV2aWRlbmNlLm1qcyAmJiBuZXh0IGJ1aWxkIiwKICAgICJzdGFydCI6ICJuZXh0IHN0YXJ0IC0taG9zdG5hbWUgMTI3LjAuMC4xIC0tcG9ydCAzMDQ4IiwKICAgICJkZXY6dmluZXh0IjogInZpbmV4dCBkZXYiLAogICAgImNoZWNrOnZpbmV4dCI6ICJ2aW5leHQgY2hlY2siLAogICAgImJ1aWxkOnZpbmV4dCI6ICJ2aW5leHQgYnVpbGQiLAogICAgInN0YXJ0OnZpbmV4dCI6ICJ2aW5leHQgc3RhcnQiLAogICAgImRlcGxveTpjbG91ZGZsYXJlIjogIm5weCBAdmluZXh0L2Nsb3VkZmxhcmUgZGVwbG95IiwKICAgICJjZi10eXBlZ2VuIjogIndyYW5nbGVyIHR5cGVzIC0tZW52LWludGVyZmFjZSBDbG91ZGZsYXJlRW52IC4vY2xvdWRmbGFyZS1lbnYuZC50cyIsCiAgICAidHlwZWNoZWNrIjogInRzYyAtLW5vRW1pdCAmJiB0c2MgLS1ub0VtaXQgLXAgdHNjb25maWcuYXV0b3BpbG90LWNvbnZlcmdlbmNlLmpzb24iLAogICAgInRlc3QiOiAidHN4IC0tdGVzdCB0ZXN0cy8qLnRlc3QudHMiLAogICAgInRlc3Q6c2VudGllbnQtY29udHJvbC1hcGkiOiAidHN4IHNjcmlwdHMvcmVoZWFyc2Utc2VudGllbnQtY29udHJvbC1hcGkudHMiLAogICAgImRiOmdlbmVyYXRlIjogInByaXNtYSBnZW5lcmF0ZSIsCiAgICAiZGI6bWlncmF0ZSI6ICJwcmlzbWEgbWlncmF0ZSBkZXBsb3kiLAogICAgInZlcmlmeTpzdGFnaW5nLXJlY29uY2lsaWF0aW9uLXBsYW4iOiAibm9kZSBzY3JpcHRzL3BsYW5fc3RhZ2luZ19oaXN0b3J5X2VzdGFibGlzaG1lbnQubWpzIiwKICAgICJ0ZXN0OnN0YWdpbmctcmVjb25jaWxpYXRpb24iOiAibm9kZSBzY3JpcHRzL3JlaGVhcnNlX3N0YWdpbmdfaGlzdG9yaWNhbF9yZWNvbmNpbGlhdGlvbi5tanMiLAogICAgInN0YWdpbmc6cmVjb25jaWxlLWFuZC1taWdyYXRlIjogInRzeCBzY3JpcHRzL3N0YWdpbmctcmVjb25jaWxlLWFuZC1taWdyYXRlLnRzIiwKICAgICJ0ZXN0OnN0YWdpbmctb25lLXNob3QtcmVjb25jaWxpYXRpb24iOiAidHN4IHNjcmlwdHMvcmVoZWFyc2Vfc3RhZ2luZ19vbmVfc2hvdF9yZWNvbmNpbGlhdGlvbi50cyIsCiAgICAic3RhZ2luZzpjYXB0dXJlLXJlY29uY2lsaWF0aW9uLXByb2ZpbGUiOiAidHN4IHNjcmlwdHMvc3RhZ2luZy1jYXB0dXJlLXJlY29uY2lsaWF0aW9uLXByb2ZpbGUudHMiLAogICAgInRlc3Q6c3RhZ2luZy1wcm9maWxlLWNhcHR1cmUiOiAidHN4IHNjcmlwdHMvcmVoZWFyc2Vfc3RhZ2luZ19wcm9maWxlX2NhcHR1cmUudHMiLAogICAgInZlcmlmeTpzb3VyY2UiOiAicHl0aG9uMyBzY3JpcHRzL3ZlcmlmeV9zb3VyY2VzLnB5IiwKICAgICJyZXBvcnQ6Y29zdC1mbG9vcnMiOiAidHN4IHNjcmlwdHMvcmVwb3J0X2Nvc3RfZmxvb3JzLnRzIiwKICAgICJkaXJlY3Rvcjp0b2tlbnMiOiAidHN4IHNjcmlwdHMvcmVwb3J0X2RpcmVjdG9yX3Rva2Vucy50cyIsCiAgICAibWVhc3VyZTpmMy1hdWRpdCI6ICJub2RlIHNjcmlwdHMvbWVhc3VyZV9mM19hdWRpdF9jb3N0Lm1qcyIsCiAgICAibWVhc3VyZTpmMy1hdWRpdDpkcnktcnVuIjogIm5vZGUgc2NyaXB0cy9tZWFzdXJlX2YzX2F1ZGl0X2Nvc3QubWpzIC0tZHJ5LXJ1biIsCiAgICAiY2FuYXJ5OnN0cmlwZSI6ICJ0c3ggc2NyaXB0cy9zdHJpcGUtY2FuYXJ5LnRzIiwKICAgICJjYW5hcnk6d29ya2VyOnF1ZXVlIjogInRzeCBzY3JpcHRzL3F1ZXVlLXdvcmtlci1yZWhlYXJzYWwudHMiLAogICAgImNhbmFyeTpzdGFnaW5nLWNlcnRpZnkiOiAidHN4IHNjcmlwdHMvc3RhZ2luZy1jZXJ0aWZpY2F0aW9uLnRzIiwKICAgICJjYW5hcnk6c3RhZ2luZy1jZXJ0aWZ5OnRlY2huaWNhbCI6ICJ0c3ggc2NyaXB0cy9zdGFnaW5nLWNlcnRpZmljYXRpb24tdGVjaG5pY2FsLnRzIiwKICAgICJkcnktcnVuOmNvdW5zZWwiOiAiRElSRUNUT1JfUFJPVklERVJfTU9ERT1mYWtlIERJUkVDVE9SX0ZBS0VfQUNLPWRpcmVjdG9yLXN0dWRpby1zdGFnaW5nIERJUkVDVE9SX1BPUlRBTF9VUkw9aHR0cDovLzEyNy4wLjAuMTozMDQ4IHB5dGhvbjMgLW0gcHl0ZXN0IHRlc3RzL3Rlc3RfY291bnNlbF9kcnlfcnVuLnB5IC1xIiwKICAgICJidWlsZDpsZWFkLXdvcmtlci1zZXJ2aWNlIjogImVzYnVpbGQgd29ya2VyLXNlcnZpY2UvbWFpbi50cyAtLWJ1bmRsZSAtLXBsYXRmb3JtPW5vZGUgLS1mb3JtYXQ9ZXNtIC0tcGFja2FnZXM9ZXh0ZXJuYWwgLS1vdXRmaWxlPWRpc3QvbGVhZC13b3JrZXItc2VydmljZS5tanMiLAogICAgInN0YXJ0OmxlYWQtd29ya2VyLXNlcnZpY2UiOiAibm9kZSBkaXN0L2xlYWQtd29ya2VyLXNlcnZpY2UubWpzIiwKICAgICJ0ZXN0OmxlYWQtd29ya2VyLXNlcnZpY2UiOiAidHN4IC0tdGVzdCB0ZXN0cy9sZWFkLXdvcmtlci1zZXJ2aWNlLnRlc3QudHMgdGVzdHMvcHJvZHVjdGlvbi1hdXRob3JpdHkudGVzdC50cyIsCiAgICAidGVzdDpsZWFkLXdvcmtlci1zZXJ2aWNlOnBvc3RncmVzIjogInRzeCAtLXRlc3QgdGVzdHMvbGVhZC13b3JrZXItc2VydmljZS1wb3N0Z3Jlcy5pbnRlZ3JhdGlvbi50cyIsCiAgICAiYnVpbGQ6b3BlcmF0aW9uYWwtc3RhZ2luZy10cnVzdGVkLXJ1bm5lciI6ICJlc2J1aWxkIG9wZXJhdGlvbmFsLXN0YWdpbmctd29ya2VyL21haW4udHMgLS1idW5kbGUgLS1wbGF0Zm9ybT1ub2RlIC0tZm9ybWF0PWVzbSAtLXBhY2thZ2VzPWV4dGVybmFsIC0tb3V0ZmlsZT1kaXN0L29wZXJhdGlvbmFsLXN0YWdpbmctdHJ1c3RlZC1ydW5uZXIubWpzIiwKICAgICJzdGFydDpkZXZlbG9wbWVudC10ZXN0LXdvcmtlciI6ICJlc2J1aWxkIGRldmVsb3BtZW50LXRlc3Qtd29ya2VyL21haW4udHMgLS1idW5kbGUgLS1wbGF0Zm9ybT1ub2RlIC0tZm9ybWF0PWVzbSAtLXBhY2thZ2VzPWV4dGVybmFsIC0tb3V0ZmlsZT1kaXN0L2RldmVsb3BtZW50LXRlc3Qtd29ya2VyLm1qcyIsCiAgICAgInN0YXJ0OmRldmVsb3BtZW50LWRlc3Qtd29ya2VyIjogIm5vZGUgZGlzdC9rZXZlbG9wbWVudC1jb25zdW1lci9tYWluLnRzIgogIH0sCiAgImRlcGVuZGVuY2llcyI6IHsKICAgICJAcHJpc21hL2NsaWVudCI6ICI2LjE5LjMiLAogICAgIm5leHQiOiAiMTYuMy44IiwKICAgICJyZWFjdCI6ICIxOS4zLjEiLAogICAgInJlYWN0LWRvbSI6ICIxOS4zLjEiLAogICAgInN0cmlwZSI6ICIxNy43LjAiLAogICAgInRocmVlIjogIjAuMTg2LjAiLAogICAgInZpbmV4dCI6ICIxLjMuMSIsCiAgICAiem9kIjogIjMuMjUuNzYiCiAgfSwKICAiZGV2RGVwZW5kZW5jaWVzIjogewogICAgIkBjbG91ZGZsYXJlL3ZpdGUtcGx1Z2luIjogIjEuNjUuMCIsCiAgICAiQHR5cGVzL25vZGUiOiAiXjIyLjAuMCIsCiAgICAiQHR5cGVzL3JlYWN0IjogIl4xOS4wLjAiLAogICAgIkB0eXBlcy9yZWFjdC1kb20iOiAiXjE5LjAuMCIsCiAgICAiQHR5cGVzL3RocmVlIjogIjAuMTg2LjAiLAogICAgIkB2aXRlanMvcGx1Z2luLXJlYWN0IjogIjYuMS4yIiwKICAgICJAdml0ZWpzL3BsdWdpbi1yc2MiOiAiMC41LjM4IiwKICAgICJlc2J1aWxkIjogIl4wLjI4LjIiLAogICAgInByaXNtYSI6ICI2LjE5LjMiLAogICAgInRzeCI6ICJeNC4yMy4xMyIsCiAgICAidHlwZXNjcmlwdCI6ICI1LjkuMyIsCiAgICAidml0ZSI6ICI4LjMuNSIsCiAgICAid3JhbmdsZXIiOiAiNC4xNTMuMCIKICB9LAogICJvdmVycmlkZXMiOiB7CiAgICAiQHByaXNtYS9jb25maWciOiB7CiAgICAgICJkZWVwbWVyZ2UtdHMiOiAiOC4wLjAiCiAgICB9CiAgfSwKICAiZW5naW5lcyI6IHsKICAgICJub2RlIjogIj49MjIgPDI1IgogIH0KfQo="
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Generate canonical Director lock from exact manifest
+      - name: Generate exact Director dependency lock receipt
         shell: bash
         run: |
           set -euo pipefail
-          mkdir work
-          cd work
-          cat > package.json <<'JSON'
-{
-  "name": "director-studio-customer-portal",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 3048",
-    "build": "prisma generate && node scripts/emit-somcp-receipt-evidence.mjs && next build",
-    "start": "next start --hostname 127.0.0.1 --port 3048",
-    "dev:vinext": "vinext dev",
-    "check:vinext": "vinext check",
-    "build:vinext": "vinext build",
-    "start:vinext": "vinext start",
-    "deploy:cloudflare": "npx @vinext/cloudflare deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.autopilot-convergence.json",
-    "test": "tsx --test tests/*.test.ts",
-    "test:sentient-control-api": "tsx scripts/rehearse-sentient-control-api.ts",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
-    "verify:staging-reconciliation-plan": "node scripts/plan_staging_history_establishment.mjs",
-    "test:staging-reconciliation": "node scripts/rehearse_staging_historical_reconciliation.mjs",
-    "staging:reconcile-and-migrate": "tsx scripts/staging-reconcile-and-migrate.ts",
-    "test:staging-one-shot-reconciliation": "tsx scripts/rehearse_staging_one_shot_reconciliation.ts",
-    "staging:capture-reconciliation-profile": "tsx scripts/staging-capture-reconciliation-profile.ts",
-    "test:staging-profile-capture": "tsx scripts/rehearse_staging_profile_capture.ts",
-    "verify:source": "python3 scripts/verify_sources.py",
-    "report:cost-floors": "tsx scripts/report_cost_floors.ts",
-    "director:tokens": "tsx scripts/report_director_tokens.ts",
-    "measure:f3-audit": "node scripts/measure_f3_audit_cost.mjs",
-    "measure:f3-audit:dry-run": "node scripts/measure_f3_audit_cost.mjs --dry-run",
-    "canary:stripe": "tsx scripts/stripe-canary.ts",
-    "canary:worker:queue": "tsx scripts/queue-worker-rehearsal.ts",
-    "canary:staging-certify": "tsx scripts/staging-certification.ts",
-    "canary:staging-certify:technical": "tsx scripts/staging-certification-technical.ts",
-    "dry-run:counsel": "DIRECTOR_PROVIDER_MODE=fake DIRECTOR_FAKE_ACK=director-studio-staging DIRECTOR_PORTAL_URL=http://127.0.0.1:3048 python3 -m pytest tests/test_counsel_dry_run.py -q",
-    "build:lead-worker-service": "esbuild worker-service/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/lead-worker-service.mjs",
-    "start:lead-worker-service": "node dist/lead-worker-service.mjs",
-    "test:lead-worker-service": "tsx --test tests/lead-worker-service.test.ts tests/production-authority.test.ts",
-    "test:lead-worker-service:postgres": "tsx --test tests/lead-worker-service-postgres.integration.ts",
-    "build:operational-staging-trusted-runner": "esbuild operational-staging-worker/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/operational-staging-trusted-runner.mjs",
-    "start:operational-staging-trusted-runner": "node dist/operational-staging-trusted-runner.mjs",
-    "test:operational-staging-trusted-runner": "tsx --test tests/operational-staging-worker-continuation.test.ts tests/operational-staging-authority-wake.test.ts tests/operational-staging-sentient-transport.test.ts tests/operational-staging-trusted-runner-systemd.test.ts",
-    "build:development-test-worker": "esbuild development-test-worker/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/development-test-worker.mjs",
-    "start:development-test-worker": "node dist/development-test-worker.mjs"
-  },
-  "dependencies": {
-    "@prisma/client": "6.19.3",
-    "next": "16.3.8",
-    "react": "19.3.1",
-    "react-dom": "19.3.1",
-    "react-server-dom-webpack": "19.3.1",
-    "stripe": "17.7.0",
-    "three": "0.186.0",
-    "vinext": "1.3.1",
-    "zod": "3.25.76"
-  },
-  "devDependencies": {
-    "@cloudflare/vite-plugin": "1.65.0",
-    "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@types/three": "0.186.0",
-    "@vitejs/plugin-react": "6.1.2",
-    "@vitejs/plugin-rsc": "0.5.38",
-    "esbuild": "^0.28.2",
-    "prisma": "6.19.3",
-    "tsx": "^4.23.13",
-    "typescript": "5.9.3",
-    "vite": "8.3.5",
-    "wrangler": "4.153.0"
-  },
-  "overrides": {
-    "@prisma/config": {
-      "deepmerge-ts": "8.0.0"
-    }
-  },
-  "engines": {
-    "node": ">=22 <25"
-  }
-}
-JSON
-          printf '%s  package.json\n' 'b52c69b95bf4747e267ad38f58e94ba59fd0d0d7e1e032b25b88ef329a5f427b' | sha256sum -c -
+          mkdir -p /tmp/director-lock receipts/director-studio
+          printf '%s' "$DIRECTOR_MANIFEST_B64" | base64 -d > /tmp/director-lock/package.json
+          test "$(sha256sum /tmp/director-lock/package.json | awk '{print $1}')" = "b52c69b95bf4747e267ad38f58e94ba59fd0d0d7e1e032b25b88ef329a5f427b"
+          cd /tmp/director-lock
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           ! grep -Fq '@clerk/nextjs' package-lock.json
+          cp package-lock.json "$GITHUB_WORKSPACE/receipts/director-studio/package-lock-3d9b0735.json"
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "sentient-proof-runner"
+          git config user.email "sentient-proof-runner@users.noreply.github.com"
+          git add receipts/director-studio/package-lock-3d9b0735.json
+          if ! git diff --cached --quiet; then
+            git commit -m "proof: record Director 3d9b0735 dependency lock"
+            git push origin HEAD:main
+          fi
+          echo "DIRECTOR_LOCK_GENERATION=PASS"
+          echo "CLERK_DEPENDENCY_PRESENT=false"
           echo "DIRECTOR_MANIFEST_SHA256=b52c69b95bf4747e267ad38f58e94ba59fd0d0d7e1e032b25b88ef329a5f427b"
-          echo "DIRECTOR_LOCK_SHA256=$(sha256sum package-lock.json | awk '{print $1}')"
-          echo "DIRECTOR_LOCK_GZIP_BASE64_BEGIN"
-          gzip -c package-lock.json | base64 -w 76
-          echo
-          echo "DIRECTOR_LOCK_GZIP_BASE64_END"
