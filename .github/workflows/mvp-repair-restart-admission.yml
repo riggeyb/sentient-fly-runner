@@ -1,0 +1,127 @@
+name: MVP Repair Restart Admission Head-of-Line Blocking
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Apply exact-head admission repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "63d89cbcd8c2f8d6ad1fc2a26ae12260f5f28062"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+             s = p.read_text()
+             n = s.count(old)
+             if n != 1:
+                 raise SystemExit(f"{path}: expected one match, found {n}")
+             p.write_text(s.replace(old, new, 1))
+
+          replace_once(
+            "src/fly/self-execution.ts",
+            '''  scheduleInheritedRestart(objectiveId: string): void {
+    this.#restartRecoveryTail = this.#restartRecoveryTail
+      .catch(() => undefined)
+      .then(async () => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await this.#schedule(objectiveId, true);
+        await new Promise<void>((delay) =>
+          setTimeout(delay, PHASE5_RESTART_ADMISSION_PACING_MS)
+        ));
+      });
+  }''',
+            '''  #scheduleInheritedRestart(objectiveId: string): void {
+    this.#restartRecoveryTail = this.#restartRecoveryTail
+      .catch(() => undefined)
+      .then(async () => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        void this.#schedule(objectiveId, true);
+        await new Promise<void>((delay) =>
+          setTimeout(delay, PHASE5_RESTART_ADMISSION_PACING_MS)
+        );
+      });
+  }''',
+        )
+
+         replace_once(
+            "test/final-cert-restart-backlog-serialization.test.ts",
+            'test("restart recovery executes unfinished managed objectives serially", async () => {',
+            'test("restart recovery paces unfinished objective admission without head-of-line completion blocking", async () => {',
+          )
+
+         replace_once(
+            "test/final-cert-restart-backlog-serialization.test.ts",
+            '''  assert.deepEqual(started, ["recover-a"]);
+
+  release.get("recover-a")?.();
+  for (let i = 0; i < 400 && started.length < 2; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(started, ["recover-a", "recover-b"]);
+
+  release.get("recover-b")?.();''',
+            '''  assert.deepEqual(started, ["recover-a"]);
+
+  // Restart recovery must pace admissions, but one long-running
+  // objective must not block later unfinished objectives from starting.
+  for (let i = 0; i < 400 && started.length < 2; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(started, ["recover-a", "recover-b"]);
+
+  release.get("recover-a")?.();
+  release.get("recover-b")?.();'',
+        )
+          PY
+
+          git diff --check
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' test/final-cert-restart-backlog-serialization.test.ts src/fly/self-execution.ts | sort)"
+
+      - name: Build and restart regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/final-cert-restart-backlog-serialization.test.js
+
+      - name: Full suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+
+      - name: Commit verified repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "63d89cbcd8c2f8d6ad1fc2a26ae12260f5f28062"
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' test/final-cert-restart-backlog-serialization.test.ts src/fly/self-execution.ts | sort)"
+          git config user.name "sentient-mvp-activation"
+          git config user.email "sentient-mvp-activation@users.noreply.github.com"
+          git add src/fly/self-execution.ts test/final-cert-restart-backlog-serialization.test.ts
+          git commit -m "mvp: prevent restart-backlog head-of-line blocking"
+          git push origin HEAD:entient-production-composition-20261017
+          echo "REPAIRED_SHA=$(git rev-parse HEAD)"
+          echo "REPAIRED_TREE=$(git rev-parse 'HEAD^{tree}')"
