@@ -31,7 +31,7 @@ jobs:
             sleep 2
           done
           test "$state" = "started"
-          cat >/tmp/approval-probe.mjs <<'NODE'
+          cat >/app/approval-probe.mjs <<'NODE'
           import pg from "pg";
           const cs=String(process.env.SENTIENT_DATABASE_BOOTSTRAP_URL??process.env.SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL??"").trim();
           const candidate=String(process.env.CANDIDATE_SKILLS_SHA??"").trim();
@@ -87,5 +87,5 @@ jobs:
             console.log("SECRET_VALUES_EXPOSED=false");
           } finally { await pool.end(); }
           NODE
-          b64="$(base64 -w0 /tmp/approval-probe.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $b64 | base64 -d >/tmp/approval-probe.mjs && CANDIDATE_SKILLS_SHA=$CANDIDATE_SKILLS_SHA node /tmp/approval-probe.mjs; rc=\$?; rm -f /tmp/approval-probe.mjs; exit \$rc'"
+          b64="$(base64 -w0 /app/approval-probe.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $b64 | base64 -d >/app/approval-probe.mjs && CANDIDATE_SKILLS_SHA=$CANDIDATE_SKILLS_SHA node /app/approval-probe.mjs; rc=\$?; rm -f /app/approval-probe.mjs; exit \$rc'"
