@@ -24,7 +24,7 @@ jobs:
       S: ${{ inputs.sha }}
       T: ${{ inputs.tree }}
       O: ${{ inputs.objective_id }}
-      K: d85eb820f18ad6d944ab93b03150d606273891a5
+      K: b3df9b32b47370a7140d6fe814eeba97564663ab
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy exact candidate through resident Governor
@@ -58,9 +58,11 @@ jobs:
           if(b.READYZ&&typeof b.READYZ==="object") out.READYZ={statusCode:b.READYZ.statusCode??null,body:b.READYZ.body??null};
           console.log(JSON.stringify(out));
           if(!r.ok || b.REQUESTED_SHA!==sha || b.REQUESTED_TREE!==tree || b.DEPLOYED_SHA!==sha || b.DEPLOYED_TREE!==tree || b.BUILD_RESULT!=="SUCCEEDED") process.exit(21);
+          if(b.SKILLS_SHA!==skillsSha) process.exit(24);
           if(b.RESOURCE_CHANGE_STATUS!=="APPROVED_BASELINE") process.exit(22);
           if(b.HEALTHZ?.statusCode!==200 || b.READYZ?.statusCode!==200 || b.READYZ_FAILURE!==null) process.exit(23);
           console.log("GOVERNOR_DEPLOY_EXACT=PASS");
+          console.log("MISSION_CONTROL_SKILLS_SHA_MATCH=PASS");
           console.log("AUTHORIZATION_BOUND_TO_IDENTITY=PASS");
           console.log("HIGH_TIER_ACTION_REQUIRES_VERIFICATION_RECEIPT=PASS");
           console.log("RESOURCE_ENVELOPE_CHANGED=false");
@@ -77,6 +79,6 @@ jobs:
             sleep 2
           done
           test "$st" = started
-          flyctl ssh console -a "$app" -C "sh -lc 'echo $b64 | base64 -d >/tmp/deploy.mjs && S=TS T=$T O=$O K=$K node /tmp/deploy.mjs; rc=\$?; rm -f /tmp/deploy.mjs; exit \$rc'"
+          flyctl ssh console -a "$app" -C "sh -lc 'echo $b64 | base64 -d >/tmp/deploy.mjs && S=$S T=$T O=$O K=$K node /tmp/deploy.mjs; rc=\$?; rm -f /tmp/deploy.mjs; exit \$rc'"
           rm -f /tmp/deploy.mjs
           echo "RESULT=PASS"
