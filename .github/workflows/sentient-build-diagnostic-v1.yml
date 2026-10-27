@@ -14,7 +14,7 @@ jobs:
         ref: 12372d0b2417c0521a7927b0cf0b3aa34ea1184c
         token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
         persist-credentials: false
-    - uses: actions/setup-node@@v4
+    - uses: actions/setup-node@v4
       with:
         node-version: "22"
     - name: Print exact TypeScript diagnostics
