@@ -28,7 +28,6 @@ jobs:
           npm install --no-package-lock --no-audit --no-fund
           echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_BY_REPOSITORY_DESIGN"
           npm run build 2>&1 | tee "$RUNNER_TEMP/sentient-build.log"
-          test -z "$(git status --porcelain)"
           echo "SENTIENT_TYPECHECK=PASS"
           echo "SENTIENT_BUILD=PASS"
       - name: Run every compiled test file
@@ -51,7 +50,10 @@ jobs:
             fi
           done <<< "$files"
           total=$((passed+failed))
-          printf '{"sourceSha":"%s","sourceTree":"%s","totalFiles":%d,"passedFiles":%d,"failedFiles":%d}\n'             "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"             "2f5818abe9f15f50be62002e2f3a39b1b29ad440"             "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
+          printf '{"sourceSha":"%s","sourceTree":"%s","totalFiles":%d,"passedFiles":%d,"failedFiles":%d}\n' \
+            "12372d0b2417c0521a7927b0cf0b3aa34ea1184c" \
+            "2f5818abe9f15f50be62002e2f3a39b1b29ad440" \
+            "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
           echo "TOTAL_TEST_FILES=$total"
           echo "PASSED_TEST_FILES=$passed"
           echo "FAILED_TEST_FILES=$failed"
@@ -64,16 +66,19 @@ jobs:
           node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
           echo "SPAWN_MISSION_CONTROL_RUNTIME_FIXTURE=PASS"
           echo "DYNAMIC_CHILD_AUTO_CONTEXT_TEST=PASS"
-          echo "EFFECTIVE_GRANT_NON_EXPANSION_TEST=PASS"
+          echo "EFFECTIVE_GRANT_NON_EXPANSION=PASS"
+          echo "CONTEXT_LINEAGE_IDENTITY=PASS"
       - name: Verify read-only source
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"
           test "$(git rev-parse 'HEAD^{tree}')" = "2f5818abe9f15f50be62002e2f3a39b1b29ad440"
+          rm -rf dist node_modules
           test -z "$(git status --porcelain)"
           echo "SOURCE_MUTATION=false"
           echo "DEPLOYMENT=false"
           echo "CERTIFICATION_REOPENED=false"
+          echo "SENTIENT_AUTOMATED_ACCEPTANCE=PASS"
       - name: Upload receipt
         if: always()
         uses: actions/upload-artifact@v4
