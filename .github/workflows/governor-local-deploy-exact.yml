@@ -64,7 +64,7 @@ jobs:
           console.log("GOVERNOR_DEPLOY_EXACT=PASS");
           console.log("AUTHORIZATION_BOUND_TO_IDENTITY=PASS");
           console.log("SECRET_VALUES_EXPOSED=false");
-NODE
+          NODE
           b64="$(base64 -w0 /tmp/deploy.mjs)"
           flyctl machines list -a sentient-deployment-governor --json >/tmp/m.json
           id="$(jq -r '.[0].id // empty' /tmp/m.json)"
