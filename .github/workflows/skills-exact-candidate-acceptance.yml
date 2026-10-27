@@ -27,11 +27,11 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
-      - name: Checkout exact coordination substrate candidate
+      - name: Checkout exact Mission Control candidate
         uses: actions/checkout@v4
         with:
           repository: riggeyb/skills
-          ref: 6f074b7d6b8d858c323900ca2838fefcfa18505a
+          ref: b3df9b32b47370a7140d6fe814eeba97564663ab
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
@@ -44,8 +44,8 @@ jobs:
       - name: Fence exact source and dependency identity
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "6f074b7d6b8d858c323900ca2838fefcfa18505a"
-          test "$(git rev-parse 'HEAD^{tree}')" = "df6e1828bc154cd6fb972b8bb668c98596902be8"
+          test "$(git rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
+          test "$(git rev-parse 'HEAD^{tree}')" = "3173ee3cb2e39038921d3b125f1a74ecd783ff30"
           echo "SOURCE_SHA=$(git rev-parse HEAD)"
           echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo "EXECUTION_ENVIRONMENT=github-hosted-ubuntu-latest-via-riggeyb/sentient-fly-runner"
@@ -88,17 +88,17 @@ jobs:
       - name: Verify read-only source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "6f074b7d6b8d858c323900ca2838fefcfa18505a"
-          test "$(git rev-parse 'HEAD^{tree}')" = "df6e1828bc154cd6fb972b8bb668c98596902be8"
+          test "$(git rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
+          test "$(git rev-parse 'HEAD^{tree}')" = "3173ee3cb2e39038921d3b125f1a74ecd783ff30"
           test -z "$(git status --porcelain)"
-          echo "COORDINATION_ACCEPTANCE=PASS"
+          echo "MISSION_CONTROL_ACCEPTANCE=PASS"
           echo "SOURCE_MUTATION=false"
           echo "PRODUCTION_DEPLOYMENT=false"
       - name: Upload receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skills-coordination-acceptance
+          name: skills-mission-control-acceptance
           path: |
             ${{ runner.temp }}/skills-typecheck.log
             ${{ runner.temp }}/skills-tests.log
