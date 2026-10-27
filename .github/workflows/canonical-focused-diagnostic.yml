@@ -1,16 +1,35 @@
-name: Mission Control Exact Typecheck Diagnostic
+name: Mission Control Exact Acceptance Diagnostic
 on:
   workflow_dispatch:
     inputs:
       sha:
         required: true
         type: string
+      tree:
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
-  typecheck:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,17 +41,43 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Fence exact Mission Control candidate
+      - name: Fence exact candidate
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ inputs.sha }}"
-          test "$(git rev-parse 'HEAD^{tree}')" = "d074b3170069b188fd71caf28c6ec11ef677f4ff"
-          echo "SOURCE_SHA=${{ inputs.sha }}"
-          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
-      - name: Install orchestrator dependencies
+          test "$(git rev-parse 'HEAD^{tree}')" = "${{ inputs.tree }}"
+          echo "SOURCE_IDENTITY=PASS"
+      - name: Install
         working-directory: sentient-orchestrator
         run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock
-      - name: Typecheck exact candidate
+      - name: Typecheck
         working-directory: sentient-orchestrator
         run: npm run typecheck
+      - name: Migrate
+        working-directory: sentient-orchestrator
+        run: npm run migrate
+      - name: Test with bounded failure receipt
+        working-directory: sentient-orchestrator
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/mission-control-test.log 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "TEST_EXIT=$code"
+            tail -n 260 /tmp/mission-control-test.log
+            exit "$code"
+          fi
+          tail -n 40 /tmp/mission-control-test.log
+          echo "MISSION_CONTROL_TESTS=PASS"
+      - name: Guard source mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --porcelain --untracked-files=no | grep -q . && {
+            git status --short
+            exit 1
+          } || true
+          echo "SOURCE_MUTATION=false"
