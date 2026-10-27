@@ -1,10 +1,10 @@
-name: Repair MVP Mission Control event vocabulary
+name: Normalize Sentient MVP dependency lock
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  repair:
+  normalize:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -15,35 +15,26 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
-      - name: Fence and repair only unsupported event
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence, normalize, and push package lock only
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "74ad1be0ab36e87ed5f8d77cf470a2b790fb6faa"
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("src/application/production-mission-control.ts")
-          s = p.read_text()
-          marker = '      type: "ROOT_DECISION",'
-          idx = s.find(marker)
-          if idx < 0:
-              raise SystemExit("ROOT_DECISION marker missing")
-          start = s.rfind("    await publishMissionEvent({", 0, idx)
-          end = s.find("    });", idx)
-          if start < 0 or end < 0:
-              raise SystemExit("ROOT_DECISION block boundaries missing")
-          end += len("    });")
-          if s.find(marker, idx + len(marker)) >= 0:
-              raise SystemExit("multiple ROOT_DECISION markers")
-          p.write_text(s[:start] + s[end:])
-          PY
-          git diff --check -- src/application/production-mission-control.ts
+          test "$(git rev-parse HEAD)" = "34d81fd3890ca662705ea33775983e73ab1a77e3"
+          test "$(git rev-parse 'HEAD^{tree}')" = "10a9012c0817d6d70b16673298db834cf0f4a5d1"
+          npm install --no-audit --no-fund
           changed="$(git diff --name-only)"
-          test "$changed" = "src/application/production-mission-control.ts"
-          git config user.name "sentient-mvp-activation"
-          git config user.email "sentient-mvp-activation@users.noreply.github.com"
-          git add src/application/production-mission-control.ts
-          git commit -m "mvp: use accepted Mission Control event vocabulary"
+          echo "TRACKED_DIFF=${changed//$'\n'/,}"
+          test "$changed" = "package-lock.json"
+          npm ci --no-audit --no-fund
+          npm run build
+          git diff --name-only | grep -qx 'package-lock.json'
+          git config user.name sentient-mvp-activation
+          git config user.email sentient-mvp-activation@users.noreply.github.com
+          git add package-lock.json
+          git commit -m "mvp: normalize Mission Control dependency lock"
           git push origin HEAD:sentient/mvp-mission-control-integration-v1
-          echo "REPAIRED_SHA=$(git rev-parse HEAD)"
-          echo "REPAIRED_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "NORMALIZED_SHA=$(git rev-parse HEAD)"
+          echo "NORMALIZED_TREE=$(git rev-parse 'HEAD^{tree}')"
