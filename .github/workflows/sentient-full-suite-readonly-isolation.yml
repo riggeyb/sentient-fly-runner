@@ -1,165 +1,120 @@
-name: Sentient Full Suite Readonly Isolation
+name: Skills Exact Candidate Acceptance
+
 on:
   workflow_dispatch:
     inputs:
       sha:
-        description: Exact private source SHA
         required: true
         type: string
       tree:
-        description: Exact private source tree
         required: true
         type: string
       private_issue:
-        description: Private source issue number for detailed report
         required: true
         type: string
+
 permissions:
   contents: read
+
 jobs:
-  isolate:
+  exact:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: riggeyb/sentient
+          repository: riggeyb/skills
           ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Fence exact source identity
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Exact acceptance
         shell: bash
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
           EXPECTED_TREE: ${{ inputs.tree }}
-        run: |
-          set -euo pipefail
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
-          echo "SOURCE_IDENTITY=PASS"
-      - name: Build without mutation
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --ignore-scripts --no-audit --no-fund >/dev/null
-          npm run build >/dev/null
-          test -z "$(git status --porcelain)"
-          echo "BUILD_RESULT=PASS"
-          echo "SOURCE_MUTATION=false"
-      - name: Isolate compiled test failures privately
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.sha }}
-          EXPECTED_TREE: ${{ inputs.tree }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const fs=require("node:fs");
-          const path=require("node:path");
-          const {spawnSync}=require("node:child_process");
-          const testDir=path.join(process.cwd(),"dist","test");
-          const files=fs.readdirSync(testDir).filter(f=>f.endsWith(".test.js")).sort();
-          const clean=(v)=>String(v??"")
-            .replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]")
-            .replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]")
-            .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]");
-          const failures=[];
-          let passed=0;
-          for(const file of files){
-            const full=path.join(testDir,file);
-            const started=Date.now();
-            const r=spawnSync(process.execPath,["--test",full],{
-              encoding:"utf8",
-              timeout:120000,
-              maxBuffer:4*512*1024,
-              env:{...process.env}
-            });
-            const durationMs=Date.now()-started;
-            if(r.status===0 && !r.error){
-              passed++;
-              continue;
-            }
-            const out=clean((r.stdout??"")+"\n"+(r.stderr??""));
-            failures.push({
-              file,
-              exitCode:r.status,
-              signal:r.signal??null,
-              error:r.error?.message??null,
-              durationMs,
-              tail:out.slice(-6000)
-            });
-          }
-          const report={
-            contract:"sentient-readonly-test-isolation/v1",
-            sourceSha:process.env.EXPECTED_SHA,
-            sourceTree:process.env.EXPECTED_TREE,
-            totalFiles:files.length,
-            passedFiles:passed,
-            failedFiles:failures.length,
-            failures,
-            sourceMutation:false,
-            deployment:false,
-            certificationReopened:false,
-            learningJustified:false,
-            createdAt:new Date().toISOString()
-          };
-          fs.writeFileSync("/tmp/isolation-report.json",JSON.stringify(report));
-          fs.writeFileSync("/tmp/isolation-counts.txt",`TOTAL_TEST_FILES=${files.length}\nPASSED_TEST_FILES=${passed}\nFAILED_TEST_FILES=${failures.length}\n`);
-          NODE
-          cat /tmp/isolation-counts.txt
-          node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/isolation-report.json","utf8")); console.log("FAILED_TEST_FILE_NAMES="+r.failures.map(x=>x.file).join(","));'
-          echo "PUBLIC_TEST_DETAILS_EXPOSED=filenames_only"
-      - name: Post detailed report to private source issue
-        shell: bash
-        env:
           SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           PRIVATE_ISSUE: ${{ inputs.private_issue }}
         run: |
-          set -euo pipefail
-          [[ "$PRIVATE_ISSUE" =~ ^[0-9]+$ ]]
-          node <<'NODE'
-          (async () => {
-            const fs=require("node:fs");
-            const issue=String(process.env.PRIVATE_ISSUE);
-            const token=String(process.env.SOURCE_TOKEN??"");
-            if(!token) throw new Error("SOURCE_TOKEN_MISSING");
-            const report=JSON.parse(fs.readFileSync("/tmp/isolation-report.json","utf8"));
-            const body=[
-              "FULL_SUITE_READONLY_ISOLATION_RECEIPT_V1",
-              "SOURCE_SHA="+report.sourceSha,
-              "SOURCE_TREE="+report.sourceTree,
-              "TOTAL_TEST_FILES="+report.totalFiles,
-              "PASSED_TEST_FILES="+report.passedFiles,
-              "FAILED_TEST_FILES="+report.failedFiles,
-              "SOURCE_MUTATION=false",
-              "DEPLOYMENT=false",
-              "CERTIFICATION_REOPENED=false",
-              "LEARNING_JUSTIFIED=false",
-              "",
-              "DETAILED_FAILURES_JSON",
-              "```json",
-              JSON.stringify(report.failures,null,2),
-              "```"
-            ].join("\n");
-            const res=await fetch(`https://api.github.com/repos/riggeyb/sentient/issues/${issue}/comments`,{
-              method:"POST",
-              headers:{
-                "Authorization":`Bearer ${token}`,
-                "Accept":"application/vnd.github+json",
-                "X-GitHub-Api-Version":"2022-11-28",
-                "Content-Type":"application/json",
-                "User-Agent":"sentient-readonly-isolation"
-              },
-              body:JSON.stringify({body})
-            });
-            if(!res.ok) throw new Error("PRIVATE_REPORT_POST_FAILED:"+res.status);
-            console.log("PRIVATE_REPORT_POSTED=true");
-            console.log("SECRET_VALUES_EXPOSED=false");
-          })().catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
+          set +e
+          mkdir -p /tmp/skills
+          receipt=/tmp/receipt.txt
+          : >"$receipt"
+          failed=0
+          runq() {
+            label="$1"; shift
+            "$@" >"/tmp/skills/$label.log" 2>&1
+            rc=$?
+            echo "${label}_EXIT=$rc" | tee -a "$receipt"
+            [ "$rc" -eq 0 ] || failed=1
+          }
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
+          {
+            echo "EXACT_SKILLS_ACCEPTANCE_RECEIPT_V1"
+            echo "SOURCE_SHA=$EXPECTED_SHA"
+            echo "SOURCE_TREE=$EXPECTED_TREE"
+            echo "RUNNER_OS=$(uname -srvmo)"
+            echo "NODE_VERSION=$(node --version)"
+            echo "PYTHON_VERSION=$(python --version 2>&1)"
+            echo "REQUIREMENTS_BLOB=$(git rev-parse HEAD:requirements.txt)"
+            echo "ORCHESTRATOR_MANIFEST_BLOB=$(git rev-parse HEAD:sentient-orchestrator/package.json)"
+            echo "ORCHESTRATOR_LOCK=ABSENT"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee -a "$receipt"
+          runq PYTHON_DEPS pip install -r requirements.txt
+          runq REGISTRY python scripts/validate_registry.py
+          runq EVALS python scripts/check_evals.py
+          runq DURABLE env PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+          runq ACTIVE_WORK env PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+          runq REPO_EDIT python scripts/test_repository_edit.py
+          runq REPO_GATEWAY python scripts/test_repository_edit_request.py
+          runq ACTION_SCHEMA python scripts/validate_actions_schema.py
+          runq NETLIFY_SCHEMA python scripts/validate_netlify_actions_schema.py
+          (cd sentient-orchestrator && npm install --ignore-scripts --no-audit --no-fund --no-package-lock) >/tmp/skills/NPM_INSTALL.log 2>&1
+          rc=$?; echo "NPM_INSTALL_EXIT=$rc" | tee -a "$receipt"; [ "$rc" -eq 0 ] || failed=1
+          (cd sentient-orchestrator && npm run typecheck) >/tmp/skills/TYPECHECK.log 2>&1
+          rc=$?; echo "TYPECHECK_EXIT=$rc" | tee -a "$receipt"; [ "$rc" -eq 0 ] || failed=1
+          (cd sentient-orchestrator && npm run migrate) >/tmp/skills/MIGRATE.log 2>&1
+          rc=$?; echo "MIGRATE_EXIT=$rc" | tee -a "$receipt"; [ "$rc" -eq 0 ] || failed=1
+          (cd sentient-orchestrator && npm test) >/tmp/skills/TESTS.log 2>&1
+          rc=$?; echo "TESTS_EXIT=$rc" | tee -a "$receipt"; [ "$rc" -eq 0 ] || failed=1
+          grep -E '^# (tests|pass|fail) ' /tmp/skills/TESTS.log | tail -3 | tee -a "$receipt" || true
+          GITHUB_TOKEN="$SOURCE_TOKEN" python scripts/validate_registry.py --remote >/tmp/skills/REMOTE.log 2>&1
+          rc=$?; echo "REMOTE_REGISTRY_EXIT=$rc" | tee -a "$receipt"; [ "$rc" -eq 0 ] || failed=1
+          rm -rf sentient-orchestrator/node_modules
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "SOURCE_MUTATION=true" | tee -a "$receipt"
+            failed=1
+          else
+            echo "SOURCE_MUTATION=false" | tee -a "$receipt"
+          fi
+          echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$receipt"
+          echo "OVERALL_EXIT=$failed" | tee -a "$receipt"
+          if [ "$failed" -ne 0 ]; then
+            printf 'EXACT_SKILLS_ACCEPTANCE_RECEIPT_V1\n```text\n' >/tmp/body
+            cat "$receipt" >>/tmp/body
+            printf '```\n' >>/tmp/body
+            jq -Rs '{body:.}' </tmp/body >/tmp/payload.json
+            curl --fail --silent --show-error               -H "Authorization: Bearer $SOURCE_TOKEN"               -H "Accept: application/vnd.github+json"               -H "Content-Type: application/json"               -X POST "https://api.github.com/repos/riggeyb/skills/issues/$PRIVATE_ISSUE/comments"               --data-binary @/tmp/payload.json >/dev/null || true
+          fi
+          exit "$failed"
