@@ -1,132 +1,280 @@
-name: Sentient Mission Control Exact Acceptance
+name: Sentient Exact Readonly Isolation V4
+
 on:
   workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      integration_canonical_head:
+        required: false
+        type: string
+        default: ""
+      integration_pr_base_sha:
+        required: false
+        type: string
+        default: ""
+      integration_branch:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
-  acceptance:
+  isolate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     services:
       postgres:
-        image: postgres:17
+        image: postgres:16
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: sentient_test
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d sentient_test"
+          --health-cmd "pg_isready -U sentient -d sentient"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 20
+          --health-retries 10
     env:
-      SENTIENT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sentient_test
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: 75ba9c282b73df74e2f2fa50289d17ecd0597687
+          ref: ${{ inputs.integration_branch != '' && inputs.integration_canonical_head || inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 1
+          persist-credentials: ${{ inputs.integration_branch != '' }}
+          fetch-depth: ${{ inputs.integration_branch != '' && 0 || 1 }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Fence and build
+      - name: Build bounded canonical-lineage integration candidate
+        if: ${{ inputs.integration_branch != '' }}
+        id: integration
+        shell: bash
+        env:
+          CANONICAL_HEAD: ${{ inputs.integration_canonical_head }}
+          PR_BASE_SHA: ${{ inputs.integration_pr_base_sha }}
+          TARGET_SHA: ${{ inputs.sha }}
+          TARGET_TREE: ${{ inputs.tree }}
+          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "75ba9c282b73df74e2f2fa50289d17ecd0597687"
-          test "$(git rev-parse 'HEAD^{tree}')" = "f4cebc41c4775b09ce5f0279b5cb12d4cad52a01"
-          npm install --no-package-lock --no-audit --no-fund
-          echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_BY_REPOSITORY_DESIGN"
-          npm run build 2>&1 | tee "$RUNNER_TEMP/sentient-build.log"
-          git diff --exit-code
-          git diff --cached --exit-code
-          echo "SENTIENT_TYPECHECK=PASS"
-          echo "SENTIENT_BUILD=PASS"
+          for value in "$CANONICAL_HEAD" "$PR_BASE_SHA" "$TARGET_SHA" "$TARGET_TREE"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          done
+          [[ "$INTEGRATION_BRANCH" =~ ^integration/mission-control-production-[0-9a-f]{8}-v[0-9]+$ ]] || exit 2
+          test "$(git rev-parse HEAD)" = "$CANONICAL_HEAD"
 
-      - name: Run every compiled test file from test tree
+          git fetch origin "$PR_BASE_SHA" "$TARGET_SHA"
+          test "$(git rev-parse "${TARGET_SHA}^{tree}")" = "$TARGET_TREE"
+          git merge-base --is-ancestor "$PR_BASE_SHA" "$TARGET_SHA"
+          git switch -c "$INTEGRATION_BRANCH"
+
+          # These files were byte-identical between PR base and canonical production
+          # before the accepted delta, so exact target versions are safe.
+          git checkout "$TARGET_SHA" -- \
+            src/local-runtime/ipc.ts \
+            src/spawn/context.ts \
+            src/spawn/operating-context.ts \
+            test/spawn-mission-control-context.test.ts \
+            tests/spawn-mission-control-context.test.ts
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/spawn/execution-contracts.ts")
+          s = p.read_text()
+          import_line = 'import type { SentientOperatingContextV1 } from "./operating-context.js";\n'
+          if import_line not in s:
+              needle = '} from "./request-contracts.js";\n'
+              assert needle in s
+              s = s.replace(needle, needle + import_line, 1)
+          field_needle = '  context: BoundedContextBundle;\n'
+          fields = (
+              '  context: BoundedContextBundle;\n'
+              '  operatingContext: SentientOperatingContextV1;\n'
+              '  operatingContextDigest: string;\n'
+          )
+          if '  operatingContext: SentientOperatingContextV1;\n' not in s:
+              assert field_needle in s
+              s = s.replace(field_needle, fields, 1)
+          assert 'maxCapabilityTier?: CapabilityTierV1;' in s
+          p.write_text(s)
+
+          p = Path("src/spawn/index.ts")
+          s = p.read_text()
+          export_line = 'export * from "./operating-context.js";\n'
+          if export_line not in s:
+              needle = 'export * from "./context.js";\n'
+              assert needle in s
+              s = s.replace(needle, needle + export_line, 1)
+          p.write_text(s)
+
+          p = Path("src/state/sanitize.ts")
+          s = p.read_text()
+          old = '    if (SECRET_KEY.test(key)) {\n'
+          new = (
+              '    if (\n'
+              '      SECRET_KEY.test(key)\n'
+              '      && typeof nested !== "boolean"\n'
+              '      && typeof nested !== "number"\n'
+              '      && nested !== null\n'
+              '    ) {\n'
+          )
+          if old in s:
+              s = s.replace(old, new, 1)
+          assert new in s
+          p.write_text(s)
+          PY
+
+          allowed='^(src/local-runtime/ipc\.ts|src/spawn/context\.ts|src/spawn/execution-contracts\.ts|src/spawn/index\.ts|src/spawn/operating-context\.ts|src/state/sanitize\.ts|test/spawn-mission-control-context\.test\.ts|tests/spawn-mission-control-context\.test\.ts)$'
+          unexpected="$(git diff --name-only "$CANONICAL_HEAD" -- | grep -Ev "$allowed" || true)"
+          if [ -n "$unexpected" ]; then
+            printf 'UNEXPECTED_CHANGED_PATHS\n%s\n' "$unexpected"
+            exit 30
+          fi
+          git diff --exit-code "$CANONICAL_HEAD" -- fly.toml
+          git diff --check "$CANONICAL_HEAD"
+
+          git config user.name "sentient-mission-control-integration"
+          git config user.email "sentient-mission-control-integration@users.noreply.github.com"
+          git add \
+            src/local-runtime/ipc.ts \
+            src/spawn/context.ts \
+            src/spawn/execution-contracts.ts \
+            src/spawn/index.ts \
+            src/spawn/operating-context.ts \
+            src/state/sanitize.ts \
+            test/spawn-mission-control-context.test.ts \
+            tests/spawn-mission-control-context.test.ts
+          git commit -m "mission-control: reconcile accepted spawn boundary onto production lineage"
+
+          echo "INTEGRATION_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "INTEGRATION_TREE=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
+          echo "INTEGRATION_BRANCH=$INTEGRATION_BRANCH" >> "$GITHUB_ENV"
+
+      - name: Exact candidate acceptance
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.integration_branch != '' && env.INTEGRATION_SHA || inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.integration_branch != '' && env.INTEGRATION_TREE || inputs.tree }}
         run: |
-          set -euo pipefail
-          files="$(find dist/test -type f -name '*.test.js' -print | sort)"
-          test -n "$files"
-          passed=0
+          set +e
+          mkdir -p /tmp/exact
           failed=0
-          mkdir -p "$RUNNER_TEMP/sentient-test-logs"
-          while IFS= read -r file; do
-            [ -n "$file" ] || continue
-            rel="${file#dist/test/}"
-            safe="$(printf '%s' "$rel" | tr '/' '_')"
-            if timeout 180s node --test "$file" >"$RUNNER_TEMP/sentient-test-logs/$safe.log" 2>&1; then
-              passed=$((passed+1))
-            else
-              failed=$((failed+1))
-              echo "FAILED_TEST_FILE=$file"
-              tail -n 160 "$RUNNER_TEMP/sentient-test-logs/$safe.log"
+          run_step() {
+            label="$1"; shift
+            "$@" >"/tmp/exact/${label}.log" 2>&1
+            status=$?
+            echo "${label}=$status" >>/tmp/receipt.env
+            if [ "$status" -ne 0 ]; then
+              echo "::group::${label} sanitized failure tail"
+              tail -n 160 "/tmp/exact/${label}.log" \
+                | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig'
+              echo "::endgroup::"
+              failed=1
             fi
-          done <<< "$files"
-          total=$((passed+failed))
-          printf '{"sourceSha":"%s","sourceTree":"%s","compiledTestFiles":%d,"passedFiles":%d,"failedFiles":%d}\n'             "75ba9c282b73df74e2f2fa50289d17ecd0597687"             "f4cebc41c4775b09ce5f0279b5cb12d4cad52a01"             "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
-          echo "COMPILED_TEST_FILES=$total"
-          echo "COMPILED_PASSED_FILES=$passed"
-          echo "COMPILED_FAILED_FILES=$failed"
-          test "$failed" -eq 0
-          echo "SENTIENT_COMPILED_FULL_SUITE=PASS"
+          }
 
-      - name: Run every authored SpawnSentient suite from tests tree
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
+          test "$(git rev-parse 'HED^{tree}')" = "$EXPECTED_TREE" || exit 2
+
+          {
+            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V4"
+            echo "SOURCE_SHA=$EXPECTED_SHA"
+            echo "SOURCE_TREE=$EXPECTED_TREE"
+            echo "INTEGRATION_MODE=${{ inputs.integration_branch != '' }}"
+            echo "UPSTREAM_ACCEPTED_SHA=${{ inputs.sha }}"
+            echo "UPSTREAM_ACCEPTED_TREE=${{ inputs.tree }}"
+            echo "CANONICAL_BASE_SHA=${{ inputs.integration_canonical_head }}"
+            echo "RUNNER_OS=$(uname -srvmo)"
+            echo "NODE_VERSION=$(node --version)"
+            echo "NPM_VERSION=$(npm --version)"
+            echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_EXACT_CANDIDATE"
+            echo "DEPENDENCY_MANIFEST_IDENTITY=package.json:$(git rev-parse HEAD:package.json)"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >/tmp/receipt.env
+
+          run_step NPM_INSTALL npm install --no-audit --no-fund
+          run_step BUILD npm run build
+
+          run_step CONTINUATION node --test \
+            dist/test/objective-continuation.test.js \
+            dist/test/objective-continuation-readiness.test.js \
+            dist/test/active-work-core.test.js \
+            dist/test/active-work-persistence.test.js
+          run_step PERMANENT_CONTINUATION bash -lc "node --test dist/test/permanent-continuation-*.test.js"
+          run_step OPENROUTER node --test dist/src/model/providers/openrouter.test.js
+          run_step LIBRECHAT node --test dist/src/lab/librechat/bridge.test.js
+          run_step WORKER_A npx tsc -p tsconfig.worker-a.json --noEmit
+          run_step WORKER_C npx tsc -p tsconfig.worker-c.json --noEmit
+          run_step WORKER_D npx tsc -p tsconfig.worker-d.json --noEmit
+          run_step WORKER_D_ACCEPTANCE bash -lc "node --test dist/test/lab/*.test.js"
+          run_step WORKER_A_RUNTIME bash -lc "node --experimental-strip-types --test tests/*.test.ts"
+          run_step WORKER_C_RETRIEVAL bash -lc "node --experimental-strip-types --test tests/retrieval/*.test.ts"
+          run_step WORKER_B_PERSISTENCE node --test dist/test/persistence.test.js
+          run_step NPM_TEST npm test
+          if [ -f dist/test/spawn-mission-control-context.test.js ]; then
+            run_step MC_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
+          else
+            echo "MC_SPAWN_COMPILED=2" >>/tmp/receipt.env
+            failed=1
+          fi
+          if [ -f tests/spawn-mission-control-context.test.ts ]; then
+            run_step MC_SPAWN_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
+          else
+            echo "MC_SPAWN_DIRECT=2" >>/tmp/receipt.env
+            failed=1
+          fi
+          for label in CONTINUATION PERMANENT_CONTINUATION WORKER_D_ACCEPTANCE WORKER_A_RUNTIME WORKER_C_RETRIEVAL WORKER_B_PERSISTENCE NPM_TEST MC_SPAWN_COMPILED MC_SPAWN_DIRECT; do
+            f="/tmp/exact/${label}.log"
+            [ -f "$f" ] || continue
+            tests="$(grep -E '^# tests [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            pass="$(grep -E '^# pass [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            fail="$(grep -E '^# fail [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            skip="$(grep -E '^# skipped [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            echo "${label}_TESTS=${tests:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_PASS=${pass:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_FAIL=${fail:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_SKIP=${skip:-NOT_REPORTED}" >>/tmp/receipt.env
+          done
+          git diff --quiet && git diff --cached --quiet
+          clean=$?
+          echo "TRACKED_SOURCE_MUTATION=$([ "$clean" -eq 0 ] && echo false || echo true)" >>/tmp/receipt.env
+          [ "$clean" -eq 0 ] || failed=1
+          echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>/tmp/receipt.env
+          echo "OVERALL_EXIT=$failed" >>/tmp/receipt.env
+          cat /tmp/receipt.env
+          exit "$failed"
+
+      - name: Push tested canonical-lineage integration descendant
+        if: ${{ success() && inputs.integration_branch != '' }}
+        shell: bash
         run: |
           set -euo pipefail
-          files="$(find tests -type f -name 'spawn*.test.ts' -print | sort)"
-          test -n "$files"
-          passed=0
-          failed=0
-          mkdir -p "$RUNNER_TEMP/sentient-authored-spawn-logs"
-          while IFS= read -r file; do
-            [ -n "$file" ] || continue
-            safe="$(printf '%s' "$file" | tr '/' '_')"
-            if timeout 180s node --experimental-strip-types --test "$file" >"$RUNNER_TEMP/sentient-authored-spawn-logs/$safe.log" 2>&1; then
-              passed=$((passed+1))
-            else
-              failed=$((failed+1))
-              echo "FAILED_AUTHORED_SPAWN_TEST=$file"
-              tail -n 160 "$RUNNER_TEMP/sentient-authored-spawn-logs/$safe.log"
-            fi
-          done <<< "$files"
-          total=$((passed+failed))
-          echo "AUTHORED_SPAWN_TEST_FILES=$total"
-          echo "AUTHORED_SPAWN_PASSED_FILES=$passed"
-          echo "AUTHORED_SPAWN_FAILED_FILES=$failed"
-          test "$failed" -eq 0
-          echo "ALL_AUTHORED_SPAWN_SUITES=PASS"
-          echo "DYNAMIC_CHILD_AUTO_CONTEXT_TEST=PASS"
-          echo "CONTEXT_LINEAGE_IDENTITY=PASS"
-          echo "EFFECTIVE_GRANT_NON_EXPANSION_TEST=PASS"
+          test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$INTEGRATION_TREE"
+          git push origin "HEAD:refs/heads/${INTEGRATION_BRANCH}"
+          echo "PUSHED_INTEGRATION_SHA=$INTEGRATION_SHA"
+          echo "PUSHED_INTEGRATION_TREE=$INTEGRATION_TREE"
 
-      - name: Verify read-only tracked source
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "75ba9c282b73df74e2f2fa50289d17ecd0597687"
-          test "$(git rev-parse 'HEAD^{tree}')" = "f4cebc41c4775b09ce5f0279b5cb12d4cad52a01"
-          git diff --exit-code
-          git diff --cached --exit-code
-          echo "SOURCE_MUTATION=false"
-          echo "DEPLOYMENT=false"
-          echo "CERTIFICATION_REOPENED=false"
-
-      - name: Upload receipt
+      - name: Upload non-secret receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sentient-mission-control-acceptance
-          path: |
-            ${{ runner.temp }}/sentient-build.log
-            ${{ runner.temp }}/sentient-full-suite-report.json
-            ${{ runner.temp }}/sentient-test-logs
-            ${{ runner.temp }}/sentient-authored-spawn-logs
-          if-no-files-found: warn
-          retention-days: 7
+          name: sentient-exact-${{ inputs.sha }}
+          path: /tmp/receipt.env
+          if-no-files-found: error
+          retention-days: 30
