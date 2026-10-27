@@ -66,10 +66,10 @@ jobs:
                 status:x.status,
                 leaseExpiresAt:x.leaseExpiresAt,
                 reclaimCount:x.reclaimCount
-              })));
+              }))));
             } else {
               console.log("ACTIVE_WORK_COUNT=0");
-              console.log("ACTIVE_WORK=");
+              console.log("ACTIVE_WORK=[]");
             }
           } finally {
             await repo.close();
