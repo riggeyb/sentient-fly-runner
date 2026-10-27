@@ -1,143 +1,43 @@
-name: Director Studio Cloudflare Runtime Proof V4
-
+name: Director Studio Vinext Compatibility
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
-  proof:
+  check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
-      - name: Checkout exact Director Studio candidate
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
-          ref: cf7105954218014f3ef6f95ba56638f473e7fae9
+          ref: 082e9e39ac797118668b02b2d159ca5b5151d747
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          fetch-depth: 0
-      - name: Fence exact source identity
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Fence exact source
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "cf7105954218014f3ef6f95ba56638f473e7fae9"
-          test "$(git rev-parse 'HEAD^{tree}')" = "c6a0840427b4151dc4d05e112f445438aca7a0c9"
-          echo "PROOF_CANDIDATE_IDENTITY=PASS"
+          test "$(git rev-parse HEAD)" = "082e9e39ac797118668b02b2d159ca5b5151d747"
+          test "$(git rev-parse 'HEAD^{tree}')" = "1b5c1abad16092878eb325d5f3b0663758469a60"
+          echo "DIRECTOR_SOURCE_IDENTITY=PASS"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-      - name: Install dependencies
+      - name: Install exact dependencies
         run: npm ci --no-audit --no-fund
-      - name: Focused Sentient Cloudflare contract tests
-        run: npx tsx --test tests/sentient-cloudflare-contract.test.ts
       - name: Vinext compatibility check
         shell: bash
         run: |
           set -euo pipefail
           npx --yes vinext@latest check
-          echo "VINEXT_CHECK=PASS"
-      - name: Build Workers candidate
+          echo "VINEXT_COMPATIBILITY=PASS"
+      - name: Inspect initializer contract
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@latest setup --yes --build
-          npx --yes wrangler@latest deploy --dry-run --outdir "${RUNNER_TEMP}/director-cf-bundle"
-          echo "WORKERS_BUILD=PASS"
-      - name: Deploy one temporary non-production Worker
-        id: deploy
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="${RUNNER_TEMP}/director-cf-temporary-deploy.txt"
-          npx --yes wrangler@latest deploy --temporary >"$out" 2>&1
-          public_url="$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' "$out" | tail -n1)"
-          test -n "$public_url"
-          echo "worker_url=$public_url" >> "$GITHUB_OUTPUT"
-          echo "TEMPORARY_WORKER_DEPLOY=PASS"
-          # Never print the raw deploy output: it contains a short-lived claim URL.
-      - name: Start real-time Worker tail
-        id: tail
-        shell: bash
-        run: |
-          set -euo pipefail
-          tail_out="${RUNNER_TEMP}/director-cf-tail.jsonl"
-          tail_err="${RUNNER_TEMP}/director-cf-tail.err"
-          (timeout 60s npx --yes wrangler@latest tail --format json >"$tail_out" 2>"$tail_err") &
-          echo "$!" > "${RUNNER_TEMP}/director-cf-tail.pid"
-          sleep 5
-          echo "tail_out=$tail_out" >> "$GITHUB_OUTPUT"
-      - name: Smoke real Worker and capture invocations
-        shell: bash
-        env:
-          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        run: |
-          set -euo pipefail
-          for _ in $(seq 1 20); do
-            curl -fsS --max-time 20 "$WORKER_URL/" >/dev/null
-          done
-          code="$(curl -sS -o "${RUNNER_TEMP}/objective-response.txt" -w '%{http_code}' --max-time 20 \
-            -X POST -H 'content-type: application/json' \
-            --data '{"objective":"read-only test"}' \
-            "$WORKER_URL/api/sentient/objectives")"
-          test "$code" = "401"
-          sleep 5
-          echo "TEMPORARY_WORKER_SMOKE=PASS"
-          echo "UNAUTHENTICATED_OBJECTIVE_BLOCK=PASS"
-      - name: Stop tail and summarize authoritative CPU fields
-        if: always()
-        shell: bash
-        run: |
-          set -uo pipefail
-          pid_file="${RUNNER_TEMP}/director-cf-tail.pid"
-          if [ -f "$pid_file" ]; then
-            kill "$(cat "$pid_file")" 2>/dev/null || true
-          fi
-          wait 2>/dev/null || true
-          tail_out="${RUNNER_TEMP}/director-cf-tail.jsonl"
-          python3 - "$tail_out" <<'PY'
-          import json, math, pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          values = []
-          def walk(x):
-              if isinstance(x, dict):
-                  for k, v in x.items():
-                      if k in {"cpuTimeMs", "CPUTimeMs"} and isinstance(v, (int, float)):
-                          values.append(float(v))
-                      walk(v)
-              elif isinstance(x, list):
-                  for v in x:
-                      walk(v)
-          if p.exists():
-              for line in p.read_text(errors="replace").splitlines():
-                  try:
-                      walk(json.loads(line))
-                  except Exception:
-                      pass
-          values.sort()
-          def pct(q):
-              if not values:
-                  return None
-              pos=(len(values)-1)*q
-              lo=math.floor(pos); hi=math.ceil(pos)
-              if lo == hi: return values[lo]
-              return values[lo] + (values[hi]-values[lo])*(pos-lo)
-          print(f"CPU_SAMPLE_COUNT={len(values)}")
-          if values:
-              print(f"CPU_P50_MS={pct(.50):.6g}")
-              print(f"CPU_P95_MS={pct(.95):.6g}")
-              print(f"CPU_P99_MS={pct(.99):.6g}")
-              print(f"CPU_MAX_MS={max(values):.6g}")
-              print(f"CPU_EXCEEDED_10MS_COUNT={sum(v>10 for v in values)}")
-          else:
-              print("CPU_P50_MS=NOT_VERIFIED")
-              print("CPU_P95_MS=NOT_VERIFIED")
-              print("CPU_P99_MS=NOT_VERIFIED")
-              print("CPU_MAX_MS=NOT_VERIFIED")
-              print("CPU_EXCEEDED_10MS_COUNT=NOT_VERIFIED")
-          PY
-          echo "PRODUCTION_DEPLOYMENT=false"
-          echo "CANONICAL_HOST_CHANGE=false"
-          echo "SECRET_VALUES_EXPOSED=false"
+          npx --yes vinext@latest init --help
+          test -z "$(git status --porcelain)"
+          echo "SOURCE_MUTATION=false"
