@@ -19,7 +19,7 @@ permissions:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 9
     env:
       APP: sentient-validation-runner
       EXPECTED_SHA: ${{ inputs.sha }}
@@ -27,7 +27,7 @@ jobs:
       OBJECTIVE_ID: ${{ inputs.objective_id }}
       SENTIENT_API_TOKEN: ${{ secrets.SENTIENT_API_TOKEN }}
     steps:
-      - name: Verify exact live identity and externally poll existing objective
+      - name: GET-only external poll of existing objective
         shell: bash
         run: |
           set -euo pipefail
@@ -42,36 +42,38 @@ jobs:
           const objectiveId=String(process.env.OBJECTIVE_ID);
           const token=String(process.env.SENTIENT_API_TOKEN);
           const base=`https://${app}.fly.dev`;
-          const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
           let exact=false;
           for(let i=0;i<60;i++){
             try{
-              const [h,r]=await Promise.all([
-                fetch(`${base}/healthz`,{signal:AbortSignal.timeout(8000)}).then(x=>x.json()),
-                fetch(`${base}/readyz`,{signal:AbortSignal.timeout(8000)}).then(x=>x.json()),
+              const [hr,rr]=await Promise.all([
+                fetch(`${base}/healthz`,{signal:AbortSignal.timeout(10000)}),
+                fetch(`${base}/readyz`,{signal:AbortSignal.timeout(10000)})
               ]);
-              if(h?.application?.identity?.source?.sha===sha
-                && h?.application?.identity?.source?.tree===tree
-                && r?.ready===true
-                && r?.identity?.source?.sha===sha
-                && r?.identity?.source?.tree===tree){
-                exact=true; break;
+              if(hr.ok&&rr.ok){
+                const h=await hr.json(), r=await rr.json();
+                if(h?.application?.identity?.source?.sha===sha
+                  && h?.application?.identity?.source?.tree===tree
+                  && r?.ready===true
+                  && r?.identity?.source?.sha===sha
+                  && r?.identity?.source?.tree===tree){
+                  exact=true; break;
+                }
               }
             }catch{}
             await sleep(2000);
           }
           if(!exact) throw new Error("LIVE_EXACT_IDENTITY_NOT_READY");
           console.log("LIVE_EXACT_IDENTITY=PASS");
+
           const headers={authorization:`Bearer ${token}`,accept:"application/json"};
           let last=null;
-          for(let i=0;i<150;i++){
+          for(let i=0;i<180;i++){
             try{
               const res=await fetch(`${base}/v1/objectives/${encodeURIComponent(objectiveId)}`,{
-                headers,redirect:"manual",signal:AbortSignal.timeout(10000)
+                headers,redirect:"manual",signal:AbortSignal.timeout(12000)
               });
-              if(!res.ok){
-                console.log(`POLL_HTTP_STATUS=${res.status}`);
-              }else{
+              if(res.ok){
                 last=await res.json();
                 const p=last?.rootProjection??null;
                 if(i%10===0 || ["succeeded","failed","cancelled"].includes(String(last?.status))i{
@@ -81,12 +83,15 @@ jobs:
                     rootStatus:p?.rootStatus??null,
                     currentPhase:p?.currentPhase??null,
                     contexts:Array.isArray(p?.participantOperatingContexts)?p.participantOperatingContexts.length:0,
+                    staleContexts:Array.isArray(p?.staleOperatingContextWorkers)?p.staleOperatingContextWorkers.length:0,
                     workers:Array.isArray(p?.workers)?p.workers.length:0,
                     acceptedEvidence:Array.isArray(p?.acceptedEvidence)?p.acceptedEvidence.length:0,
-                    finalResultPresent:typeof p?.finalResult==="string"&&p.finalResult.trim().length>0,
+                    finalResultPresent:typeof p?.finalResult==="string"&&p.finalResult.trim().length>0
                   }));
                 }
-                if(["succeeded","failed","cancelled"].includes(String(last?.status))) break;
+                if(["succeded","failed","cancelled"].includes(String(last?.status))) break;
+              }else{
+                console.log(`POLL_HTTP_STATUS=${res.status}`);
               }
             }catch(e){
               console.log("POLL_TRANSIENT_ERROR="+String(e?.name??"error").replace(/[^A-Za-z0-9_.:-]/g,"_"));
@@ -94,12 +99,16 @@ jobs:
             await sleep(2000);
           }
           if(!last) throw new Error("OBJECTIVE_STATUS_UNAVAILABLE");
-          const p=last.rootProjection??null;
+          const p=last?.rootProjection??null;
+          const x=last?.result?.body?.result??{};
+          const c=String(x?.authoritativeContent??"");
           console.log("FINAL_STATE="+JSON.stringify({
-            objectiveId:last.objectiveId??objectiveId,
-            status:last.status??null,
-            error:last.error??null,
+            objectiveId:last?.objectiveId??objectiveId,
+            status:last?.status??null,
+            error:last?.error??null,
             rootProjectionPresent:!!p,
+            rootStatus:p?.rootStatus??null,
+            currentPhase:p?.currentPhase??null,
             contextVersion:p?.operatingContextVersion??null,
             contextDigest:p?.operatingContextDigest??null,
             contexts:Array.isArray(p?.participantOperatingContexts)?p.participantOperatingContexts.length:0,
@@ -108,7 +117,15 @@ jobs:
             subOrchestrators:Array.isArray(p?.subOrchestrators)?p.subOrchestrators.length:0,
             acceptedEvidence:Array.isArray(p?.acceptedEvidence)?p.acceptedEvidence.length:0,
             blockers:Array.isArray(p?.blockers)?p.blockers.length:0,
+            proofStatus:p?.proofStatus??null,
+            waitingAuthority:p?.waitingAuthority??null,
             finalResultPresent:typeof p?.finalResult==="string"&&p.finalResult.trim().length>0,
+            contractVersion:x?.contractVersion??null,
+            missionControlStatus:x?.status??null,
+            contextNotAuthority:x?.operatingContextIsNotAuthority??null,
+            workerEffectsCanonical:x?.workerEffectsCanonical??null,
+            sourceRepoKnown:c.includes("riggeyb/sentient"),
+            operatorBridgeKnown:c.includes("riggeyb/sentient-fly-runner")
           }));
           console.log("EXTERNAL_POLL_USED=true");
           console.log("NEW_OBJECTIVE_CREATED=false");
