@@ -1,0 +1,90 @@
+name: Director Exact Lock Receipt
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Generate exact current Director lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/director-lock"
+          rm -rf "$work"
+          mkdir -p "$work"
+          cat > "$work/package.json" <<'JSON'
+          {
+            "name": "director-studio-customer-portal",
+            "version": "0.1.0",
+            "private": true,
+            "type": "module",
+            "dependencies": {
+              "@prisma/client": "6.19.3",
+              "next": "16.3.8",
+              "react": "19.3.1",
+              "react-dom": "19.3.1",
+              "react-server-dom-webpack": "19.3.1",
+              "stripe": "17.7.0",
+              "three": "0.186.0",
+              "vinext": "1.3.1",
+              "zod": "3.25.76"
+            },
+            "devDependencies": {
+              "@cloudflare/vite-plugin": "1.65.0",
+              "@types/node": "^22.0.0",
+              "@types/react": "^19.0.0",
+              "@types/react-dom": "^19.0.0",
+              "@types/three": "0.186.0",
+              "@vitejs/plugin-react": "6.1.2",
+              "@vitejs/plugin-rsc": "0.5.38",
+              "esbuild": "^0.28.2",
+              "prisma": "6.19.3",
+              "tsx": "^4.23.13",
+              "typescript": "5.9.3",
+              "vite": "8.3.5",
+              "wrangler": "4.153.0"
+            },
+            "overrides": {
+              "@prisma/config": {
+                "deepmerge-ts": "8.0.0"
+              }
+            },
+            "engines": {
+              "node": ">=22 <25"
+            }
+          }
+          JSON
+          cd "$work"
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          ! grep -Fq '@clerk/nextjs' package-lock.json
+          grep -Fq '"rinext": "1.3.1"' package-lock.json
+          sha256sum package-lock.json | tee package-lock.sha256
+          mkdir -p "$GITHUB_WORKSPACE/receipts/director-studio/current-lock"
+          cp package-lock.json "$GITHUB_WORKSPACE/receipts/director-studio/current-lock/package-lock.json"
+          cp package-lock.sha256 "$GITHUB_WORKSPACE/receipts/director-studio/current-lock/package-lock.sha256"
+          gzip -c package-lock.json | base64 -w0 > "$RUNNER_TEMP/lock.gz.b64"
+          rm -f "$GITHUB_WORKSPACE"/receipts/director-studio/current-lock/part*
+          split -b 10000 -d -a 02 "$RUNNER_TEMP/lock.gz.b64" "$GITHUB_WORKSPACE/receipts/director-studio/current-lock/part"
+      - name: Commit non-secret lock receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-director-lock-proof"
+          git config user.email "sentient-director-lock-proof@users.noreply.github.com"
+          git add -f receipts/director-studio/current-lock
+          git diff --cached --quiet && exit 0
+          git commit -m "proof: regenerate exact Clerk-free Director lock"
+          git push origin HEAD:main
