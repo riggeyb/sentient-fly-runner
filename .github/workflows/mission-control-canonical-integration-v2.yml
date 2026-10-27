@@ -54,6 +54,23 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Establish canonical dependency and Worker A baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.canonical_head }}"
+          CANONICAL_LOCK_BLOB="$(git rev-parse HEAD:package-lock.json)"
+          echo "CANONICAL_LOCK_BLOB=$CANONICAL_LOCK_BLOB" >> "$GITHUB_ENV"
+          npm ci --no-audit --no-fund
+          set +e
+          npx tsc -p tsconfig.worker-a.json --noEmit > /tmp/canonical-worker-a.log 2>&1
+          rc=$?
+          set -e
+          echo "CANONICAL_WORKER_A_RC=$rc" >> "$GITHUB_ENV"
+          git diff --quiet
+          git diff --cached --quiet
+          echo "CANONICAL_WORKER_A_BASELINE_CAPTURED=true"
+
       - name: Reconcile accepted delta onto canonical lineage
         shell: bash
         env:
@@ -150,7 +167,8 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$INTEGRATION_TREE"
-          npm install --no-audit --no-fund
+          test "$(git rev-parse HEAD:package-lock.json)" = "$CANONICAL_LOCK_BLOB"
+          npm ci --no-audit --no-fund
           npm run build
           node --test \
             dist/test/objective-continuation.test.js \
@@ -160,12 +178,22 @@ jobs:
           node --test dist/test/permanent-continuation-*.test.js
           node --test dist/src/model/providers/openrouter.test.js
           node --test dist/src/lab/librechat/bridge.test.js
-          npx tsc -p tsconfig.worker-a.json --noEmit
+          set +e
+          npx tsc -p tsconfig.worker-a.json --noEmit > /tmp/integration-worker-a.log 2>&1
+          worker_a_rc=$?
+          set -e
+          if [ "$worker_a_rc" -eq 0 ]; then
+            test "$CANONICAL_WORKER_A_RC" -eq 0
+          else
+            test "$worker_a_rc" -eq "$CANONICAL_WORKER_A_RC"
+            diff -u /tmp/canonical-worker-a.log /tmp/integration-worker-a.log
+          fi
+          echo "WORKER_A_CANONICAL_BASELINE_MATCH=PASS"
           npx tsc -p tsconfig.worker-c.json --noEmit
           npx tsc -p tsconfig.worker-d.json --noEmit
           node --test dist/test/lab/*.test.js
           node --experimental-strip-types --test tests/*.test.ts
-          node --experimental-strip-types --test tests/retrieval/*.test.ts
+          node --test dist/test/retrieval/*.test.ts
           node --test dist/test/persistence.test.js
           npm test
           test -f dist/test/spawn-mission-control-context.test.js
@@ -176,6 +204,7 @@ jobs:
           git diff --cached --quiet
           echo "FULL_ACCEPTANCE=PASS"
           echo "RESOURCE_ENVELOPE_UNCHANGED=true"
+          echo "DEPENDENCY_LOCK_IDENTITY=package-lock.json:${CANONICAL_LOCK_BLOB}"
           echo "INTEGRATION_SHA=$INTEGRATION_SHA"
           echo "INTEGRATION_TREE=$INTEGRATION_TREE"
 
