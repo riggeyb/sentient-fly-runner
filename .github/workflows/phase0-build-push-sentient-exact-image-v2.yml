@@ -5,58 +5,27 @@ on:
       sha:
         required: true
         type: string
-      tree:
-        required: true
-        type: string
-      parent:
-        required: true
-        type: string
-      skills_sha:
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       SHA: ${{ inputs.sha }}
-      TREE: ${{ inputs.tree }}
-      PARENT: ${{ inputs.parent }}
-      SKILLS: ${{ inputs.skills_sha }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: riggeyb/sentient
-          ref: ${{ inputs.sha }}
-          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Build, smoke, and push exact immutable image
+      - name: Pull and smoke exact runtime image
         shell: bash
         run: |
           set -euo pipefail
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$TREE" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$PARENT" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$SKILLS" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$SHA"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$TREE"
-          test "$(git rev-parse HEAD^)" = "$PARENT"
-          git bundle create sentient-source.bundle HEAD
-          flyctl deploy -a sentient-validation-runner -c fly.toml --remote-only --build-only --push --image-label "phase0-$SHA" --build-arg "SENTIENT_RUNTIME_SHA=$SHA" --build-arg "SENTIENT_RUNTIME_TREE=$TREE" --build-arg "SENTIENT_SKILLS_SHA=$SKILLS" --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=$PARENT"
-          rm -f sentient-source.bundle
           flyctl auth docker
           IMAGE="registry.fly.io/sentient-validation-runner:phase0-$SHA"
           docker pull "$IMAGE"
-          docker run --rm --entrypoint node "$IMAGE" --input-type=module -e 'await import("sentient-orchestrator/mission-control-context"); console.log("RUNTIME_MISSION_CONTROL_IMPORT=PASS")'
-          echo "EXACT_IMAGE_BUILD_PUSH=PASS"
-          echo "RUNTIME_MISSION_CONTROL_IMPORT=PASS"
-          echo "GOVERNOR_EXPECTED_IMAGE_TAG=phase0-$SHA"
-          echo "SKILLS_SHA=$SKILLS"
+          docker run --rm --entrypoint sh "$IMAGE" -lc 'set -eu; echo "NODE_MODULE_LINK=$(readlink node_modules/sentient-orchestrator || true)"; test -e vendor/sentient-orchestrator/package.json; test -e node_modules/sentient-orchestrator/package.json; node --input-type=module -e '\''await import("sentient-orchestrator/mission-control-context"); console.log("RUNTIME_MISSION_CONTROL_IMPORT=PASS")'\'''
+          echo "REGISTRY_IMAGE_SMOKE=PASS"
           echo "SECRET_VALUES_EXPOSED=false"
