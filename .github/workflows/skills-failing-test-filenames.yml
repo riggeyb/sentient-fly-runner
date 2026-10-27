@@ -1,0 +1,72 @@
+name: Skills Failing Test Filenames
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence and isolate failing filenames
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          cd sentient-orchestrator
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock >/dev/null
+          npm run migrate >/dev/null
+          failed=0
+          shopt -s globstar nullglob
+          for file in tests/**/*.test.ts; do
+            set +e
+            out="$(npx tsx --test "$file" 2>&1)"
+            rc=$?
+            set -e
+            if [ "$rc" -ne 0 ]; then
+              failed=$((failed+1))
+              echo "FAILED_TEST_FILE=$file EXIT_CODE=$rc"
+              printf '%s\n' "$out" | grep -E '(not ok|AssertionError|Error:)' | tail -n 20 || true
+            fi
+          done
+          echo "FAILED_TEST_FILES=$failed"
+          rm -rf node_modules
+          echo "TRACKED_SOURCE_MUTATION=$(git diff --quiet && git diff --cached --quiet && echo false || echo true)"
+          exit "$failed"
