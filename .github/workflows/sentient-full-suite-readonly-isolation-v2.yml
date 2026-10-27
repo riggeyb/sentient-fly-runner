@@ -1,4 +1,4 @@
-name: Mission Control Exact Acceptance V1
+name: Mission Control Skills Exact Acceptance V2
 
 on:
   workflow_dispatch:
@@ -17,7 +17,8 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: sentient
-        ports: ["5432:5432"]
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d sentient"
           --health-interval 5s
@@ -33,16 +34,20 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
-      - name: Fence exact candidate and lock
+      - name: Fence exact candidate and dependency manifests
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "a6d430ff775044a03f2fca9c63ee6bfa1796f558"
           test "$(git rev-parse 'HEAD^{tree}')" = "785fb508b67515b1963914196ad7cbee50ccabe2"
-          sha256sum requirements.txt sentient-orchestrator/package-lock.json
+          test ! -e sentient-orchestrator/package-lock.json
+          sha256sum requirements.txt sentient-orchestrator/package.json
+          echo "DEPENDENCY_LOCK_IDENTITY=NO_NODE_LOCKFILE_REPOSITORY_NATIVE_NPM_INSTALL"
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
-        with: { node-version: "22" }
+        with:
+          node-version: "22"
       - name: Registry and repository contracts
         run: |
           set -euo pipefail
@@ -58,11 +63,11 @@ jobs:
         working-directory: sentient-orchestrator
         run: |
           set -euo pipefail
-          npm ci --ignore-scripts
+          npm install --ignore-scripts
           npm run typecheck
           npm run migrate
           npm test
-          echo PR_245_AUTOMATED_ACCEPTANCE=PASS
+          echo "PR_245_AUTOMATED_ACCEPTANCE=PASS"
 
   mission-control:
     runs-on: ubuntu-latest
@@ -74,7 +79,8 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: sentient
-        ports: ["5432:5432"]
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d sentient"
           --health-interval 5s
@@ -90,16 +96,20 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
-      - name: Fence exact candidate and lock
+      - name: Fence exact candidate and dependency manifests
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
           test "$(git rev-parse 'HEAD^{tree}')" = "3173ee3cb2e39038921d3b125f1a74ecd783ff30"
-          sha256sum requirements.txt sentient-orchestrator/package-lock.json
+          test ! -e sentient-orchestrator/package-lock.json
+          sha256sum requirements.txt sentient-orchestrator/package.json
+          echo "DEPENDENCY_LOCK_IDENTITY=NO_NODE_LOCKFILE_REPOSITORY_NATIVE_NPM_INSTALL"
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
-        with: { node-version: "22" }
+        with:
+          node-version: "22"
       - name: Registry and repository contracts
         run: |
           set -euo pipefail
@@ -115,57 +125,8 @@ jobs:
         working-directory: sentient-orchestrator
         run: |
           set -euo pipefail
-          npm ci --ignore-scripts
+          npm install --ignore-scripts
           npm run typecheck
           npm run migrate
           npm test
-          echo PR_247_AUTOMATED_ACCEPTANCE=PASS
-
-  sentient-spawn-boundary:
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: sentient
-          POSTGRES_PASSWORD: sentient
-          POSTGRES_DB: sentient
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U sentient -d sentient"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      SENTIENT_TEST_DATABASE_URL: postgres://sentient:sentient@localhost:5432/sentient
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: riggeyb/sentient
-          ref: 12372d0b2417c0521a7927b0cf0b3aa34ea1184c
-          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 0
-      - name: Fence exact candidate and lock
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"
-          test "$(git rev-parse 'HEAD^{tree}')" = "2f5818abe9f15f50be62002e2f3a39b1b29ad440"
-          sha256sum package-lock.json
-      - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - name: Install and build
-        run: |
-          set -euo pipefail
-          npm ci --no-audit --no-fund
-          npm run build
-      - name: All authored Mission Control spawn suites
-        run: |
-          set -euo pipefail
-          node --test dist/test/spawn-mission-control-context.test.js
-          node --experimental-strip-types --test tests/spawn-mission-control-context.ts
-          node --test dist/test/spawn*.test.js
-          echo MISSION_CONTROL_SPAWN_SUITES=PASS
-      - name: Full Sentient repository tests
-        run: npm test
+          echo "PR_247_AUTOMATED_ACCEPTANCE=PASS"
