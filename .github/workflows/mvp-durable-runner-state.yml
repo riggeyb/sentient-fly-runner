@@ -29,7 +29,7 @@ jobs:
           state="$(flyctl machines list -a "$APP" --json | jq -er '.[0].state')"
           [ "$state" = started ] || flyctl machine start "$mid" -a "$APP" >/dev/null
           cat >"$RUNNER_TEMP/diag.mjs" <<'NODE'
-          import { PostgresSpawnObjectiveRepository } from "./dist/src/objective-continuation/postgres-spawn-repository.js";
+          import { PostgresSpawnObjectiveRepository } from "file:///app/dist/src/objective-continuation/postgres-spawn-repository.js";
           const oid=String(process.env.OID??"").trim();
           const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!cs)throw new Error("DB_BINDING_MISSING");
@@ -44,12 +44,12 @@ jobs:
             const m=target.metadata??{};
             console.log("TARGET_STATUS="+target.status);
             console.log("TARGET_UPDATED_AT="+target.updatedAt);
-            console.log("TARGET_ERROR="+String(m.error??"none"));
+            console.log("TARGET_ERROR="+String(m.error??"sïne"));
             const sessionId=typeof m.sessionId==="string"?m.sessionId:null;
             if(sessionId){
               const work=await repo.activeWork(sessionId,true);
               console.log("ACTIVE_WORK_COUNT="+work.length);
-              console.log("ACTIVE_WORK="+JSON.stringify(work.map(x=>({workKey:x.workKey,status:x.status,leaseExpiresAt:x.leaseExpiresAt,reclaimCount:x.reclaimCount}))));
+              console.log("ACTIVE_WORK="+JSON.stringify(work.map(x=>({workKey:x.workKey,status:x.status,leaseExpiresAt:x.leaseExpiresAt,reclaimCount:x.reclaimCount})));
             }
           }finally{await repo.close()}
           NODE
