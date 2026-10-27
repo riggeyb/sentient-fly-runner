@@ -1,4 +1,4 @@
-name: Skills Exact Candidate Acceptance V2
+name: Skills Exact Candidate Acceptance V3
 on:
   workflow_dispatch:
     inputs:
@@ -47,14 +47,14 @@ jobs:
           failed=0
           runx() {
             label="$1"; shift
-            "$@" 2>&1 | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g' | tee "/tmp/exact/$label.log"
-            rc=${PIPESTATUS[0]}
+            "$@" >"/tmp/exact/$label.log" 2>&1
+            rc=$?
             echo "${label}_EXIT=$rc" | tee -a "$R"
             [ "$rc" -eq 0 ] || failed=1
           }
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
-          echo "EXACT_SKILLS_ACCEPTANCE_RECEIPT_V2" | tee -a "$R"
+          echo "EXACT_SKILLS_ACCEPTANCE_RECEIPT_V3" | tee -a "$R"
           echo "SOURCE_SHA=$EXPECTED_SHA" | tee -a "$R"
           echo "SOURCE_TREE=$EXPECTED_TREE" | tee -a "$R"
           echo "NODE_VERSION=$(node --version)" | tee -a "$R"
@@ -85,6 +85,19 @@ jobs:
           echo "UNTRACKED_GENERATED_FILES=$(git status --porcelain | grep '^??' | wc -l | tr -d ' ')" | tee -a "$R"
           echo "OVERALL_EXIT=$failed" | tee -a "$R"
           exit "$failed"
+      - name: Compact failure summary
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          echo "=== RECEIPT ==="
+          cat /tmp/receipt.txt 2>/dev/null || true
+          grep '_EXIT=[1-9]' /tmp/receipt.txt 2>/dev/null | while IFS= read -r statusline; do
+            label="${statusline%%_EXIT=*}"
+            f="/tmp/exact/${label}.log"
+            echo "=== ${label} FAILURE TAIL ==="
+            tail -n 120 "$f" 2>/dev/null | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g'
+          done
       - if: always()
         uses: actions/upload-artifact@v4
         with:
