@@ -33,7 +33,7 @@ jobs:
       EXPECTED_SHA: ${{ inputs.sha }}
       EXPECTED_TREE: ${{ inputs.tree }}
     steps:
-      - uses: actions/checkout4v4
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: ${{ inputs.sha }}
