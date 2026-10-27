@@ -1,0 +1,87 @@
+name: MVP Recovery Fairness V2 Repair
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient/mvp-recovery-fairness-v2
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply bounded scheduler repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "ae939533aa2daac5ce488a47bb0eb5c61d45d437"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("src/fly/self-execution.ts")
+          s=p.read_text()
+          old='''  public async resumeUnfinished(): Promise<number> {
+            const tasks = await this.#state.list("task");
+            let count = 0;
+            for (const task of tasks) {
+              if (task.kind !== "task" || !ACTIVE.has(task.status)) continue;
+              if (parseRunnerMetadata(task) === null) continue;
+              count += 1;
+              this.#scheduleInheritedRestart(task.id);
+            }
+            return count;
+          }'''.replace("        ","")
+          new='''  public async resumeUnfinished(): Promise<number> {
+            const tasks = (await this.#state.list("task"))
+              .filter((task) =>
+                task.kind === "task"
+                && ACTIVE.has(task.status)
+                && parseRunnerMetadata(task) !== null)
+              .sort((left, right) =>
+                right.updatedAt.localeCompare(left.updatedAt)
+                || left.id.localeCompare(right.id));
+
+            for (const task of tasks) this.#scheduleInheritedRestart(task.id);
+            return tasks.length;
+          }'''.replace("        ","")
+          if s.count(old)!=1: raise SystemExit(f"resume_matches={s.count(old)}")
+          s=s.replace(old,new,1)
+          old2="        void this.#schedule(objectiveId, true);"
+          new2="        await this.#schedule(objectiveId, true);"
+          if s.count(old2)!=1: raise SystemExit(f"schedule_matches={s.count(old2)}")
+          p.write_text(s.replace(old2,new2,1))
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "src/fly/self-execution.ts"
+      - name: Build and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/mvp-recovery-fairness-v2.test.js
+          node --test dist/test/final-cert-restart-backlog-serialization.test.js
+          node --test dist/test/phase5-fly-restart-lease-retry.test.js
+          npm test
+      - name: Commit isolated repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "ae939533aa2daac5ce488a47bb0eb5c61d45d437"
+          git config user.name "sentient-mvp-activation"
+          git config user.email "sentient-mvp-activation@users.noreply.github.com"
+          git add src/fly/self-execution.ts
+          git commit -m "mvp: make restart recovery fair and bounded"
+          git push origin HEAD:sentient/mvp-recovery-fairness-v2
+          echo "REPAIRED_SHA=$(git rev-parse HEAD)"
+          echo "REPAIRED_TREE=$(git rev-parse 'HEAD^{tree}')"
