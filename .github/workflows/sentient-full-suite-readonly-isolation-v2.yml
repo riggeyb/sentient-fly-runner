@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: 90d45ee12dd9990df2d11b412afcd7ac4ebe3edc
+          ref: 12372d0b2417c0521a7927b0cf0b3aa34ea1184c
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
@@ -23,11 +23,11 @@ jobs:
       - name: Fence and build
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "90d45ee12dd9990df2d11b412afcd7ac4ebe3edc"
-          test "$(git rev-parse 'HEAD^{tree}')" = "56557e957d320aaa065c20f626c33c819c6f9409"
+          test "$(git rev-parse HEAD)" = "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"
+          test "$(git rev-parse 'HEAD^{tree}')" = "2f5818abe9f15f50be62002e2f3a39b1b29ad440"
           npm install --no-package-lock --no-audit --no-fund
           echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_BY_REPOSITORY_DESIGN"
-          npm run build
+          npm run build 2>&1 | tee "$RUNNER_TEMP/sentient-build.log"
           test -z "$(git status --porcelain)"
           echo "SENTIENT_TYPECHECK=PASS"
           echo "SENTIENT_BUILD=PASS"
@@ -47,11 +47,11 @@ jobs:
             else
               failed=$((failed+1))
               echo "FAILED_TEST_FILE=$file"
-              tail -n 120 "$RUNNER_TEMP/sentient-test-logs/$name.log"
+              tail -n 160 "$RUNNER_TEMP/sentient-test-logs/$name.log"
             fi
           done <<< "$files"
           total=$((passed+failed))
-          printf '{"sourceSha":"%s","sourceTree":"%s","totalFiles":%d,"passedFiles":%d,"failedFiles":%d}\n' "90d45ee12dd9990df2d11b412afcd7ac4ebe3edc" "56557e957d320aaa065c20f626c33c819c6f9409" "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
+          printf '{"sourceSha":"%s","sourceTree":"%s","totalFiles":%d,"passedFiles":%d,"failedFiles":%d}\n'             "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"             "2f5818abe9f15f50be62002e2f3a39b1b29ad440"             "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
           echo "TOTAL_TEST_FILES=$total"
           echo "PASSED_TEST_FILES=$passed"
           echo "FAILED_TEST_FILES=$failed"
@@ -68,8 +68,8 @@ jobs:
       - name: Verify read-only source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "90d45ee12dd9990df2d11b412afcd7ac4ebe3edc"
-          test "$(git rev-parse 'HEAD^{tree}')" = "56557e957d320aaa065c20f626c33c819c6f9409"
+          test "$(git rev-parse HEAD)" = "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"
+          test "$(git rev-parse 'HEAD^{tree}')" = "2f5818abe9f15f50be62002e2f3a39b1b29ad440"
           test -z "$(git status --porcelain)"
           echo "SOURCE_MUTATION=false"
           echo "DEPLOYMENT=false"
@@ -80,6 +80,7 @@ jobs:
         with:
           name: sentient-mission-control-acceptance
           path: |
+            ${{ runner.temp }}/sentient-build.log
             ${{ runner.temp }}/sentient-full-suite-report.json
             ${{ runner.temp }}/sentient-test-logs
           if-no-files-found: warn
