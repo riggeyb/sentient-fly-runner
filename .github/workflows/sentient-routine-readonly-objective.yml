@@ -1,4 +1,4 @@
-name: Mission Control Live Integration Stage V1
+name: Mission Control Integration Repair V1
 
 "on":
   workflow_dispatch:
@@ -12,12 +12,11 @@ permissions:
   contents: read
 
 jobs:
-  stage:
+  repair:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout integration branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: sentient/mission-control-live-integration-v1
@@ -25,133 +24,122 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Fence certified integration base
+      - name: Fence integration base
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "3ce2b2e2104a1000a7a82b4cb0e465bdc1789282"
-          test "$(git rev-parse 'HEAD^{tree}')" = "b40d7c0d8334d5f71bc6f8e545c9e428d12cdbd2"
+          test "$(git rev-parse HEAD)" = "9daf5b2f9802d139bb146c3e7431f5bdbdabc170"
 
-      - name: Three-way apply accepted PR 307 delta
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          base="7303625a229eac336b8c27bd66e8636bd1c86432"
-          head="75ba9c282b73df74e2f2fa50289d17ecd0597687"
-          git fetch origin "$base" "$head"
-          mapfile -t changed < <(git diff --name-only "$base" "$head")
-          printf '%s\n' "${changed[@]}" > /tmp/pr307-files.txt
-          cat >/tmp/expected-files.txt <<'EOF'
-          src/local-runtime/ipc.ts
-          src/spawn/context.ts
-          src/spawn/execution-contracts.ts
-          src/spawn/index.ts
-          src/spawn/operating-context.ts
-          src/state/sanitize.ts
-          test/spawn-mission-control-context.test.ts
-          tests/spawn-mission-control-context.test.ts
-          EOF
-          sort -o /tmp/pr307-files.txt /tmp/pr307-files.txt
-          sort -o /tmp/expected-files.txt /tmp/expected-files.txt
-          diff -u /tmp/expected-files.txt /tmp/pr307-files.txt
-          git diff --binary "$base" "$head" -- $(cat /tmp/expected-files.txt) > /tmp/pr307.patch
-          git apply --3way /tmp/pr307.patch
-          if git ls-files -u | grep -q .; then
-            echo "PR307_THREE_WAY_CONFLICT=true"
-            git status --short
-            exit 1
-          fi
-          echo "PR307_THREE_WAY_APPLY=PASS"
-
-      - name: Checkout exact accepted Skills Mission Control source
-        uses: actions/checkout@v4
-        with:
-          repository: riggeyb/skills
-          ref: b3df9b32b47370a7140d6fe814eeba97564663ab
-          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          path: .accepted-skills
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Vendor exact accepted orchestrator source and migrations
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git -C .accepted-skills rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
-          rm -rf vendor/sentient-orchestrator
-          mkdir -p vendor/sentient-orchestrator
-          cp -a .accepted-skills/sentient-orchestrator/src vendor/sentient-orchestrator/
-          cp -a .accepted-skills/sentient-orchestrator/migrations vendor/sentient-orchestrator/
-          cp .accepted-skills/sentient-orchestrator/package.json vendor/sentient-orchestrator/package.json
-          cat > vendor/sentient-orchestrator/SOURCE.json <<'EOF'
-          {
-            "repository": "riggeyb/skills",
-            "sha": "b3df9b32b47370a7140d6fe814eeba97564663ab",
-            "tree": "3173ee3cb2e39038921d3b125f1a74ecd783ff30",
-            "missionControlPr": 247,
-            "coordinationDependencyPr": 245,
-            "operatingContextVersion": "SENTIENT_OPERATING_CONTEXT_V1",
-            "operatingContextDigest": "sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209"
-          }
-          EOF
-          rm -rf .accepted-skills
-          echo "MISSION_CONTROL_SOURCE_PIN=PASS"
-
-      - name: Ensure Docker build includes exact orchestrator source
+      - name: Present canonical operating context to child model
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path("Dockerfile")
-          s=p.read_text()
-          needle="COPY src ./src\n"
-          if "COPY vendor ./vendor\n" not in s:
-              if needle not in s:
-                  raise SystemExit("Dockerfile COPY src anchor missing")
-              s=s.replace(needle, needle+"COPY vendor ./vendor\n", 1)
-              p.write_text(s)
+          p = Path("src/spawn/backends/huggingface.ts")
+          s = p.read_text()
+          old = '''function workerPrompt(taskPackage: ChildTaskPackageV1): string {
+            const context = taskPackage.context.artifacts
+              .map((artifact) => `${artifact.id}\n${artifact.content}`)
+              .join("\n\n")
+              .slice(0, 8_000);
+            const objective = taskPackage.objective.slice(0, 12_000);
+            return context
+              ? `Objective:\n${objective}\n\nBounded context:\n${context}`
+              : `Objective:\n${objective}`;
+          }'''
+          new = '''export function workerPrompt(taskPackage: ChildTaskPackageV1): string {
+            const operating = taskPackage.operatingContext;
+            const operatingContext = [
+              "Canonical operating context (structured, non-authoritative):",
+              `version=${operating.version}`,
+              `provenance=${operating.provenance}`,
+              `digest=${taskPackage.operatingContextDigest}`,
+              `authoritativeSourceRepo=${operating.authoritativeSourceRepo}`,
+              `normalSentientOperatorBridge=${operating.normalSentientOperatorBridge}`,
+              `optionalOperatorMcp=${operating.optionalOperatorMcp}`,
+              `postgresIsDurableSystemOfRecord=${String(operating.postgresIsDurableSystemOfRecord)}`,
+              `postgresDoesNotGrantAuthority=${String(operating.postgresDoesNotGrantAuthority)}`,
+              `operatingContextIsNotAuthority=${String(operating.operatingContextIsNotAuthority)}`,
+              `orchestratorMayBypassGovernor=${String(operating.orchestratorMayBypassGovernor)}`,
+              `orchestratorMaySelfEscalate=${String(operating.orchestratorMaySelfEscalate)}`,
+            ].join("\n");
+            const context = taskPackage.context.artifacts
+              .map((artifact) => `${artifact.id}\n${artifact.content}`)
+              .join("\n\n")
+              .slice(0, 8_000);
+            const objective = taskPackage.objective.slice(0, 12_000);
+            return [
+              `Objective:\n${objective}`,
+              operatingContext,
+              ...(context ? [`Bounded context:\n${context}`] : []),
+            ].join("\n\n");
+          }'''
+          if new in s:
+              print("OPERATING_CONTEXT_PROMPT_ALREADY_PRESENT=true")
+          elif old in s:
+              p.write_text(s.replace(old, new, 1))
+              print("OPERATING_CONTEXT_PROMPT_REPAIRED=true")
+          else:
+              raise SystemExit("workerPrompt shape changed; fail closed")
           PY
+
+      - name: Add prompt regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > tests/spawn-operating-context-prompt.test.ts <<'EOF'
+          import assert from "node:assert/strict";
+          import test from "node:test";
+          import { workerPrompt } from "../src/spawn/backends/huggingface.js";
+          import { SENTIENT_OPERATING_CONTEXT_V1, sentientOperatingContextDigestV1 } from "../src/spawn/operating-context.js";
+
+          test("spawn child prompt receives canonical topology without mission repetition", async () => {
+            const mission = "Inspect a bounded area and return evidence.";
+            assert.equal(mission.includes("riggeyb/sentient-fly-runner"), false);
+            const digest = await sentientOperatingContextDigestV1(SENTIENT_OPERATING_CONTEXT_V1);
+            const prompt = workerPrompt({
+              objective: mission,
+              operatingContext: SENTIENT_OPERATING_CONTEXT_V1,
+              operatingContextDigest: digest,
+              context: { artifacts: [], contextDigest: "sha256:test" },
+            } as never);
+            assert.match(prompt, /authoritativeSourceRepo=riggeyb\/sentient/);
+            assert.match(prompt, /normalSentientOperatorBridge=riggeyb\/sentient-fly-runner/);
+            assert.match(prompt, /optionalOperatorMcp=riggeyb\/sentient-ops-mcp/);
+            assert.match(prompt, new RegExp(`digest=${digest}`));
+            assert.match(prompt, /operatingContextIsNotAuthority=true/);
+            assert.match(prompt, /orchestratorMayBypassGovernor=false/);
+            assert.match(prompt, /orchestratorMaySelfEscalate=false/);
+          });
+          EOF
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Strict build
-        run: npm run build
-
-      - name: Mission Control spawn regressions
+      - name: Validate repair
         shell: bash
         run: |
           set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --experimental-strip-types --test tests/spawn-operating-context-prompt.test.ts
           node --test dist/test/spawn-mission-control-context.test.js
           node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
-          node --test dist/test/spawn*.test.js
+          npm test
 
-      - name: Full existing Sentient test suite
-        run: npm test
-
-      - name: Commit staged accepted inputs
+      - name: Commit repair
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "sentient-mission-control-integration"
           git config user.email "sentient-mission-control-integration@users.noreply.github.com"
-          git add src test tests vendor Dockerfile
-          if git diff --cached --quiet; then
-            echo "INTEGRATION_STAGE_CHANGED=false"
-          else
-            git commit -m "mission-control: stage accepted live integration inputs"
+          git add src/spawn/backends/huggingface.ts tests/spawn-operating-context-prompt.test.ts
+          if ! git diff --cached --quiet; then
+            git commit -m "mission-control: present operating context to live child"
             git push origin HEAD:sentient/mission-control-live-integration-v1
-            echo "INTEGRATION_STAGE_CHANGED=true"
           fi
-          echo "INTEGRATION_STAGE_SHA=$(git rev-parse HEAD)"
-          echo "INTEGRATION_STAGE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "INTEGRATION_REPAIR_SHA=$(git rev-parse HEAD)"
+          echo "INTEGRATION_REPAIR_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo "PRODUCTION_DEPLOYMENT=false"
-          echo "NEW_DATABASE_CREATED=false"
-          echo "NEW_ORCHESTRATOR_PLATFORM_CREATED=false"
