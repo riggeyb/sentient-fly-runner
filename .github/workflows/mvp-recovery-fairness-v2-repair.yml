@@ -28,20 +28,11 @@ jobs:
           test "$(git rev-parse HEAD)" = "ae939533aa2daac5ce488a47bb0eb5c61d45d437"
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path("src/fly/self-execution.ts")
           s=p.read_text()
-          old='''  public async resumeUnfinished(): Promise<number> {
-            const tasks = await this.#state.list("task");
-            let count = 0;
-            for (const task of tasks) {
-              if (task.kind !== "task" || !ACTIVE.has(task.status)) continue;
-              if (parseRunnerMetadata(task) === null) continue;
-              count += 1;
-              this.#scheduleInheritedRestart(task.id);
-            }
-            return count;
-          }'''.replace("        ","")
-          new='''  public async resumeUnfinished(): Promise<number> {
+          pattern=r'''  public async resumeUnfinished\(\): Promise<number> \zh¸¨ÿ\n  \}\n\n  #scheduleInheritedRestart'''
+          replacement='''  public async resumeUnfinished(): Promise<number> {
             const tasks = (await this.#state.list("task"))
               .filter((task) =>
                 task.kind === "task"
@@ -53,13 +44,15 @@ jobs:
 
             for (const task of tasks) this.#scheduleInheritedRestart(task.id);
             return tasks.length;
-          }'''.replace("        ","")
-          if s.count(old)!=1: raise SystemExit(f"resume_matches={s.count(old)}")
-          s=s.replace(old,new,1)
-          old2="        void this.#schedule(objectiveId, true);"
-          new2="        await this.#schedule(objectiveId, true);"
-          if s.count(old2)!=1: raise SystemExit(f"schedule_matches={s.count(old2)}")
-          p.write_text(s.replace(old2,new2,1))
+          }
+
+          #scheduleInheritedRestart'''
+          s2,n=re.subn(pattern,replacement,s,count=1,flags=re.S)
+          if n != 1: raise SystemExit(f"resume_matches={n}")
+          old="        void this.#schedule(objectiveId, true);"
+          new="        await this.#schedule(objectiveId, true);"
+          if s2.count(old) != 1: raise SystemExit(f"schedule_matches={s2.count(old)}")
+          p.write_text(s2.replace(old,new,1))
           PY
           git diff --check
           test "$(git diff --name-only)" = "src/fly/self-execution.ts"
