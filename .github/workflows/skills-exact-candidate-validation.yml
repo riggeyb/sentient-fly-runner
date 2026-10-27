@@ -1,0 +1,102 @@
+name: Skills Exact Candidate Validation
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Fence exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          echo "SOURCE_SHA=$EXPECTED_SHA"
+          echo "SOURCE_TREE=$EXPECTED_TREE"
+          echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_SOURCE"
+          echo "PYTHON_REQUIREMENTS_SHA=$(git rev-parse HEAD:requirements.txt)"
+          echo "ORCHESTRATOR_MANIFEST_SHA=$(git rev-parse HEAD:sentient-orchestrator/package.json)"
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: Validate registry structure
+        run: python scripts/validate_registry.py
+      - name: Validate eval definitions
+        run: python scripts/check_evals.py
+      - name: Validate durable objective continuation contract
+        run: PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+      - name: Validate active work disclosure contract
+        run: PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+      - name: Test deterministic repository edit preparation
+        run: python scripts/test_repository_edit.py
+      - name: Test deterministic repository edit request gateway
+        run: python scripts/test_repository_edit_request.py
+      - name: Validate GPT Actions schema compatibility
+        run: python scripts/validate_actions_schema.py
+      - name: Validate Netlify Actions schema compatibility
+        run: python scripts/validate_netlify_actions_schema.py
+      - name: Install Sentient orchestrator dependencies
+        working-directory: sentient-orchestrator
+        run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Typecheck Sentient orchestrator
+        working-directory: sentient-orchestrator
+        run: npm run typecheck
+      - name: Apply Sentient orchestrator migrations
+        working-directory: sentient-orchestrator
+        run: npm run migrate
+      - name: Test Sentient orchestrator
+        working-directory: sentient-orchestrator
+        run: npm test
+      - name: Validate GitHub repositories and entrypoints
+        env:
+          GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: python scripts/validate_registry.py --remote
+      - name: Source mutation guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          echo "SOURCE_MUTATION=false"
+          echo "VALIDATION_RESULT=PASS"
