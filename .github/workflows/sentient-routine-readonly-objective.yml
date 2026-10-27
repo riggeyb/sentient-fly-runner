@@ -1,4 +1,4 @@
-name: Sentient Exact Spawn Acceptance V3
+name: Mission Control Live Integration Stage V1
 
 "on":
   workflow_dispatch:
@@ -8,35 +8,150 @@ name: Sentient Exact Spawn Acceptance V3
       objective_id: {required: true, type: string}
       request: {required: true, type: string}
 
-permissions: {contents: read}
+permissions:
+  contents: read
 
 jobs:
-  sentient-spawn:
+  stage:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: 75ba9c282b73df74e2f2fa50289d17ecd0597687
+          ref: sentient/mission-control-live-integration-v1
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: false
           fetch-depth: 0
-      - name: Fence PR 307 successor
+          persist-credentials: true
+
+      - name: Fence certified integration base
+        shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = "75ba9c282b73df74e2f2fa50289d17ecd0597687"
-          test "$(git rev-parse 'HEAD^{tree}')" = "f4cebc41c4775b09ce5f0279b5cb12d4cad52a01"
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "3ce2b2e2104a1000a7a82b4cb0e465bdc1789282"
+          test "$(git rev-parse 'HEAD^{tree}')" = "b40d7c0d8334d5f71bc6f8e545c9e428d12cdbd2"
+
+      - name: Three-way apply accepted PR 307 delta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          base="7303625a229eac336b8c27bd66e8636bd1c86432"
+          head="75ba9c282b73df74e2f2fa50289d17ecd0597687"
+          git fetch origin "$base" "$head"
+          mapfile -t changed < <(git diff --name-only "$base" "$head")
+          printf '%s\n' "${changed[@]}" > /tmp/pr307-files.txt
+          cat >/tmp/expected-files.txt <<'EOF'
+          src/local-runtime/ipc.ts
+          src/spawn/context.ts
+          src/spawn/execution-contracts.ts
+          src/spawn/index.ts
+          src/spawn/operating-context.ts
+          src/state/sanitize.ts
+          test/spawn-mission-control-context.test.ts
+          tests/spawn-mission-control-context.test.ts
+          EOF
+          sort -o /tmp/pr307-files.txt /tmp/pr307-files.txt
+          sort -o /tmp/expected-files.txt /tmp/expected-files.txt
+          diff -u /tmp/expected-files.txt /tmp/pr307-files.txt
+          git diff --binary "$base" "$head" -- $(cat /tmp/expected-files.txt) > /tmp/pr307.patch
+          git apply --3way /tmp/pr307.patch
+          if git ls-files -u | grep -q .; then
+            echo "PR307_THREE_WAY_CONFLICT=true"
+            git status --short
+            exit 1
+          fi
+          echo "PR307_THREE_WAY_APPLY=PASS"
+
+      - name: Checkout exact accepted Skills Mission Control source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: b3df9b32b47370a7140d6fe814eeba97564663ab
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: .accepted-skills
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Vendor exact accepted orchestrator source and migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .accepted-skills rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
+          rm -rf vendor/sentient-orchestrator
+          mkdir -p vendor/sentient-orchestrator
+          cp -a .accepted-skills/sentient-orchestrator/src vendor/sentient-orchestrator/
+          cp -a .accepted-skills/sentient-orchestrator/migrations vendor/sentient-orchestrator/
+          cp .accepted-skills/sentient-orchestrator/package.json vendor/sentient-orchestrator/package.json
+          cat > vendor/sentient-orchestrator/SOURCE.json <<'EOF'
+          {
+            "repository": "riggeyb/skills",
+            "sha": "b3df9b32b47370a7140d6fe814eeba97564663ab",
+            "tree": "3173ee3cb2e39038921d3b125f1a74ecd783ff30",
+            "missionControlPr": 247,
+            "coordinationDependencyPr": 245,
+            "operatingContextVersion": "SENTIENT_OPERATING_CONTEXT_V1",
+            "operatingContextDigest": "sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209"
+          }
+          EOF
+          rm -rf .accepted-skills
+          echo "MISSION_CONTROL_SOURCE_PIN=PASS"
+
+      - name: Ensure Docker build includes exact orchestrator source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("Dockerfile")
+          s=p.read_text()
+          needle="COPY src ./src\n"
+          if "COPY vendor ./vendor\n" not in s:
+              if needle not in s:
+                  raise SystemExit("Dockerfile COPY src anchor missing")
+              s=s.replace(needle, needle+"COPY vendor ./vendor\n", 1)
+              p.write_text(s)
+          PY
+
       - uses: actions/setup-node@v4
-        with: {node-version: "22"}
-      - name: Install Sentient deps
-        run: npm install --no-audit --no-fund
-      - name: Sentient strict build
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Strict build
         run: npm run build
-      - name: Dist Mission Control spawn test
-        run: node --test dist/test/spawn-mission-control-context.test.js
-      - name: Source Mission Control spawn test
-        run: node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
-      - name: All dist spawn tests
-        run: node --test dist/test/spawn*.test.js
-      - name: Full Sentient tests
+
+      - name: Mission Control spawn regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test dist/test/spawn-mission-control-context.test.js
+          node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
+          node --test dist/test/spawn*.test.js
+
+      - name: Full existing Sentient test suite
         run: npm test
+
+      - name: Commit staged accepted inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-mission-control-integration"
+          git config user.email "sentient-mission-control-integration@users.noreply.github.com"
+          git add src test tests vendor Dockerfile
+          if git diff --cached --quiet; then
+            echo "INTEGRATION_STAGE_CHANGED=false"
+          else
+            git commit -m "mission-control: stage accepted live integration inputs"
+            git push origin HEAD:sentient/mission-control-live-integration-v1
+            echo "INTEGRATION_STAGE_CHANGED=true"
+          fi
+          echo "INTEGRATION_STAGE_SHA=$(git rev-parse HEAD)"
+          echo "INTEGRATION_STAGE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "NEW_DATABASE_CREATED=false"
+          echo "NEW_ORCHESTRATOR_PLATFORM_CREATED=false"
