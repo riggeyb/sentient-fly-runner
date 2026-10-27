@@ -9,34 +9,78 @@ on:
         required: true
         type: string
 permissions:
-  contents: write
+  contents: read
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      OBJECTIVE_ID: final-e2e-v3-40557377377-1
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-      - name: Chunk exact Director lock receipt
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Observe existing Mission Control objective without mutation
         shell: bash
         run: |
           set -euo pipefail
-          src="receipts/director-studio/package-lock-3d9b0735.json"
-          test -f "$src"
-          ! grep -Fq '@clerk/nextjs' "$src"
-          dir="receipts/director-studio/package-lock-3d9b0735.b64.parts"
-          rm -rf "$dir"
-          mkdir -p "$dir"
-          base64 -w0 "$src" | split -b 20000 -d -a 3 - "$dir/part-"
-          sha256sum "$src" > receipts/director-studio/package-lock-3d9b0735.sha256
-          wc -c "$src" > receipts/director-studio/package-lock-3d9b0735.bytes
-          git config user.name "sentient-proof-runner"
-          git config user.email "sentient-proof-runner@users.noreply.github.com"
-          git add "$dir" receipts/director-studio/package-lock-3d9b0735.sha256 receipts/director-studio/package-lock-3d9b0735.bytes
-          git commit -m "proof: chunk Director lock receipt"
-          git push origin HEAD:main
-          echo "DIRECTOR_LOCK_CHECKSUM=$(cat receipts/director-studio/package-lock-3d9b0735.sha256)"
-          echo "DIRECTOR_LOCK_CHUNKS=$(find "$dir" -type f | wc -l | tr -d ' ')"
-          echo "CLERK_DEPENDENCY_PRESENT=false"
-          echo "DIRECTOR_LOCK_CHUNK_TRANSPORT=PASS"
+          cat >/tmp/observe.mjs <<'NODE'
+          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const oid = process.env.OBJECTIVE_ID;
+          const db = String(process.env.DATABASE_URL ?? process.env.DIRECT_URL ?? "").trim();
+          if (!db || !oid) throw new Error("OBSERVER_BINDING_MISSING");
+          const repo = new PostgresSpawnObjectiveRepository({ connectionString: db });
+          try {
+            const task = await repo.get("task", oid);
+            const root = await repo.getObjectiveContinuation(oid);
+            const snap = await repo.snapshot();
+            const spawn = await repo.spawnSnapshot();
+            const works = (snap.collaborationActiveWork?.records ?? [])
+              .filter((w) => JSON.stringify(w).includes(oid))
+              .map((w) => ({
+                workId: w.workId,
+                status: w.status,
+                participantId: w.participantId,
+                reclaimCount: w.reclaimCount,
+              }));
+            const execs = spawn.records.executions
+              .filter((e) => String(e.identity?.taskId ?? "").startsWith(oid + ":"))
+              .map((e) => ({
+                id: e.id,
+                role: e.identity?.role ?? null,
+                status: e.identity?.status ?? null,
+                taskId: e.identity?.taskId ?? null,
+                parentSpawnId: e.identity?.parentSpawnId ?? null,
+                contextDigest: e.operatingContext?.digest ?? e.contextDigest ?? null,
+                effectiveGrant: e.effectiveGrant ?? null,
+              }));
+            const evidence = (root?.evidenceDependencies ?? []).map((d) => ({
+              id: d.dependencyId,
+              status: d.status,
+              evidenceId: d.evidenceId ?? null,
+              subject: d.subjectIdentity ?? null,
+            }));
+            const authority = (root?.authorityDependencies ?? []).map((d) => ({
+              id: d.dependencyId,
+              status: d.status,
+            }));
+            console.log("MISSION_CONTROL_OBSERVATION=" + JSON.stringify({
+              objectiveId: oid,
+              taskStatus: task?.kind === "task" ? task.status : null,
+              rootSpawnId: root?.identity?.rootSpawnId ?? null,
+              collaborationSessionId: root?.identity?.collaborationSessionId ?? null,
+              revision: root?.revision ?? null,
+              terminal: root?.terminal ?? null,
+              works,
+              execs,
+              evidence,
+              authority,
+            }));
+            console.log("READ_ONLY_OBSERVER=PASS");
+          } finally {
+            await repo.close().catch(() => undefined);
+          }
+          NODE
+          B64="$(base64 -w0 /tmp/observe.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/observe.mjs && OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/observe.mjs; rc=\$?; rm -f /tmp/observe.mjs; exit \$rc'"
+          rm -f /tmp/observe.mjs
