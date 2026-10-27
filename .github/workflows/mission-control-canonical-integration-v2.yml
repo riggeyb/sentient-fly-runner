@@ -1,0 +1,192 @@
+name: Mission Control Canonical Integration V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      canonical_head:
+        required: true
+        type: string
+      pr_base_sha:
+        required: true
+        type: string
+      target_sha:
+        required: true
+        type: string
+      target_tree:
+        required: true
+        type: string
+      integration_branch:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.canonical_head }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Reconcile accepted delta onto canonical lineage
+        shell: bash
+        env:
+          CANONICAL_HEAD: ${{ inputs.canonical_head }}
+          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          TARGET_TREE: ${{ inputs.target_tree }}
+          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
+        run: |
+          set -euo pipefail
+          for value in "$CANONICAL_HEAD" "$PR_BASE_SHA" "$TARGET_SHA" "$TARGET_TREE"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          done
+          [[ "$INTEGRATION_BRANCH" =~ ^integration/mission-control-production-[0-9a-f]{8}-v[0-9]+$ ]] || exit 2
+          test "$(git rev-parse HEAD)" = "$CANONICAL_HEAD"
+          git fetch origin "$PR_BASE_SHA" "$TARGET_SHA"
+          test "$(git rev-parse "${TARGET_SHA}^{tree}")" = "$TARGET_TREE"
+          git merge-base --is-ancestor "$PR_BASE_SHA" "$TARGET_SHA"
+          git switch -c "$INTEGRATION_BRANCH"
+
+          git checkout "$TARGET_SHA" -- \
+            src/local-runtime/ipc.ts \
+            src/spawn/context.ts \
+            src/spawn/operating-context.ts \
+            test/spawn-mission-control-context.test.ts \
+            tests/spawn-mission-control-context.test.ts
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/spawn/execution-contracts.ts")
+          s = p.read_text()
+          import_line = 'import type { SentientOperatingContextV1 } from "./operating-context.js";\n'
+          if import_line not in s:
+              needle = '} from "./request-contracts.js";\n'
+              assert needle in s
+              s = s.replace(needle, needle + import_line, 1)
+          if '  operatingContext: SentientOperatingContextV1;\n' not in s:
+              needle = '  context: BoundedContextBundle;\n'
+              assert needle in s
+              s = s.replace(
+                  needle,
+                  needle + '  operatingContext: SentientOperatingContextV1;\n'
+                  + '  operatingContextDigest: string;\n',
+                  1,
+              )
+          assert 'maxCapabilityTier?: CapabilityTierV1;' in s
+          p.write_text(s)
+
+          p = Path("src/spawn/index.ts")
+          s = p.read_text()
+          line = 'export * from "./operating-context.js";\n'
+          if line not in s:
+              needle = 'export * from "./context.js";\n'
+              assert needle in s
+              s = s.replace(needle, needle + line, 1)
+          p.write_text(s)
+
+          p = Path("src/state/sanitize.ts")
+          s = p.read_text()
+          old = '    if (SECRET_KEY.test(key)) {\n'
+          new = (
+              '    if (\n'
+              '      SECRET_KEY.test(key)\n'
+              '      && typeof nested !== "boolean"\n'
+              '      && typeof nested !== "number"\n'
+              '      && nested !== null\n'
+              '    ) {\n'
+          )
+          if old in s:
+              s = s.replace(old, new, 1)
+          assert new in s
+          p.write_text(s)
+          PY
+
+          allowed='^(src/local-runtime/ipc\.ts|src/spawn/context\.ts|src/spawn/execution-contracts\.ts|src/spawn/index\.ts|src/spawn/operating-context\.ts|src/state/sanitize\.ts|test/spawn-mission-control-context\.test\.ts|tests/spawn-mission-control-context\.test\.ts)$'
+          unexpected="$(git diff --name-only "$CANONICAL_HEAD" -- | grep -Ev "$allowed" || true)"
+          test -z "$unexpected" || { printf 'UNEXPECTED_CHANGED_PATHS\n%s\n' "$unexpected"; exit 30; }
+          git diff --exit-code "$CANONICAL_HEAD" -- fly.toml
+          git diff --check "$CANONICAL_HEAD"
+
+          git config user.name "sentient-mission-control-integration"
+          git config user.email "sentient-mission-control-integration@users.noreply.github.com"
+          git add src/local-runtime/ipc.ts src/spawn/context.ts src/spawn/execution-contracts.ts \
+            src/spawn/index.ts src/spawn/operating-context.ts src/state/sanitize.ts \
+            test/spawn-mission-control-context.test.ts tests/spawn-mission-control-context.test.ts
+          git commit -m "mission-control: reconcile accepted spawn boundary onto production lineage"
+          echo "INTEGRATION_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "INTEGRATION_TREE=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
+
+      - name: Full exact acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$INTEGRATION_TREE"
+          npm install --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/objective-continuation.test.js \
+            dist/test/objective-continuation-readiness.test.js \
+            dist/test/active-work-core.test.js \
+            dist/test/active-work-persistence.test.js
+          node --test dist/test/permanent-continuation-*.test.js
+          node --test dist/src/model/providers/openrouter.test.js
+          node --test dist/src/lab/librechat/bridge.test.js
+          npx tsc -p tsconfig.worker-a.json --noEmit
+          npx tsc -p tsconfig.worker-c.json --noEmit
+          npx tsc -p tsconfig.worker-d.json --noEmit
+          node --test dist/test/lab/*.test.js
+          node --experimental-strip-types --test tests/*.test.ts
+          node --experimental-strip-types --test tests/retrieval/*.test.ts
+          node --test dist/test/persistence.test.js
+          npm test
+          test -f dist/test/spawn-mission-control-context.test.js
+          node --test dist/test/spawn-mission-control-context.test.js
+          test -f tests/spawn-mission-control-context.test.ts
+          node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
+          git diff --quiet
+          git diff --cached --quiet
+          echo "FULL_ACCEPTANCE=PASS"
+          echo "RESOURCE_ENVELOPE_UNCHANGED=true"
+          echo "INTEGRATION_SHA=$INTEGRATION_SHA"
+          echo "INTEGRATION_TREE=$INTEGRATION_TREE"
+
+      - name: Push tested descendant
+        shell: bash
+        env:
+          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$INTEGRATION_TREE"
+          git push origin "HEAD:refs/heads/${INTEGRATION_BRANCH}"
+          echo "PUSHED_SHA=$INTEGRATION_SHA"
+          echo "PUSHED_TREE=$INTEGRATION_TREE"
