@@ -1,0 +1,181 @@
+name: Mission Control Exact Acceptance V1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coordination-substrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: a6d430ff775044a03f2fca9c63ee6bfa1796f558
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fence exact substrate candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "a6d430ff775044a03f2fca9c63ee6bfa1796f558"
+          test "$(git rev-parse 'HEAD^{tree}')" = "785fb508b67515b1963914196ad7cbee50ccabe2"
+          echo "COORDINATION_SHA=$(git rev-parse HEAD)"
+          echo "COORDINATION_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run registry and contract validation
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          python scripts/validate_registry.py
+          python scripts/check_evals.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+          python scripts/test_repository_edit.py
+          python scripts/test_repository_edit_request.py
+          python scripts/validate_actions_schema.py
+      - name: Run Sentient orchestrator acceptance
+        working-directory: sentient-orchestrator
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts
+          npm run typecheck
+          npm run migrate
+          npm test
+          echo "PR_245_AUTOMATED_ACCEPTANCE=PASS"
+
+  mission-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: b3df9b32b47370a7140d6fe814eeba97564663ab
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fence exact Mission Control candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
+          test "$(git rev-parse 'HEAD{tree}')" = "3173ee3cb2e39038921d3b125f1a74ecd783ff30"
+          echo "MISSION_CONTROL_SHA=$(git rev-parse HEAD)"
+          echo "MISSION_CONTROL_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run registry and contract validation
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          python scripts/validate_registry.py
+          python scripts/check_evals.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+          python scripts/test_repository_edit.py
+          python scripts/test_repository_edit_request.py
+          python scripts/validate_actions_schema.py
+      - name: Run Mission Control and C1 acceptance
+        working-directory: sentient-orchestrator
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts
+          npm run typecheck
+          npm run migrate
+          npm test
+          echo "PR_247_AUTOMATED_ACCEPTANCE=PASS"
+
+  sentient-spawn-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: http://invalid
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 12372d0b2417c0521a7927b0cf0b3aa34ea1184c
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fence exact Sentient candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"
+          test "$(git rev-parse 'HEAD^{tree}')" = "2f5818abe9f15f50be62002e2f3a39b1b29ad440"
+          echo "SENTIENT_SHA=$(git rev-parse HEAD)"
+          echo "SENTIENT_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Sentient dependencies
+        run: npm install --no-audit --no-fund
+      - name: Strict Sentient build
+        run: npm run build
+      - name: Run all authored Mission Control spawn suites
+        run: |
+          set -euo pipefail
+          node --test dist/test/spawn-mission-control-context.test.js
+          node --experimental-strip-types --test tests/spawn-mission-control-context.ts
+          node --test dist/test/spawn*.test.js
+          echo "MISSION_CONTROL_SPAWN_SUITES=PASS"
+      - name: Run full Sentient repository tests
+        run: npm test
