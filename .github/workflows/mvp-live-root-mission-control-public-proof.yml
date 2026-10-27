@@ -1,0 +1,106 @@
+name: MVP Live Root Mission Control Public Proof
+
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Verify exact resident runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          h="$(curl -fsS --max-time 20 "https://${APP}.fly.dev/healthz")"
+          r="$(curl -fsS --max-time 20 "https://${APP}.fly.dev/readyz")"
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null <<<"$h"
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null <<<"$r"
+          jq -e '.bindings[] | select(.name=="ROOT_MISSION_CONTROL" and .availability=="AVAILABLE")' >/dev/null <<<"$r"
+          jq -e '.bindings[] | select(.name=="POSTGRES_STATE" and .availability=="AVAILABLE")' >/dev/null <<<"$r"
+          jq -e '.bindings[] | select(.name=="SPAWN_EXECUTION_BACKEND" and .availability=="AVAILABLE")' >/dev/null <<<"$r"
+          echo LIVE_EXACT_IDENTITY=PASS
+
+      - name: Execute harmless Root Mission Control objective through public Fly ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          OBJ="mvp-root-public-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cat >"$RUNNER_TEMP/proof.mjs" <<'NODE'
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          if(!token) throw new Error("sentient_api_token_missing");
+          const objectiveId=process.env.CERT_OBJECTIVE_ID;
+          const base="https://sentient-validation-runner.fly.dev";
+          const headers={authorization:`Bearer ${token}`,"content-type":"application/json"};
+          const request=[
+            "Inspect your current production system and tell me the highest-value improvement you can safely make next.",
+            "Use inherited operating context, not facts copied into this delegated task, to identify the authoritative source repository and normal operator bridge.",
+            "Read-only TIER_0 proof: do not edit source, open a PR, deploy, or mutate external systems."
+          ].join(" ");
+          let r=await fetch(base+"/v1/objectives",{method:"POST",headers,body:JSON.stringify({
+            objectiveId,sessionId:`session:${objectiveId}`,request,mode:"collaborative",privacy:"private",deployOnSuccess:false
+          }),signal:AbortSignal.timeout(600000)});
+          let body=await r.json();
+          if(r.status!==202||body.objectiveId!==objectiveId) throw new Error(`ingress_${r.status}`);
+          const sleep=ms=>new Promise(x=>setTimeout(x,ms));
+          const end=Date.now()+12*60_000;
+          while(Date.now()<end){
+            r=await fetch(base+`/v1/objectives/${encodeURIComponent(objectiveId)}`,{headers,signal:AbortSignal.timeout(30000)});
+            body=await r.json();
+            if(r.status!==200) throw new Error(`status_${r.status}`);
+            if(["succeeded","failed","cancelled"].includes(String(body.status))) break;
+            await sleep(1000);
+          }
+          if(body.status!=="succeeded") throw new Error(`objective_${body.status}`);
+          const p=body.rootProjection;
+          if(!p||p.objectiveId!==objectiveId) throw new Error("root_projection_missing");
+          if(p.operatingContextVersion!=="SENTIENT_OPERATING_CONTEXT_V1") throw new Error("context_version_mismatch");
+          if(p.operatingContextDigest!=="sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209") throw new Error("context_digest_mismatch");
+          if(!Array.isArray(p.participantOperatingContexts)||p.participantOperatingContexts.length<3) throw new Error("participant_context_receipts_missing");
+          if(!Array.isArray(p.staleOperatingContextWorkers)||p.staleOperatingContextWorkers.length!==0) throw new Error("stale_child_context");
+          if(!Array.isArray(p.acceptedEvidence)||p.acceptedEvidence.length<2) throw new Error("accepted_evidence_missing");
+          if(typeof p.finalResult!=="string"||!p.finalResult.trim()) throw new Error("final_root_result_missing");
+          const result=body?.result?.body?.result??{};
+          if(result.contractVersion!=="sentient-production-mission-control/v1"||result.status!=="SUCCEEDED") throw new Error("mission_control_result_invalid");
+          if(result.operatingContextIsNotAuthority!==true||result.workerEffectsCanonical!==false) throw new Error("authority_boundary_invalid");
+          const content=String(result.authoritativeContent??"");
+          if(!content.includes("riggeyb/sentient") throw new Error("source_repo_not_derived");
+          if(!content.includes("riggeyb/sentient-fly-runner")) throw new Error("operator_bridge_not_derived");
+          console.log("OBJECTIVE_ID="+objectiveId);
+          console.log("ROOT_MISSION_CONTROL_USED=PASS");
+          console.log("SPAWNSENTIENT_CHILD_OBSERVED=PASS");
+          console.log("C1_COORDINATION_OBSERVED=PASS");
+          console.log("ROOT_EVIDENCE_DECISION_OBSERVED=PASS");
+          console.log("LIVE_CHILD_CONTEXT_USE=PASS");
+          console.log("SOURCE_REPO_KNOWN_AUTOMATICALLY=PASS");
+          console.log("OPERATOR_BRIDGE_KNOWN_AUTOMATICALLY=PASS");
+          console.log("OPERATING_CONTEXT_IS_NOT_AUTHORITY=true");
+          console.log("WORKER_AUTHORITY_CANNOT_EXCEED_PARENT=true");
+          console.log("DELEGATED_SCOPE_CANNOT_EXPAND=true");
+          console.log("GOVERNOR_BYPASS_USED=false");
+          console.log("DEPLOY_ON_SUCCESS=false");
+          console.log("FINAL_ROOT_RESULT_PRESENT=true");
+          NODE
+          B64="$(base64 -w0 "$RUNNER_TEMP/proof.mjs")"
+          timeout 1000s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/mvp-root-public.mjs && CERT_OBJECTIVE_ID=$OBJ node /tmp/mvp-root-public.mjs; rc=\$?; rm -f /tmp/mvp-root-public.mjs; exit \$rc'" | tee "$RUNNER_TEMP/proof.out"
+          grep -Fq 'ROOT_MISSION_CONTROL_USED=PASS' "$RUNNER_TEMP/proof.out"
+          grep -Fq 'LIVE_CHILD_CONTEXT_USE=PASS' "$RUNNER_TEMP/proof.out"
+          grep -Fq 'FINAL_ROOT_RESULT_PRESENT=true' "$RUNNER_TEMP/proof.out"
+          echo LIVE_ROOT_OBJECTIVE_PROOF=PASS
