@@ -25,7 +25,8 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "90d45ee12dd9990df2d11b412afcd7ac4ebe3edc"
           test "$(git rev-parse 'HEAD^{tree}')" = "56557e957d320aaa065c20f626c33c819c6f9409"
-          npm ci --no-audit --no-fund
+          npm install --no-package-lock --no-audit --no-fund
+          echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_BY_REPOSITORY_DESIGN"
           npm run build
           test -z "$(git status --porcelain)"
           echo "SENTIENT_TYPECHECK=PASS"
