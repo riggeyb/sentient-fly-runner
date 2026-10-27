@@ -67,11 +67,34 @@ while (Date.now() < deadline && !["succeeded", "failed", "cancelled"].includes(s
   state = await poll.json();
 }
 
+const projection =
+  state.rootProjection && typeof state.rootProjection === "object"
+    ? state.rootProjection
+    : null;
+const arr = value => Array.isArray(value) ? value : [];
+
 console.log("OBJECTIVE_ID=" + oid);
 console.log("OBJECTIVE_STATUS=" + state.status);
 console.log("OBJECTIVE_RESULT_PRESENT=" + String(state.result != null));
 console.log("OBJECTIVE_ERROR_PRESENT=" + String(state.error != null));
 console.log("ACTIVE_ENGINEERING_JOB_PRESENT=" + String(state.activeEngineeringJobId != null));
+console.log("ROOT_PROJECTION_PRESENT=" + String(projection != null));
+if (projection) {
+  console.log("ROOT_OBJECTIVE_ID_MATCH=" + String(projection.objectiveId === oid));
+  console.log("ROOT_OPERATING_CONTEXT_VERSION=" + String(projection.operatingContextVersion ?? "none"));
+  console.log("ROOT_OPERATING_CONTEXT_DIGEST=" + String(projection.operatingContextDigest ?? "none"));
+  console.log("ROOT_ACTIVE_WORKER_COUNT=" + String(arr(projection.activeWorkers).length));
+  console.log("ROOT_SUB_ORCHESTRATOR_COUNT=" + String(arr(projection.activeSubOrchestrators).length));
+  console.log("ROOT_PARTICIPANT_CONTEXT_COUNT=" + String(arr(projection.participantOperatingContexts).length));
+  console.log("ROOT_STALE_CONTEXT_WORKER_COUNT=" + String(arr(projection.staleOperatingContextWorkers).length));
+  console.log("ROOT_EVIDENCE_COUNT=" + String(arr(projection.evidence).length));
+  console.log("ROOT_ACCEPTED_EVIDENCE_COUNT=" + String(arr(projection.acceptedEvidence).length));
+  console.log("ROOT_REJECTED_EVIDENCE_COUNT=" + String(arr(projection.rejectedEvidence).length));
+  console.log("ROOT_BLOCKER_COUNT=" + String(arr(projection.blockers).length));
+  console.log("ROOT_FINAL_RESULT_PRESENT=" + String(typeof projection.finalResult === "string" && projection.finalResult.length > 0));
+  console.log("ROOT_WORKER_IDS=" + arr(projection.activeWorkers).map(x => String(x?.workerId ?? "")).filter(Boolean).join(","));
+  console.log("ROOT_CONTEXT_WORKER_IDS=" + arr(projection.participantOperatingContexts).map(x => String(x?.workerId ?? "")).filter(Boolean).join(","));
+}
 console.log("OBJECTIVE_PERSISTED=true");
 console.log("OBJECTIVE_PRIVATE=true");
 console.log("DEPLOY_ON_SUCCESS=false");
