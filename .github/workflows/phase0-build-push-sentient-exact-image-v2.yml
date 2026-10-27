@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Build and push exact immutable image
+      - name: Build, smoke, and push exact immutable image
         shell: bash
         run: |
           set -euo pipefail
@@ -51,7 +51,12 @@ jobs:
           git bundle create sentient-source.bundle HEAD
           flyctl deploy -a sentient-validation-runner -c fly.toml --remote-only --build-only --push --image-label "phase0-$SHA" --build-arg "SENTIENT_RUNTIME_SHA=$SHA" --build-arg "SENTIENT_RUNTIME_TREE=$TREE" --build-arg "SENTIENT_SKILLS_SHA=$SKILLS" --build-arg "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=$PARENT"
           rm -f sentient-source.bundle
+          flyctl auth docker
+          IMAGE="registry.fly.io/sentient-validation-runner:phase0-$SHA"
+          docker pull "$IMAGE"
+          docker run --rm --entrypoint node "$IMAGE" --input-type=module -e 'await import("sentient-orchestrator/mission-control-context"); console.log("RUNTIME_MISSION_CONTROL_IMPORT=PASS")'
           echo "EXACT_IMAGE_BUILD_PUSH=PASS"
+          echo "RUNTIME_MISSION_CONTROL_IMPORT=PASS"
           echo "GOVERNOR_EXPECTED_IMAGE_TAG=phase0-$SHA"
           echo "SKILLS_SHA=$SKILLS"
           echo "SECRET_VALUES_EXPOSED=false"
