@@ -1,0 +1,96 @@
+name: Skills Exact Candidate Acceptance
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout exact coordination substrate candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: 35ed1b4f3ca1f8cedb971d0b294a707a4b78d11d
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence exact source and dependency identity
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "35ed1b4f3ca1f8cedb971d0b294a707a4b78d11d"
+          test "$(git rev-parse 'HEAD^{tree}')" = "c6646fd1b423238c5d09d47fc1880edbb836a558"
+          echo "SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "EXECUTION_ENVIRONMENT=github-hosted-ubuntu-latest-via-riggeyb/sentient-fly-runner"
+          echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_BY_REPOSITORY_DESIGN"
+          sha256sum requirements.txt sentient-orchestrator/package.json
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: Validate registry structure
+        run: python scripts/validate_registry.py
+      - name: Validate eval definitions
+        run: python scripts/check_evals.py
+      - name: Validate durable objective continuation contract
+        run: python tests/test_durable_objective_continuation_v1.py
+      - name: Validate active work disclosure contract
+        run: python tests/test_active_work_disclosure_v1.py
+      - name: Test deterministic repository edit preparation
+        run: python scripts/test_repository_edit.py
+      - name: Test deterministic repository edit request gateway
+        run: python scripts/test_repository_edit_request.py
+      - name: Validate GPT Actions schema compatibility
+        run: python scripts/validate_actions_schema.py
+      - name: Validate Netlify Actions schema compatibility
+        run: python scripts/validate_netlify_actions_schema.py
+      - name: Install orchestrator dependencies read-only
+        working-directory: sentient-orchestrator
+        run: npm install --ignore-scripts --no-package-lock --no-audit --no-fund
+      - name: Typecheck orchestrator
+        working-directory: sentient-orchestrator
+        run: npm run typecheck
+      - name: Apply Postgres migrations
+        working-directory: sentient-orchestrator
+        run: npm run migrate
+      - name: Run full orchestrator tests
+        working-directory: sentient-orchestrator
+        run: npm test
+      - name: Validate remote registry entrypoints
+        env:
+          GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: python scripts/validate_registry.py --remote
+      - name: Verify read-only source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "35ed1b4f3ca1f8cedb971d0b294a707a4b78d11d"
+          test "$(git rev-parse 'HEAD^{tree}')" = "c6646fd1b423238c5d09d47fc1880edbb836a558"
+          test -z "$(git status --porcelain)"
+          echo "COORDINATION_ACCEPTANCE=PASS"
+          echo "SOURCE_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
