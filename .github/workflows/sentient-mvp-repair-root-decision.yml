@@ -1,11 +1,8 @@
 name: Repair MVP Mission Control event vocabulary
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   repair:
     runs-on: ubuntu-latest
@@ -28,18 +25,27 @@ jobs:
           test "$(git rev-parse HEAD)" = "74ad1be0ab36e87ed5f8d77cf470a2b790fb6faa"
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          p=Path('src/application/production-mission-control.ts')
-          s=p.read_text()
-          pattern=r'\n    await publishMissionEvent\(\ {\n      coordination: this\.#coordination,\n      sessionId,\n      participantKey: rootKey,\n      workerId: root\\.workerId,\n      type: "ROOT_DECISION",\n.*?\n    \\\\}\);\n\'
-          n,r=re.subn(pattern,'\n',s,flags=re.S)
-          if n<!=1: raise SystemExit(f'expected exactly one root decision block, found {n}')
-          p.write_text(r)
+          p = Path("src/application/production-mission-control.ts")
+          s = p.read_text()
+          marker = '      type: "ROOT_DECISION",'
+          idx = s.find(marker)
+          if idx < 0:
+              raise SystemExit("ROOT_DECISION marker missing")
+          start = s.rfind("    await publishMissionEvent({", 0, idx)
+          end = s.find("    });", idx)
+          if start < 0 or end < 0:
+              raise SystemExit("ROOT_DECISION block boundaries missing")
+          end += len("    });")
+          if s.find(marker, idx + len(marker)) >= 0:
+              raise SystemExit("multiple ROOT_DECISION markers")
+          repaired = s[:start] + s[end:]
+          p.write_text(repaired)
           PY
           npm install --no-audit --no-fund
           npm run build
           git diff --check -- src/application/production-mission-control.ts
-          git diff --working-tree --name-only | grep -vx '^src/application/production-mission-control\.ts$' && exit 1 || true
+          changed="$(git diff --name-only)"
+          test "$changed" = "src/application/production-mission-control.ts"
           git config user.name "sentient-mvp-activation"
           git config user.email "sentient-mvp-activation@users.noreply.github.com"
           git add src/application/production-mission-control.ts
