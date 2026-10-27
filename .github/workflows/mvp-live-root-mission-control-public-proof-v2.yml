@@ -6,46 +6,44 @@ name: MVP Live Root Mission Control Public Proof V2
       sha: {required: true, type: string}
       tree: {required: true, type: string}
 
-permissions:
-  contents: read
+permissions: {contents: read}
 
 jobs:
   prove:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      FLV_API_TOKEN: ${{ secrets.FLV_API_TOKEN }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
       EXPECTED_SHA: ${{ inputs.sha }}
       EXPECTED_TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Verify exact resident runtime with cold-start retries
+      - name: Verify exact resident runtime
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 30); do
+          for i in $(seq 1 45); do
             h="$(curl -fsS --max-time 12 "https://${APP}.fly.dev/healthz" 2>/dev/null || true)"
             r="$(curl -fsS --max-time 12 "https://${APP}.fly.dev/readyz" 2>/dev/null || true)"
             if jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null 2>&1 <<<"$h" &&
                jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null 2>&1 <<<"$r" &&
                jq -e '.bindings[] | select(.name=="ROOT_MISSION_CONTROL" and .availability=="AVAILABLE")' >/dev/null 2>&1 <<<"$r" &&
-                jq -e '.bindings[] | select(.name=="POSTGRES_STATE" and .availability=="AVAILABLE")' >/dev/null 2>&1 <<<"$r" &&
+               jq -e '.bindings[] | select(.name=="POSTGRES_STATE" and .availability=="AVAILABLE")' >/dev/null 2>&1 <<<"$r" &&
                jq -e '.bindings[] | select(.name=="SPAWN_EXECUTION_BACKEND" and .availability=="AVAILABLE")' >/dev/null 2>&1 <<<"$r"; then
               echo LIVE_EXACT_IDENTITY=PASS
               exit 0
             fi
             sleep 2
           done
-          echo LIVE_EXACT_IDENTITY=FAIL
           exit 1
 
-      - name: Execute harmless Root Mission Control objective through public Fly ingress
+      - name: Execute harmless Root objective through public Fly ingress
         shell: bash
         run: |
           set -euo pipefail
-          OJJ="mvp-root-public-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          OBJ="mvp-root-public-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cat >"$RUNNER_TEMP/proof.mjs" <<'NODE'
           const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
           if(!token) throw new Error("sentient_api_token_missing");
