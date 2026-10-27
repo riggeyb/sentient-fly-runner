@@ -1,8 +1,11 @@
 name: Patch MVP Mission Control canonical completion
 on:
-  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: [.github/workflows/sentient-mvp-canonical-completion.yml]
 permissions:
   contents: read
+
 jobs:
   patch:
     runs-on: ubuntu-latest
