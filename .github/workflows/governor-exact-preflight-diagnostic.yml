@@ -10,34 +10,40 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     env:
       S: ${{ inputs.sha }}
-      PROD: 3ce2b2e2104a1000a7a82b4cb0e465bdc1789282
-      TREE: f4cebc41c4775b09ce5f0279b5cb12d4cad52a01
+      BASE: 3ce2b2e2104a1000a7a82b4cb0e465bdc1789282
+      TARGET_TREE: f4cebc41c4775b09ce5f0279b5cb12d4cad52a01
+      BRANCH: integration/mission-control-production-75ba9c28
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: sentient-production-composition-20261017
+          ref: integration/mission-control-production-75ba9c28
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: false
+          persist-credentials: true
           fetch-depth: 0
-      - name: Two-ref ancestry and resource fence
+      - name: Integrate accepted candidate without touching production
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$PROD"
-          git fetch origin "$S"
-          test "$(git rev-parse FETCH_HEAD)" = "$S"
-          test "$(git rev-parse "$S^{tree}")" = "$TREE"
-          if git merge-base --is-ancestor "$PROD" "$S"; then
-            echo "PRODUCTION_IS_ANCESTOR_OF_TARGET=true"
-          else
-            echo "PRODUCTION_IS_ANCESTOR_OF_TARGET=false"
-            exit 22
-          fi
-          git diff --exit-code "$PROD" "$S" -- fly.toml
+          test "$(git rev-parse HEAD)" = "$BASE"
+          test "$(git rev-parse "$S^{tree}")" = "$TARGET_TREE"
+          git diff --exit-code "$BASE" "$S" -- fly.toml
+          git config user.name sentient-mission-control-integrator
+          git config user.email sentient-mission-control-integrator@users.noreply.github.com
+          git merge --no-ff --no-edit "$S"
+          test "$(git rev-parse HEAD^1)" = "$BASE"
+          git merge-base --is-ancestor "$S" HEAD
+          git diff --exit-code "$BASE" HEAD -- fly.toml
+          merged="$(git rev-parse HEAD)"
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          git push --force-with-lease="refs/heads/$BRANCH:$BASE" origin "HEAD:refs/heads/$BRANCH"
+          echo "INTEGRATION_BRANCH=$BRANCH"
+          echo "INTEGRATION_SHA=$merged"
+          echo "INTEGRATION_TREE=$tree"
+          echo "ACCEPTED_CANDIDATE_ANCESTOR=true"
+          echo "PRODUCTION_PARENT=true"
           echo "FLY_RESOURCE_ENVELOPE_CHANGED=false"
-          echo "TWO_REF_PREFLIGHT=PASS"
-          echo "SECRET_VALUES_EXPOSED=false"
+          echo "PRODUCTION_REF_MUTATED=false"
