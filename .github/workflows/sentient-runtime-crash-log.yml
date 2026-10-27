@@ -1,6 +1,11 @@
 name: Sentient Runtime Crash Log
 on:
   workflow_dispatch:
+    inputs:
+      marker:
+        description: Read-only diagnostic dispatch marker
+        required: true
+        type: string
 
 permissions:
   contents: read
