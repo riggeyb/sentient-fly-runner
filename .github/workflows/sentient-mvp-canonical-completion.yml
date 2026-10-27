@@ -1,6 +1,6 @@
 name: Patch MVP Mission Control canonical completion
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 permissions:
   contents: read
 jobs:
