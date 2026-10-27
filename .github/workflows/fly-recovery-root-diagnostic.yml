@@ -12,7 +12,9 @@ jobs:
       APP: sentient-governor-recovery-root
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
+
       - name: Inspect sanitized recovery ledger
+        id: inspect
         shell: bash
         run: |
           set -euo pipefail
@@ -26,27 +28,90 @@ jobs:
             sleep 2
           done
           test "$state" = started
+
           cat >/tmp/diag.mjs <<'NODE'
           import pg from "pg";
-          const names=["SENTIENT_GOVERNOR_RECOVERY_API_TOKEN","SENTIENT_GOVERNOR_RECOVERY_FLY_TOKEN","SENTIENT_DATABASE_BOOTSTRAP_URL","SENTIENT_SOURCE_GITHUB_TOKEN"];
-          for(const name of names) console.log(`${name}_PRESENT=${Boolean(String(process.env[name]??"").trim())}`);
+          const present=(name)=>Boolean(String(process.env[name]??"").trim());
+          const result={
+            apiToken:present("SENTIENT_GOVERNOR_RECOVERY_API_TOKEN"),
+            flyToken:present("SENTIENT_GOVERNOR_RECOVERY_FLY_TOKEN"),
+            database:present("SENTIENT_DATABASE_BOOTSTRAP_URL"),
+            sourceToken:present("SENTIENT_SOURCE_GITHUB_TOKEN"),
+            latest:null
+          };
           const cs=String(process.env.SENTIENT_DATABASE_BOOTSTRAP_URL??"").trim();
-          if(!cs) process.exit(20);
+          if(!cs){
+            console.log("SAFE_RESULT="+JSON.stringify(result));
+            process.exit(0);
+          }
           const {Pool}=pg;
           const pool=new Pool({connectionString:cs,max:1,connectionTimeoutMillis:10000});
           try{
             const q=await pool.query(`
               SELECT recovery_id,requested_sha,requested_tree,observed_sha,observed_tree,status,error_code,diagnostic,started_at,completed_at
               FROM sentient_deployment_governor.governor_recovery_receipts
-              ORDER BY started_at DESC LIMIT 3
+              ORDER BY started_at DESC LIMIT 1
             `);
-            console.log("RECOVERY_LEDGER="+JSON.stringify(q.rows.map(r=>({
-              recoveryId:r.recovery_id,requestedSha:r.requested_tree,
-              observedSha:r.observed_sha,observedTree:r.observed_tree,status:r.status,errorCode:r.error_code,
-              diagnostic:String(r.diagnostic??"").slice(0,1024),startedAt:r.started_at,completedAt:r.completed_at
-            }))));
+            const r=q.rows[0];
+            if(r){
+              result.latest={
+                recoveryId:r.recovery_id,
+                requestedSha:r.requested_sha,
+                requestedTree:r.requested_tree,
+                observedSha:r.observed_sha,
+                observedTree:r.observed_tree,
+                status:r.status,
+                errorCode:r.error_code,
+                diagnostic:String(r.diagnostic??"").slice(0,1024),
+                startedAt:r.started_at,
+                completedAt:r.completed_at
+              };
+            }
           } finally { await pool.end(); }
-          console.log("SECRET_VALUES_EXPOSED=false");
+          console.log("SAFE_RESULT="+JSON.stringify(result));
           NODE
+
           b64="$(base64 -w0 /tmp/diag.mjs)"
-          flyctl ssh console -a "$APP" --machine "$id" -C "sh -lc 'cd /app && echo $b64 | base64 -d >/app/recovery-diag.mjs && node /app/recovery-diag.mjs; rc=\$?; rm -f /app/recovery-diag.mjs; exit \$rc'"
+          flyctl ssh console -a "$APP" --machine "$id" -C "sh -lc 'cd /app && echo $b64 | base64 -d >/app/recovery-diag.mjs && node /app/recovery-diag.mjs; rc=\$?; rm -f /app/recovery-diag.mjs; exit \$rc'" > /tmp/ssh-output.txt
+          line="$(grep '^SAFE_RESULT=' /tmp/ssh-output.txt | tail -n1)"
+          test -n "$line"
+          json="${line#SAFE_RESULT=}"
+          printf '%s\n' "$json" > /tmp/safe-recovery-diagnostic.json
+
+          api="$(jq -r 'if .apiToken then "1" else "0" end' /tmp/safe-recovery-diagnostic.json)"
+          fly="$(jq -r 'if .flyToken then "1" else "0" end' /tmp/safe-recovery-diagnostic.json)"
+          db="$(jq -r 'if .database then "1" else "0" end' /tmp/safe-recovery-diagnostic.json)"
+          src="$(jq -r 'if .sourceToken then "1" else "0" end' /tmp/safe-recovery-diagnostic.json)"
+          diagnostic="$(jq -r '.latest.diagnostic // ""' /tmp/safe-recovery-diagnostic.json | tr '[:upper:]' '[:lower:]')"
+          error_code="$(jq -r '.latest.errorCode // "none"' /tmp/safe-recovery-diagnostic.json)"
+
+          class="unknown"
+          if printf '%s' "$diagnostic" | grep -Eq 'unauthor|forbidden|permission|access denied|not allowed|token|401|403|authentication'; then
+            class="auth"
+          elif printf '%s' "$diagnostic" | grep -Eq 'remote builder|builder'; then
+            class="remote-builder"
+          elif printf '%s' "$diagnostic" | grep -Eq 'dockerfile|buildkit|build failed|failed to build|npm |npm_|tsc|typescript|compile'; then
+            class="build"
+          elif printf '%s' "$diagnostic" | grep -Eq 'fly\.governor\.toml|configuration|config |no such file|not found'; then
+            class="config"
+          elif printf '%s' "$diagnostic" | grep -Eq 'timeout|timed out|connection reset|network|dns|tls|service unavailable|internal server|502|503|504'; then
+            class="platform-network"
+          elif printf '%s' "$diagnostic" | grep -Eq 'machine|region|volume|app .*not found|application .*not found'; then
+            class="fly-app"
+          fi
+
+          echo "class=$class" >> "$GITHUB_OUTPUT"
+          echo "api=$api" >> "$GITHUB_OUTPUT"
+          echo "fly=$fly" >> "$GITHUB_OUTPUT"
+          echo "db=$db" >> "$GITHUB_OUTPUT"
+          echo "src=$src" >> "$GITHUB_OUTPUT"
+          echo "error_code=$error_code" >> "$GITHUB_OUTPUT"
+          echo "SECRET_VALUES_EXPOSED=false"
+
+      - name: Upload sanitized classification
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-diag-${{ steps.inspect.outputs.class }}-${{ steps.inspect.outputs.error_code }}-api${{ steps.inspect.outputs.api }}-fly${{ steps.inspect.outputs.fly }}-db${{ steps.inspect.outputs.db }}-src${{ steps.inspect.outputs.src }}
+          path: /tmp/safe-recovery-diagnostic.json
+          if-no-files-found: error
+          retention-days: 7
