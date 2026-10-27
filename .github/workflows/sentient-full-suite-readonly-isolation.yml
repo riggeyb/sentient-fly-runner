@@ -1,4 +1,4 @@
-name: Skills Typecheck Diagnostic
+name: Skills Test Failure Diagnostic
 
 on:
   workflow_dispatch:
@@ -17,8 +17,24 @@ permissions:
   contents: read
 
 jobs:
-  typecheck:
+  diagnose:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,14 +46,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Exact typecheck
+      - name: Exact failing tests only
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
           EXPECTED_TREE: ${{ inputs.tree }}
         run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          set +e
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
           cd sentient-orchestrator
           npm install --ignore-scripts --no-audit --no-fund --no-package-lock >/dev/null
-          npm run typecheck
+          npm run migrate >/dev/null
+          npm test > /tmp/tests.log 2>&1
+          rc=$?
+          echo "TEST_EXIT=$rc"
+          grep -n -B 18 -A 30 '^not ok ' /tmp/tests.log || true
+          echo "=== ASSERTION ERROR CONTEXT ==="
+          grep -n -B 8 -A 18 -E 'AssertionError|ERR_ASSERTION|error:' /tmp/tests.log | head -220 || true
+          exit "$rc"
