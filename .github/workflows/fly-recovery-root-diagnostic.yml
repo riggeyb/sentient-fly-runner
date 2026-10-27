@@ -41,7 +41,7 @@ jobs:
               ORDER BY started_at DESC LIMIT 3
             `);
             console.log("RECOVERY_LEDGER="+JSON.stringify(q.rows.map(r=>({
-              recoveryId:r.recovery_id,requestedSha:r.requested_sha,requestedTree:r.requested_tree,
+              recoveryId:r.recovery_id,requestedSha:r.requested_tree,
               observedSha:r.observed_sha,observedTree:r.observed_tree,status:r.status,errorCode:r.error_code,
               diagnostic:String(r.diagnostic??"").slice(0,1024),startedAt:r.started_at,completedAt:r.completed_at
             }))));
@@ -49,4 +49,4 @@ jobs:
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
           b64="$(base64 -w0 /tmp/diag.mjs)"
-          flyctl ssh console -a "$APP" --machine "$id" -C "sh -lc 'cd /app && echo $b64 | base64 -d >/tmp/diag.mjs && node /tmp/diag.mjs; rc=\$?; rm -f /tmp/diag.mjs; exit \$rc'"
+          flyctl ssh console -a "$APP" --machine "$id" -C "sh -lc 'cd /app && echo $b64 | base64 -d >/app/recovery-diag.mjs && node /app/recovery-diag.mjs; rc=\$?; rm -f /app/recovery-diag.mjs; exit \$rc'"
