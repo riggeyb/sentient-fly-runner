@@ -147,8 +147,8 @@ jobs:
           set -euo pipefail
           npm ci --no-audit --no-fund
           npm run build
-          node --test dist/test/spawn-mission-control.test.js
-          node --test dist/tests/spawn-mission-control.test.js
+          node --test dist/test/spawn-mission-control-context.test.js
+          node --experimental-strip-types --test tests/spawn-mission-control.test.ts
 
       - name: Commit canonical successor
         shell: bash
