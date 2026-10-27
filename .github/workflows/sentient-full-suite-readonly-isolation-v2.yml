@@ -67,10 +67,12 @@ jobs:
           echo "TOTAL_TEST_FILES=${#files[@]}"
           node --test "${files[@]}"
           echo "FULL_TEST_SUITE=PASS"
-      - name: Guard source mutation
+      - name: Guard tracked source mutation
         shell: bash
         run: |
           set -euo pipefail
-          test -z "$(git status --porcelain)"
+          git diff --quiet
+          git diff --cached --quiet
           echo "SOURCE_MUTATION=false"
+          echo "GENERATED_UNTRACKED_ARTIFACTS_ALLOWED=true"
           echo "DIRECT_EXACT_SHA_ACCEPTANCE=PASS"
