@@ -1,4 +1,4 @@
-name: Sentient Exact Readonly Isolation V4
+name: Sentient Exact Readonly Isolation V5
 
 on:
   workflow_dispatch:
@@ -74,18 +74,26 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
 
           {
-            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V4"
+            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V5"
             echo "SOURCE_SHA=$EXPECTED_SHA"
             echo "SOURCE_TREE=$EXPECTED_TREE"
             echo "RUNNER_OS=$(uname -srvmo)"
             echo "NODE_VERSION=$(node --version)"
             echo "NPM_VERSION=$(npm --version)"
-            echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_EXACT_CANDIDATE"
+            if [ -f package-lock.json ]; then
+              echo "DEPENDENCY_LOCK_IDENTITY=package-lock.json:$(git rev-parse HEAD:package-lock.json)"
+            else
+              echo "DEPENDENCY_LOCK_IDENTITY=ABSENT"
+            fi
             echo "DEPENDENCY_MANIFEST_IDENTITY=package.json:$(git rev-parse HEAD:package.json)"
             echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } >/tmp/receipt.env
 
-          run_step NPM_INSTALL npm install --no-audit --no-fund
+          if [ -f package-lock.json ]; then
+            run_step NPM_INSTALL npm ci --no-audit --no-fund
+          else
+            run_step NPM_INSTALL npm install --no-audit --no-fund --no-package-lock
+          fi
           run_step BUILD npm run build
 
           run_step CONTINUATION node --test \
@@ -107,7 +115,6 @@ jobs:
           run_step WORKER_B_PERSISTENCE node --test dist/test/persistence.test.js
           run_step NPM_TEST npm test
 
-          # Explicitly exercise both authored Mission Control spawn suites.
           if [ -f dist/test/spawn-mission-control-context.test.js ]; then
             run_step MC_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
           else
@@ -148,7 +155,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sentient-exact-${{ inputs.sha }}
+          name: sentient-exact-v5-${{ inputs.sha }}
           path: /tmp/receipt.env
           if-no-files-found: error
           retention-days: 30
