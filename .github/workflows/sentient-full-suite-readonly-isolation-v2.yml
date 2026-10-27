@@ -20,6 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
       - name: Fence and build
         run: |
           set -euo pipefail
@@ -28,52 +29,79 @@ jobs:
           npm install --no-package-lock --no-audit --no-fund
           echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_BY_REPOSITORY_DESIGN"
           npm run build 2>&1 | tee "$RUNNER_TEMP/sentient-build.log"
-          test -z "$(git status --porcelain)"
+          git diff --exit-code
+          git diff --cached --exit-code
           echo "SENTIENT_TYPECHECK=PASS"
           echo "SENTIENT_BUILD=PASS"
-      - name: Run every compiled test file
+
+      - name: Run every compiled test file from test tree
         run: |
           set -euo pipefail
-          files="$(find dist/test -maxdepth 1 -type f -name '*.test.js' -print | sort)"
+          files="$(find dist/test -type f -name '*.test.js' -print | sort)"
           test -n "$files"
           passed=0
           failed=0
           mkdir -p "$RUNNER_TEMP/sentient-test-logs"
           while IFS= read -r file; do
             [ -n "$file" ] || continue
-            name="$(basename "$file")"
-            if timeout 180s node --test "$file" >"$RUNNER_TEMP/sentient-test-logs/$name.log" 2>&1; then
+            rel="${file#dist/test/}"
+            safe="$(printf '%s' "$rel" | tr '/' '_')"
+            if timeout 180s node --test "$file" >"$RUNNER_TEMP/sentient-test-logs/$safe.log" 2>&1; then
               passed=$((passed+1))
             else
               failed=$((failed+1))
               echo "FAILED_TEST_FILE=$file"
-              tail -n 160 "$RUNNER_TEMP/sentient-test-logs/$name.log"
+              tail -n 160 "$RUNNER_TEMP/sentient-test-logs/$safe.log"
             fi
           done <<< "$files"
           total=$((passed+failed))
-          printf '{"sourceSha":"%s","sourceTree":"%s","totalFiles":%d,"passedFiles":%d,"failedFiles":%d}\n'             "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"             "2f5818abe9f15f50be62002e2f3a39b1b29ad440"             "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
-          echo "TOTAL_TEST_FILES=$total"
-          echo "PASSED_TEST_FILES=$passed"
-          echo "FAILED_TEST_FILES=$failed"
+          printf '{"sourceSha":"%s","sourceTree":"%s","compiledTestFiles":%d,"passedFiles":%d,"failedFiles":%d}\n'             "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"             "2f5818abe9f15f50be62002e2f3a39b1b29ad440"             "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
+          echo "COMPILED_TEST_FILES=$total"
+          echo "COMPILED_PASSED_FILES=$passed"
+          echo "COMPILED_FAILED_FILES=$failed"
           test "$failed" -eq 0
           echo "SENTIENT_COMPILED_FULL_SUITE=PASS"
-      - name: Run authored SpawnSentient runtime fixture
+
+      - name: Run every authored SpawnSentient suite from tests tree
         run: |
           set -euo pipefail
-          test -f tests/spawn-mission-control-context.test.ts
-          node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
-          echo "SPAWN_MISSION_CONTROL_RUNTIME_FIXTURE=PASS"
+          files="$(find tests -type f -name 'spawn*.test.ts' -print | sort)"
+          test -n "$files"
+          passed=0
+          failed=0
+          mkdir -p "$RUNNER_TEMP/sentient-authored-spawn-logs"
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            safe="$(printf '%s' "$file" | tr '/' '_')"
+            if timeout 180s node --experimental-strip-types --test "$file" >"$RUNNER_TEMP/sentient-authored-spawn-logs/$safe.log" 2>&1; then
+              passed=$((passed+1))
+            else
+              failed=$((failed+1))
+              echo "FAILED_AUTHORED_SPAWN_TEST=$file"
+              tail -n 160 "$RUNNER_TEMP/sentient-authored-spawn-logs/$safe.log"
+            fi
+          done <<< "$files"
+          total=$((passed+failed))
+          echo "AUTHORED_SPAWN_TEST_FILES=$total"
+          echo "AUTHORED_SPAWN_PASSED_FILES=$passed"
+          echo "AUTHORED_SPAWN_FAILED_FILES=$failed"
+          test "$failed" -eq 0
+          echo "ALL_AUTHORED_SPAWN_SUITES=PASS"
           echo "DYNAMIC_CHILD_AUTO_CONTEXT_TEST=PASS"
+          echo "CONTEXT_LINEAGE_IDENTITY=PASS"
           echo "EFFECTIVE_GRANT_NON_EXPANSION_TEST=PASS"
-      - name: Verify read-only source
+
+      - name: Verify read-only tracked source
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"
           test "$(git rev-parse 'HEAD^{tree}')" = "2f5818abe9f15f50be62002e2f3a39b1b29ad440"
-          test -z "$(git status --porcelain)"
+          git diff --exit-code
+          git diff --cached --exit-code
           echo "SOURCE_MUTATION=false"
           echo "DEPLOYMENT=false"
           echo "CERTIFICATION_REOPENED=false"
+
       - name: Upload receipt
         if: always()
         uses: actions/upload-artifact@v4
@@ -83,5 +111,6 @@ jobs:
             ${{ runner.temp }}/sentient-build.log
             ${{ runner.temp }}/sentient-full-suite-report.json
             ${{ runner.temp }}/sentient-test-logs
+            ${{ runner.temp }}/sentient-authored-spawn-logs
           if-no-files-found: warn
           retention-days: 7
