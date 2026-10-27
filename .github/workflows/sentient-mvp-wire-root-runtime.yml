@@ -41,6 +41,124 @@ jobs:
           p = "src/application/production-composition.ts"
           replace_once(
               p,
-              'fine {ProductionEvidenceGap,stepExecutionFromBoundedResultV1} from "./production-evidence.js";',
-               'import {ProductionEvidenceGap,stepExecutionFromBoundedResultV1} from "./production-evidence.js";'if False else import  }
+              'import {ProductionEvidenceGap,stepExecutionFromBoundedResultV1} from "./production-evidence.js";',
+              'import {ProductionEvidenceGap,stepExecutionFromBoundedResultV1} from "./production-evidence.js";\nimport type {ProductionMissionControlProjectionPortV1} from "./production-mission-control.js";'
+          )
+          replace_once(
+              p,
+              'export function composeSentientApplication(o:ComposeSentientApplicationOptions):SentientApplication{',
+              'export function composeSentientApplication(o:ComposeSentientApplicationOptions & {missionControl?:ProductionMissionControlProjectionPortV1|null}):SentientApplication{'
+          )
+          replace_once(
+              p,
+              ' const modelImprovement=unavailable(o.modelImprovement!==undefined&&o.modelImprovement!==null,"phase7_model_improvement_binding_missing");\n const spawn=unavailable(o.spawnBackends.length>0,"spawn_execution_backend_missing");',
+              ' const modelImprovement=unavailable(o.modelImprovement!==undefined&&o.modelImprovement!==null,"phase7_model_improvement_binding_missing");\n const missionControlRequired=o.missionControl!==undefined&&o.missionControl!==null;\n const missionControl=unavailable(missionControlRequired,"mission_control_binding_missing");\n const spawn=unavailable(o.spawnBackends.length>0,"spawn_execution_backend_missing");'
+          )
+          replace_once(
+              p,
+              '  bindingStatus("PHASE7_MODEL_IMPROVEMENT",modelImprovement.availability,true,modelImprovement.reason),\n  cstat("SKILLS_TOOLS",true),',
+              '  bindingStatus("PHASE7_MODEL_IMPROVEMENT",modelImprovement.availability,true,modelImprovement.reason),\n  bindingStatus("ROOT_MISSION_CONTROL",missionControl.availability,missionControlRequired,missionControl.reason),\n  cstat("SKILLS_TOOLS",true),'
+          )
+          replace_once(
+              p,
+              '  if(o.modelImprovement)try{await o.modelImprovement.initialize();ok(modelImprovement)}catch(e){fail(modelImprovement,"phase7_model_improvement_initialization_failed");bad.push(`PHASE7_MODEL_IMPROVEMENT:${err(e)}`)}\n  const rb:typeof backs=[];',
+              '  if(o.modelImprovement)try{await o.modelImprovement.initialize();ok(modelImprovement)}catch(e){fail(modelImprovement,"phase7_model_improvement_initialization_failed");bad.push(`PHASE7_MODEL_IMPROVEMENT:${err(e)}`)}\n  if(o.missionControl)try{await o.missionControl.initialize();ok(missionControl)}catch(e){fail(missionControl,"mission_control_initialization_failed");bad.push(`ROOT_MISSION_CONTROL:${err(e)}`)}\n  const rb:typeof backs=[];'
+          )
+          replace_once(
+              p,
+              '  await o.modelImprovement?.close?.().catch(()=>undefined);fail(modelImprovement,"closed");',
+              '  await o.missionControl?.close().catch(()=>undefined);fail(missionControl,"closed");\n  await o.modelImprovement?.close?.().catch(()=>undefined);fail(modelImprovement,"closed");'
+          )
+          replace_once(
+              p,
+              '  if(m==="collaborative"){await root(d,i);await ensureProductionObjectiveContinuationV1(d,i);return runProductionCollaborationV1(d,i,{sourceSha:o.identity.source.sha,applicationVersion:SENTIENT_APPLICATION_CONTRACT},backs)}',
+              '  if(m==="collaborative"){await root(d,i);await ensureProductionObjectiveContinuationV1(d,i);if(o.missionControl)return o.missionControl.run(i);return runProductionCollaborationV1(d,i,{sourceSha:o.identity.source.sha,applicationVersion:SENTIENT_APPLICATION_CONTRACT},backs)}'
+          )
+          replace_once(
+              p,
+              ' if(m!=="auto")return m;if(collab(r))return"collaborative";if(shouldPlanObjectiveV1(r))return"multi_step";return selectCapabilityV1(r)==="ORDINARY"?"ordinary":"capability";',
+              ' if(m!=="auto")return m;if(collab(r)||shouldPlanObjectiveV1(r))return"collaborative";return selectCapabilityV1(r)==="ORDINARY"?"ordinary":"capability";'
+          )
+
+          p = "src/fly/production-runtime.ts"
+          replace_once(
+              p,
+              'import { ProductionLocalHfModelImprovementV1 } from "../application/production-model-improvement.js";',
+              'import { ProductionLocalHfModelImprovementV1 } from "../application/production-model-improvement.js";\nimport { ProductionMissionControlV1 } from "../application/production-mission-control.js";'
+          )
+          replace_once(
+              p,
+              '  const spawnBackends = [\n    new LocalHuggingFaceSpawnExecutionBackendV1(localHfRuntime),\n  ];\n\n  const application = composeSentientApplication({',
+              '  const spawnBackends = [\n    new LocalHuggingFaceSpawnExecutionBackendV1(localHfRuntime),\n  ];\n  const missionControl = state === null || databaseUrl === null\n    ? null\n    : new ProductionMissionControlV1({ databaseUrl, state, spawnBackends, identity });\n\n  const application = composeSentientApplication({'
+          )
+          replace_once(
+              p,
+              '    modelImprovement,\n    capabilities,',
+              '    modelImprovement,\n    missionControl,\n    capabilities,'
+          )
+          replace_once(
+              p,
+              '          registry: phase4ExecutorFactory,\n        },',
+              '          registry: phase4ExecutorFactory,\n          missionControl,\n        },'
+          )
+
+          p = "src/fly/self-execution.ts"
+          replace_once(
+              p,
+              'import { ProductionCollaborationLeaseLiveErrorV1 } from "../application/production-collaboration.js";',
+              'import { ProductionCollaborationLeaseLiveErrorV1 } from "../application/production-collaboration.js";\nimport type { ProductionMissionControlProjectionPortV1 } from "../application/production-mission-control.js";'
+          )
+          replace_once(
+              p,
+              '  result: JsonValue | null;\n}',
+              '  result: JsonValue | null;\n  rootProjection: JsonValue | null;\n}'
+          )
+          replace_once(
+              p,
+              '  readonly #identity: SentientApplicationIdentity;\n  readonly #active = new Map<string, Promise<void>>();',
+              '  readonly #identity: SentientApplicationIdentity;\n  readonly #missionControl: ProductionMissionControlProjectionPortV1 | null;\n  readonly #active = new Map<string, Promise<void>>();'
+          )
+          replace_once(
+              p,
+              '    registry: EngineeringObjectiveRegistryV1;\n    identity: SentientApplicationIdentity;\n  }) {',
+              '    registry: EngineeringObjectiveRegistryV1;\n    identity: SentientApplicationIdentity;\n    missionControl?: ProductionMissionControlProjectionPortV1 | null;\n  }) {'
+          )
+          replace_once(
+              p,
+              '    this.#registry = input.registry;\n    this.#identity = input.identity;\n  }',
+              '    this.#registry = input.registry;\n    this.#identity = input.identity;\n    this.#missionControl = input.missionControl ?? null;\n  }'
+          )
+          replace_once(
+              p,
+              '  public async status(objectiveId: string): Promise<ObjectiveRunnerStatusV1> {\n    const task = await this.#state.get("task", objectiveId);\n    if (task?.kind !== "task") throw new Error("objective_not_found");\n    return objectiveRunnerStatusFromTask(task);\n  }',
+              '  public async status(objectiveId: string): Promise<ObjectiveRunnerStatusV1> {\n    const task = await this.#state.get("task", objectiveId);\n    if (task?.kind !== "task") throw new Error("objective_not_found");\n    const receipt = objectiveRunnerStatusFromTask(task);\n    const metadata = parseRunnerMetadata(task);\n    if (metadata === null || this.#missionControl === null) return receipt;\n    const projection = await this.#missionControl.project({objectiveId,humanIntent:metadata.request});\n    return Object.freeze({...receipt,rootProjection:projection===null?null:jsonValue(projection)});\n  }'
+          )
+          replace_once(
+              p,
+              '    result: metadata.result,\n  });',
+              '    result: metadata.result,\n    rootProjection: null,\n  });'
+          )
           PY
+          git diff --check
+
+      - name: Build and focused Mission Control regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/spawn-mission-control.test.js
+          node --test dist/tests/spawn-mission-control.test.js
+
+      - name: Commit canonical successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' src/application/production-composition.ts src/fly/production-runtime.ts src/fly/self-execution.ts | sort)"
+          git config user.name "sentient-mvp-activation"
+          git config user.email "sentient-mvp-activation@users.noreply.github.com"
+          git add src/application/production-composition.ts src/fly/production-runtime.ts src/fly/self-execution.ts
+          git commit -m "mvp: route production objectives through Root Mission Control"
+          git push origin HEAD:sentient/mvp-mission-control-integration-v1
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git rev-parse 'HEAD^{tree}')"
