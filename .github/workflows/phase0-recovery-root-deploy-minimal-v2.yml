@@ -1,35 +1,52 @@
-name: Phase0 Recovery Root Deploy Minimal V2
+name: Phase0 Recovery Root Deploy Minimal V3
 on:
   workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
 permissions:
   contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      TARGET_SHA: 5d642c9e337e99639a4af8640249cc8f27595764
-      TARGET_TREE: 5a895ad4403792dffd64f004f392dd55ce7c1b63
+      TARGET_SHA: ${{ inputs.sha }}
+      TARGET_TREE: ${{ inputs.tree }}
       GOVERNOR_APP: sentient-deployment-governor
       RECOVERY_APP: sentient-governor-recovery-root
     steps:
-      - uses: "actions/checkout\u0040v4"
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: 5d642c9e337e99639a4af8640249cc8f27595764
+          ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
-      - uses: "superfly/flyctl-actions/setup-flyctl\u0040master"
-      - name: Deploy recovery root
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Redeploy existing recovery root exactly
         shell: bash
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLU_API_TOKEN: ${{ secrets.FLU_API_TOKEN }}
         run: |
           set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_TREE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
           echo "CANONICAL_FENCE=PASS"
+
+          recovery_before="$(flyctl machines list -a "$RECOVERY_APP" --json)"
+          before_count="$(printf '%s' "$recovery_before" | jq 'length')"
+          test "$before_count" -eq 1
 
           machines="$(flyctl machines list -a "$GOVERNOR_APP" --json)"
           id="$(printf '%s' "$machines" | jq -r '.[0].id')"
@@ -38,7 +55,7 @@ jobs:
             flyctl machine start "$id" -a "$GOVERNOR_APP" >/dev/null
           fi
 
-          DB="$(flyctl ssh console -a "$GOVERNOR_APP" -C 'printenv SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL' 2>/dev/null | tail -n1)"
+          DB="$(flyctl ssh console -a "$GOVERNOR_APP" -C 'printenv SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL+' 2>/dev/null | tail -n1)"
           test -n "$DB"
           echo "::add-mask::$DB"
           printf 'SENTIENT_DATABASE_BOOTSTRAP_URL=%s\n' "$DB" | flyctl secrets import -a "$RECOVERY_APP" --stage >/dev/null
@@ -47,4 +64,12 @@ jobs:
           echo "SECRET_VALUES_EXPOSED=false"
 
           flyctl deploy --app "$RECOVERY_APP" --config fly.recovery.toml --remote-only --yes --ha=false
+
+          recovery_after="$(flyctl machines list -a "$RECOVERY_APP" --json)"
+          after_count="$(printf '%s' "$recovery_after" | jq 'length')"
+          test "$after_count" -eq 1
+          echo "RECOVERY_MACHINE_COUNT_BEFORE=$before_count"
+          echo "RECOVERY_MACHINE_COUNT_AFTER=$after_count"
+          echo "NEW_FLY_MACHINE=false"
+          echo "FLY_RESOURCE_ENVELOPE_CHANGED=false"
           echo "RECOVERY_ROOT_EXACT_SOURCE_DEPLOY=PASS"
