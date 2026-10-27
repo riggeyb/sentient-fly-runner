@@ -147,9 +147,8 @@ jobs:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
           set -euo pipefail
-          for _ in $(seq 1 20); do
-            curl -fsS --max-time 20 "$WORKER_URL/" >/dev/null
-          done
+          # The temporary Worker has no Cloudflare Access policy attached; exercise the
+          # application-level Access JWT guard through the same-origin objective route.
           code="$(curl -sS -o "${RUNNER_TEMP}/objective-response.txt" -w '%{http_code}' --max-time 20 \
             -X POST -H 'content-type: application/json' \
             --data '{"objective":"read-only test"}' \
