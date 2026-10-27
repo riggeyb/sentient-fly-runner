@@ -1,0 +1,48 @@
+name: Force exact Mission Control vendor
+on: {workflow_dispatch: {}}
+permissions: {contents: read}
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: b3df9b32b47370a7140d6fe814eeba97564663ab
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: skills
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - shell: bash
+        run: |
+          set -euo pipefail
+          cd skills
+          test "$(git rev-parse HEAD)" = b3df9b32b47370a7140d6fe814eeba97564663ab
+          test "$(git rev-parse 'HEAD^{tree}')" = 3173ee3cb2e39038921d3b125f1a74ecd783ff30
+          cd sentient-orchestrator
+          npm install --no-package-lock --no-audit --no-fund
+          npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --esModuleInterop --skipLibCheck --types node --rootDir src --outDir dist --declaration src/*.ts
+          test -f dist/mission-control-context.js
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient/mvp-mission-control-integration-v1
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: true
+          fetch-depth: 0
+      - shell: bash
+        run: |
+          set -euo pipefail
+          cd sentient
+          test "$(git rev-parse HEAD)" = 21e2491f229e80562380224993b38a47f4fc94f4
+          rm -rf vendor/sentient-orchestrator/dist
+          cp -R ../skills/sentient-orchestrator/dist vendor/sentient-orchestrator/dist
+          git config user.name sentient-mvp-activation
+          git config user.email sentient-mvp-activation@users.noreply.github.com
+          git add -f vendor/sentient-orchestrator/dist
+          git commit -m "mvp: include exact compiled Mission Control artifact"
+          git push origin HEAD:sentient/mvp-mission-control-integration-v1
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
