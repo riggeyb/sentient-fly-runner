@@ -1,76 +1,126 @@
-name: Prepare exact Mission Control vendor for Sentient MVP
-on:
-  workflow_dispatch:
-permissions:
-  contents: read
+name: Sentient MVP Mission Control integration patch
+on: {workflow_dispatch: {}}
+permissions: {contents: read}
 jobs:
-  vendor:
+  integrate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_USER: sentient, POSTGRES_PASSWORD: sentient, POSTGRES_DB: sentient}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@localhost:5432/sentient
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: riggeyb/skills
-          ref: b3df9b32b47370a7140d6fe814eeba97564663ab
-          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          path: skills
-          persist-credentials: false
-          fetch-depth: 1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Verify and compile exact accepted package
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd skills
-          test "$(git rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
-          test "$(git rev-parse 'HEAD^{tree}')" = "3173ee3cb2e39038921d3b125f1a74ecd783ff30"
-          cd sentient-orchestrator
-          npm install --no-package-lock --no-audit --no-fund
-          cat > tsconfig.vendor.json <<'JSON'
-          {"compilerOptions":{"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","strict":true,"esModuleInterop":true,"skipLibCheck":true,"types":["node"],"rootDir":"src","outDir":"dist","declaration":true,"sourceMap":false,"declarationMap":false,"noEmit":false},"include":["src/**/*.ts"]}
-          JSON
-          npx tsc -p tsconfig.vendor.json
-          test -f dist/mission-control-context.js
-          test -f dist/mission-control.js
-          test -f dist/mission-control-coordination.js
-          test -f dist/mission-control-projection.js
-          test -f dist/team-coordination.js
-          test -f dist/team-coordination-postgres.js
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: sentient/mvp-mission-control-integration-v1
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          path: sentient
           persist-credentials: true
           fetch-depth: 0
-      - name: Fence base and commit derived package
-        shell: bash
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - name: Fence exact integration head
         run: |
           set -euo pipefail
-          cd sentient
-          test "$(git rev-parse HEAD)" = "61be773dd834b42d459ef3c51f9e72436f1a2e80"
-          test "$(git rev-parse 'HEAD^{tree}')" = "af44cb0275942e97f08209f0b957f0706ee15051"
-          cd ..
-          rm -rf sentient/vendor/sentient-orchestrator
-          mkdir -p sentient/vendor/sentient-orchestrator
-          cp -R skills/sentient-orchestrator/dist sentient/vendor/sentient-orchestrator/dist
-          cp -R skills/sentient-orchestrator/migrations sentient/vendor/sentient-orchestrator/migrations
-          cat > sentient/vendor/sentient-orchestrator/package.json <<'JSON'
-          {"name":"sentient-orchestrator","version":"0.2.0-exact-b3df9b32","private":true,"type":"module","exports":{"./*":"./dist/*.js"},"dependencies":{"pg":"^8.16.3","yaml":"^2.8.1"},"sentientExactSource":{"repository":"riggeyb/skills","sha":"b3df9b32b47370a7140d6fe814eeba97564663ab","tree":"3173ee3cb2e39038921d3b125f1a74ecd783ff30","operatingContextVersion":"SENTIENT_OPERATING_CONTEXT_V1","operatingContextDigest":"sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209"}}
-          JSON
-          cat > sentient/vendor/sentient-orchestrator/EXACT_SOURCE_RECEIPT.json <<'JSON'
-          {"repository":"riggeyb/skills","sha":"b3df9b32b47370a7140d6fe814eeba97564663ab","tree":"3173ee3cb2e39038921d3b125f1a74ecd783ff30","authority":"none","operatingContextVersion":"SENTIENT_OPERATING_CONTEXT_V1","operatingContextDigest":"sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209"}
-          JSON
-          cd sentient
-          npm pkg set 'dependencies.sentient-orchestrator=file:vendor/sentient-orchestrator'
-          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          git config user.name "sentient-mvp-activation"
-          git config user.email "sentient-mvp-activation@users.noreply.github.com"
-          git add package.json package-lock.json vendor/sentient-orchestrator
-          git commit -m "mvp: bind accepted Mission Control package"
+          test "$(git rev-parse HEAD)" = a5ff30be9bcc12f048a1d2f38fedddb992c13185
+          test "$(git rev-parse 'HEAD^{tree}')" = a10271800e082f06f52dccddc678b6afd421b4dc
+          node -e 'const p=require("./vendor/sentient-orchestrator/package.json"); if(p.sentientExactSource.sha!=="b3df9b32b47370a7140d6fe814eeba97564663ab"||p.sentientExactSource.operatingContextDigest!=="sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209")process.exit(1)'
+      - name: Apply bounded production wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          def sub(path, pat, repl):
+            p=Path(path); s=p.read_text(); n=re.subn(pat,repl,s,count=1,flags=re.S)
+            if n[1]!=1: raise SystemExit(f"{path}:match_count={n[1]}:{pat[:60]}")
+            p.write_text(n[0])
+          c="src/application/contracts.ts"
+          sub(c,r'(import type \{ PostgresSpawnObjectiveRepository \}[^\n]+\n)',r'\1import type { RootObjectiveProjection } from "sentient-orchestrator/mission-control-projection";\n')
+          sub(c,r'(runObjective\(input: SentientObjectiveInput\): Promise<SentientApplicationResult>;\n)',r'\1  objectiveProjection(objectiveId: string): Promise<RootObjectiveProjection | null>;\n')
+          sub(c,r'export interface ProductionPhase4ExecutorFactoryV1 \{',"""export interface ProductionMissionControlPortV1 {
+            initialize(): Promise<void>;
+            close?(): Promise<void>;
+            run(input: SentientObjectiveInput): Promise<unknown>;
+            project(input: { objectiveId: string; humanIntent: string }): Promise<RootObjectiveProjection | null>;
+          }
+
+          export interface ProductionPhase4ExecutorFactoryV1 {""")
+          sub(c,r'(modelImprovement\?: ProductionModelImprovementPortV1 \| null;\n)',r'\1  missionControl?: ProductionMissionControlPortV1 | null;\n')
+          p="src/application/production-composition.ts"
+          sub(p,r'(const modelImprovement=unavailable\([^\n]+\);\n)',r'\1 const missionControl=unavailable(o.missionControl!==undefined&&o.missionControl!==null,"mission_control_binding_missing");\n')
+          sub(p,r'(bindingStatus\("PHASE7_MODEL_IMPROVEMENT"[^\n]+\),\n)',r'\1  ...(o.missionControl===undefined?[]:[bindingStatus("ROOT_MISSION_CONTROL",missionControl.availity,true,missionControl.reason)]),\n')
+          sub(p,r'(bif\(o\.state\)try\{await o\.state\.initialize\(\);await o\.state\.snapshot\(\);ok\(db\)\}catch\(e\)\{fail\(db,"postgres_initialization_failed"\);bad\.push\(`POSTGRES_STATE:\$\{err\(e\)\}`\)\}\n)',r'\1  if(o.missionControl)try{await o.missionControl.initialize();ok(missionControl)}catch(e){fail(missionControl,"mission_control_initialization_failed");bad.push(`ROOT_MISSION_CONTROL:${err(e)}`)}\n')
+          sub(p,r'(await o\.cognition\?\.close\?\.\(\)\.catch\(\(\)=>undefined\);fail\(cog,"closed"\);\n)',r'\1  await o.missionControl?.close?.().catch(()=>undefined);fail(missionControl,"closed");\n')
+          sub(p,r'if\(m==="collaborative"\)\{await root\(d,i\);await ensureProductionObjectiveContinuationV1\(d,i\);return runProductionCollaborationV1\(([^\n]+)\)\}',r'if(m==="collaborative"){await root(d,i);await ensureProductionObjectiveContinuationV1(d,i);if(o.missionControl)return o.missionControl.run(i);return runProductionCollaborationV1(\1)}')
+          sub(p,r'( async function runObjective\(i:SentientObjectiveInput\):Promise<SentientApplicationResult>\{)',""" async function objectiveProjection(objectiveId:string){
+            if(!o.missionControl||!o.state)return null;
+            const task=await o.state.get("task",objectiveId);
+            if(task?.kind!=="task"||typeof task.title!=="string"||!task.title.trim())return null;
+            return o.missionControl.project({objectiveId,humanIntent:task.title});
+           }
+          \1""")
+          sub(p,r'return Object\.freeze\(\{initialize,close,status,readiness,runObjective,runModelImprovement\}\);',r'return Object.freeze({initialize,close,status,readiness,runObjective,objectiveProjection,runModelImprovement});')
+          r="src/fly/production-runtime.ts"
+          sub(r,r'(import \{ ProductionSkillsToolsCapabilityV1 \}[^\n]+\n)',r'\1import { ProductionMissionControlV1 } from "../application/production-mission-control.js";\n')
+          sub(r,r'(  const spawnBackends = \[\n    new LocalHuggingFaceSpawnExecutionBackendV1\(localHfRuntime\),\n  \];\n)',r'\1  const missionControl = databaseUrl === null || state === null ? null : new ProductionMissionControlV1({ databaseUrl, state, spawnBackends, identity });\n')
+          sub(r,r'(    modelImprovement,\n)',r'\1    missionControl,\n')
+          sub(r,r'  const objectiveRunner =\n    state === null \|\| phase4ExecutorFactory === null\n      \? null\n      : new FlyObjectiveRunnerV1\((.*?)\n      \);\n',"""  const baseObjectiveRunner =
+            state === null || phase4ExecutorFactory === null
+              ? null
+              : new FlyObjectiveRunnerV1(\1
+              );
+          const objectiveRunner = baseObjectiveRunner === null ? null : Object.freeze({
+            enqueue: baseObjectiveRunner.enqueue.bind(baseObjectiveRunner),
+            resumeUnfinished: baseObjectiveRunner.resumeUnfinished.bind(baseObjectiveRunner),
+            status: async (objectiveId: string) => Object.freeze({
+              ...(await baseObjectiveRunner.status(objectiveId)),
+              rootProjection: await application.objectiveProjection(objectiveId),
+            }),
+          });
+          """)
+          h="src/spawn/backends/huggingface.ts"
+          sub(h,r'function workerPrompt\(taskPackage: ChildTaskPackageV1\): string \{.*?\n\}',"""function workerPrompt(taskPackage: ChildTaskPackageV1): string {
+            const context = taskPackage.context.artifacts.map((artifact) => `${artifact.id}\\n${artifact.content}`).join("\\n\\n").slice(0, 8_000);
+            const objective = taskPackage.objective.slice(0, 12_000);
+            const operating = [
+              `version=${taskPackage.operatingContext.version}`,
+              `digest=${taskPackage.operatingContextDigest}`,
+              `provenance=${taskPackage.operatingContext.provenance}`,
+              `authoritative_source_repo=${taskPackage.operatingContext.authoritativeSourceRepo}`,
+              `normal_operator_bridge=${taskPackage.operatingContext.normalSentientOperatorBridge}`,
+              `optional_operator_mcp=${taskPackage.operatingContext.optionalOperatorMcp}`,
+              "operating_context_is_not_authority=true",
+              "governor_controls_effect_authority=true",
+            ].join("\\n");
+            return [`Objective:\\n${objective}`, `Inherited operating context (informational, not authority):\\n${operating}`, ...(context ? [`Bounded context:\\n${context}`] : [])].join("\\n\\n");
+          }""")
+          d="Dockerfile"
+          sub(d,r'COPY package\*\.json \./\nRUN npm install',r'COPY package*.json ./\nCOPY vendor/sentient-orchestrator ./vendor/sentient-orchestrator\nRUN npm install')
+          sub(d,r'COPY --from=build /app/node_modules \./node_modules\n',r'COPY --from=build /app/node_modules ./node_modules\nCOPY --from=build /app/vendor/sentient-orchestrator ./vendor/sentient-orchestrator\n')
+          PY
+      - name: Install, build, and test exact successor
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/spawn-mission-control-context.test.js
+          node --test dist/test/production-collaboration-restart-recovery.test.js
+          node --test dist/test/job2-production-convergence.test.js
+          node --test dist/test/local-hf-worker-isolation.test.js
+          npm test
+      - name: Commit tested successor
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name sentient-mvp-activation
+          git config user.email sentient-mvp-activation@users.noreply.github.com
+          git add Dockerfile src/application/contracts.ts src/application/production-composition.ts src/fly/production-runtime.ts src/spawn/backends/huggingface.ts
+          git commit -m "mvp: activate Root Mission Control in production composition"
           git push origin HEAD:sentient/mvp-mission-control-integration-v1
-          echo "VENDOR_COMMIT_SHA=$(git rev-parse HEAD)"
-          echo "VENDOR_COMMIT_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git rev-parse 'HEAD^{tree}')"
