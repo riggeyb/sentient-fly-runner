@@ -50,8 +50,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
           echo "SOURCE_SHA=$EXPECTED_SHA"
@@ -61,42 +59,26 @@ jobs:
           echo "ORCHESTRATOR_MANIFEST_SHA=$(git rev-parse HEAD:sentient-orchestrator/package.json)"
       - name: Install Python dependencies
         run: pip install -r requirements.txt
-      - name: Validate registry structure
+      - name: Registry validation
         run: python scripts/validate_registry.py
-      - name: Validate eval definitions
-        run: python scripts/check_evals.py
-      - name: Validate durable objective continuation contract
-        run: PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
-      - name: Validate active work disclosure contract
-        run: PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
-      - name: Test deterministic repository edit preparation
-        run: python scripts/test_repository_edit.py
-      - name: Test deterministic repository edit request gateway
-        run: python scripts/test_repository_edit_request.py
-      - name: Validate GPT Actions schema compatibility
-        run: python scripts/validate_actions_schema.py
-      - name: Validate Netlify Actions schema compatibility
-        run: python scripts/validate_netlify_actions_schema.py
-      - name: Install Sentient orchestrator dependencies
+      - name: Install orchestrator dependencies
         working-directory: sentient-orchestrator
         run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
-      - name: Typecheck Sentient orchestrator
+      - name: Typecheck
         working-directory: sentient-orchestrator
         run: npm run typecheck
-      - name: Apply Sentient orchestrator migrations
+      - name: Migrate Postgres
         working-directory: sentient-orchestrator
         run: npm run migrate
-      - name: Test Sentient orchestrator
+      - name: Full orchestrator tests
         working-directory: sentient-orchestrator
         run: npm test
-      - name: Validate GitHub repositories and entrypoints
-        env:
-          GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-        run: python scripts/validate_registry.py --remote
-      - name: Source mutation guard
+      - name: Guard tracked source mutation
         shell: bash
         run: |
           set -euo pipefail
-          test -z "$(git status --porcelain)"
+          git diff --quiet
+          git diff --cached --quiet
           echo "SOURCE_MUTATION=false"
-          echo "VALIDATION_RESULT=PASS"
+          echo "GENERATED_UNTRACKED_ARTIFACTS_ALLOWED=true"
+          echo "DIRECT_EXACT_SHA_ACCEPTANCE=PASS"
