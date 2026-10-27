@@ -1,0 +1,65 @@
+name: Patch MVP Mission Control canonical completion
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient/mvp-mission-control-integration-v1
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fence patch build and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "74ad1be0ab36e87ed5f8d77cf470a2b790fb6faa"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/application/production-mission-control.ts")
+          s = p.read_text()
+          a = s.find('    await publishMissionEvent({\n      coordination: this.#coordination,\n      sessionId,\n      participantKey: rootKey,\n      workerId: root.workerId,\n      type: "ROOT_DECISION",')
+          if a < 0:
+              raise SystemExit("ROOT_DECISION block not found")
+          b = s.find('    await publishMissionEvent({\n      coordination: this.#coordination,\n      sessionId,\n      participantKey: rootKey,\n      workerId: root.workerId,\n      type: "ORCHESTRATOR_COMPLETE",', a)
+          if b < 0:
+              raise SystemExit("ORCHESTRATOR_COMPLETE block not found")
+          s = s[:a] + s[b:]
+          old = '''      details: {
+        status: converged ? "SUCCEEDED" : "NOT_CONVERGED",
+        acceptedEvidenceCount: converged ? workers.length : 0,
+      },'''
+          new = '''      details: {
+        orchestratorId: root.workerId,
+        result: truncateMissionText(
+          authoritativeContent ?? "Sentient did not produce a verified result.",
+          1500,
+        ),
+        evidenceIds: converged
+          ? workers.map((worker, index) =>
+              boundedEvidenceId(input.objectiveId, worker.workerId, index),
+            )
+          : [],
+      },'''
+          if old not in s:
+              raise SystemExit("completion details block not found")
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          npm install --no-audit --no-fund
+          npm run build
+          git config user.name sentient-mvp-activation
+          git config user.email sentient-mvp-activation@users.noreply.github.com
+          git add src/application/production-mission-control.ts
+          git commit -m "mvp: use canonical Mission Control completion event"
+          git push origin HEAD:sentient/mvp-mission-control-integration-v1
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git rev-parse 'HEAD^{tree}')"
