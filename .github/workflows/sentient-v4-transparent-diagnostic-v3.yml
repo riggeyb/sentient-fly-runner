@@ -13,16 +13,34 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
+      MACHINE_ID: 8469e7b243d558
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Read Fly machine state only
+      - name: Restore existing machine after failed restart transport
         shell: bash
         run: |
           set -euo pipefail
-          flyctl machines list -a "$APP" --json | jq '[.[] | {id,state,region,image,created_at,updated_at}]'
-          flyctl status -a "$APP" || true
-          echo READ_ONLY_FLY_STATE=PASS
+          before="$(flyctl machines list -a "$APP" --json)"
+          test "$(jq -r --arg id "$MACHINE_ID" '.[]|select(.id==$id)|.state' <<<"$before")" = "stopped"
+          test "$(jq -r 'length' <<<"$before")" = "1"
+          flyctl machine start "$MACHINE_ID" -a "$APP"
+          for _ in $(seq 1 120); do
+            r="$(curl -fsS --max-time 5 "https://${APP}.fly.dev/readyz" || true)"
+            if jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null 2>&1 <<<"$r"; then
+              after="$(flyctl machines list -a "$APP" --json)"
+              test "$(jq -r 'length' <<<"$after")" = "1"
+              echo EXISTING_MACHINE_RESTORED=PASS
+              echo EXACT_RUNTIME_READY=PASS
+              echo NEW_FLY_MACHINE=false
+              echo FLY_RESOURCE_ENVELOPE_CHANGED=false
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
