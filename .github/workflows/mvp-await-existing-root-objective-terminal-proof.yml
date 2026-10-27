@@ -18,17 +18,30 @@ jobs:
       OID: ${{ inputs.objective_id }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: GET-only terminal observation
+      - name: Wake and verify exact existing runtime
         shell: bash
         run: |
           set -euo pipefail
           [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          for _ in $(seq 1 30); do
+            h="$(curl -fsS --max-time 12 "https://${APP}.fly.dev/healthz" 2>/dev/null || true)"
+            r="$(curl -fsS --max-time 12 "https://${APP}.fly.dev/readyz" 2>/dev/null || true)"
+            if jq -e --arg s "$SHA" --arg t "$TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null 2>&1 <<<"$h" &&
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null 2>&1 <<<"$r"; then
+              echo LIVE_EXACT_IDENTITY=PASS
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: GET-only terminal observation
+        shell: bash
+        run: |
+          set -euo pipefail
           cat >"$RUNNER_TEMP/a.mjs" <<'NODE'
-          const oid=process.env.CERT_OBJECTIVE_ID, s=process.env.CERT_SHA, t=process.env.CERT_TREE;
+          const oid=process.env.CERT_OBJECTIVE_ID;
           const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
-          if(!oid||!s||!t||!token) throw new Error("binding_missing");
-          if(process.env.SENTIENT_RUNTIME_SHA!==s||process.env.SENTIENT_RUNTIME_TREE!==t) throw new Error("runtime_identity_mismatch");
-          console.log("LIVE_EXACT_IDENTITY=PASS");
+          if(!oid||!token) throw new Error("binding_missing");
           const h={authorization:`Bearer ${token}`};
           let b=null,e=null;
           for(let i=0;i<360;i++){
@@ -57,4 +70,4 @@ jobs:
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
           B64="$(base64 -w0 "$RUNNER_TEMP/a.mjs")"
-          timeout 780s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/a.mjs; CERT_OBJECTIVE_ID=$OID CERT_SHA=$SHA CERT_TREE=$TREE node /tmp/a.mjs; rc=\$?; rm -f /tmp/a.mjs; exit \$rc'"
+          timeout 780s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/a.mjs; CERT_OBJECTIVE_ID=$OID node /tmp/a.mjs; rc=\$?; rm -f /tmp/a.mjs; exit \$rc'"
