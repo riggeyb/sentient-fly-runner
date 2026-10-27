@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: riggeyb/skills
-          ref: 35ed1b4f3ca1f8cedb971d0b294a707a4b78d11d
+          ref: 6f074b7d6b8d858c323900ca2838fefcfa18505a
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
@@ -44,8 +44,8 @@ jobs:
       - name: Fence exact source and dependency identity
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "35ed1b4f3ca1f8cedb971d0b294a707a4b78d11d"
-          test "$(git rev-parse 'HEAD^{tree}')" = "c6646fd1b423238c5d09d47fc1880edbb836a558"
+          test "$(git rev-parse HEAD)" = "6f074b7d6b8d858c323900ca2838fefcfa18505a"
+          test "$(git rev-parse 'HEAD^{tree}')" = "df6e1828bc154cd6fb972b8bb668c98596902be8"
           echo "SOURCE_SHA=$(git rev-parse HEAD)"
           echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
           echo "EXECUTION_ENVIRONMENT=github-hosted-ubuntu-latest-via-riggeyb/sentient-fly-runner"
@@ -74,13 +74,13 @@ jobs:
         run: npm install --ignore-scripts --no-package-lock --no-audit --no-fund
       - name: Typecheck orchestrator
         working-directory: sentient-orchestrator
-        run: npm run typecheck
+        run: npm run typecheck 2>&1 | tee "$RUNNER_TEMP/skills-typecheck.log"
       - name: Apply Postgres migrations
         working-directory: sentient-orchestrator
         run: npm run migrate
       - name: Run full orchestrator tests
         working-directory: sentient-orchestrator
-        run: npm test
+        run: npm test 2>&1 | tee "$RUNNER_TEMP/skills-tests.log"
       - name: Validate remote registry entrypoints
         env:
           GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
@@ -88,9 +88,19 @@ jobs:
       - name: Verify read-only source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "35ed1b4f3ca1f8cedb971d0b294a707a4b78d11d"
-          test "$(git rev-parse 'HEAD^{tree}')" = "c6646fd1b423238c5d09d47fc1880edbb836a558"
+          test "$(git rev-parse HEAD)" = "6f074b7d6b8d858c323900ca2838fefcfa18505a"
+          test "$(git rev-parse 'HEAD^{tree}')" = "df6e1828bc154cd6fb972b8bb668c98596902be8"
           test -z "$(git status --porcelain)"
           echo "COORDINATION_ACCEPTANCE=PASS"
           echo "SOURCE_MUTATION=false"
           echo "PRODUCTION_DEPLOYMENT=false"
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-coordination-acceptance
+          path: |
+            ${{ runner.temp }}/skills-typecheck.log
+            ${{ runner.temp }}/skills-tests.log
+          if-no-files-found: warn
+          retention-days: 7
