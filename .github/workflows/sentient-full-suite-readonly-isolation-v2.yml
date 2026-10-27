@@ -1,100 +1,171 @@
-name: Sentient Full Suite Readonly Isolation V2
+name: Mission Control Exact Acceptance V1
+
 on:
   workflow_dispatch:
-    inputs:
-      sha:
-        required: true
-        type: string
-      tree:
-        required: true
-        type: string
-      private_issue:
-        required: true
-        type: string
+
 permissions:
   contents: read
+
 jobs:
-  isolate:
+  coordination-substrate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: a6d430ff775044a03f2fca9c63ee6bfa1796f558
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fence exact candidate and lock
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "a6d430ff775044a03f2fca9c63ee6bfa1796f558"
+          test "$(git rev-parse 'HEAD^{tree}')" = "785fb508b67515b1963914196ad7cbee50ccabe2"
+          sha256sum requirements.txt sentient-orchestrator/package-lock.json
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Registry and repository contracts
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          python scripts/validate_registry.py
+          python scripts/check_evals.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+          python scripts/test_repository_edit.py
+          python scripts/test_repository_edit_request.py
+          python scripts/validate_actions_schema.py
+      - name: Coordination substrate acceptance
+        working-directory: sentient-orchestrator
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm run migrate
+          npm test
+          echo PR_245_AUTOMATED_ACCEPTANCE=PASS
+
+  mission-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: b3df9b32b47370a7140d6fe814eeba97564663ab
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fence exact candidate and lock
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "b3df9b32b47370a7140d6fe814eeba97564663ab"
+          test "$(git rev-parse 'HEAD^{tree}')" = "3173ee3cb2e39038921d3b125f1a74ecd783ff30"
+          sha256sum requirements.txt sentient-orchestrator/package-lock.json
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Registry and repository contracts
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          python scripts/validate_registry.py
+          python scripts/check_evals.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+          python scripts/test_repository_edit.py
+          python scripts/test_repository_edit_request.py
+          python scripts/validate_actions_schema.py
+      - name: Mission Control and C1 acceptance
+        working-directory: sentient-orchestrator
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm run migrate
+          npm test
+          echo PR_247_AUTOMATED_ACCEPTANCE=PASS
+
+  sentient-spawn-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgres://sentient:sentient@localhost:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: ${{ inputs.sha }}
+          ref: 12372d0b2417c0521a7927b0cf0b3aa34ea1184c
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
-          fetch-depth: 1
-      - name: Fence and build
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.sha }}
-          EXPECTED_TREE: ${{ inputs.tree }}
+          fetch-depth: 0
+      - name: Fence exact candidate and lock
         run: |
           set -euo pipefail
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
-          npm ci --ignore-scripts --no-audit --no-fund >/dev/null
-          npm run build >/dev/null
-          test -z "$(git status --porcelain)"
-          echo "SOURCE_IDENTITY=PASS"
-          echo "BUILD_RESULT=PASS"
-          echo "SOURCE_MUTATION=false"
-      - name: Isolate failures without public details
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.sha }}
-          EXPECTED_TREE: ${{ inputs.tree }}
+          test "$(git rev-parse HEAD)" = "12372d0b2417c0521a7927b0cf0b3aa34ea1184c"
+          test "$(git rev-parse 'HEAD^{tree}')" = "2f5818abe9f15f50be62002e2f3a39b1b29ad440"
+          sha256sum package-lock.json
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install and build
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fs=require("node:fs"),p=require("node:path"),{spawnSync}=require("node:child_process");
-          const dir=p.join(process.cwd(),"dist","test");
-          const files=fs.readdirSync(dir).filter(x=>x.endsWith(".test.js")).sort();
-          const clean=v=>String(v??"").replace(/gh[pousr]_[A-Za-z0-9_]+/g,"[REDACTED]").replace(/flyv1_[A-Za-z0-9_-]+/g,"[REDACTED]").replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig,"$1=[REDACTED]");
-          const failures=[]; let passed=0;
-          for(const file of files){
-            const t=Date.now();
-            const r=spawnSync(process.execPath,["--test",p.join(dir,file)],{encoding:"utf8",timeout:120000,maxBuffer:2097152,env:{...process.env}});
-            if(r.status===0&&!r.error){passed++;continue}
-            failures.push({file,exitCode:r.status,signal:r.signal??null,error:r.error?.message??null,durationMs:Date.now()-t,tail:clean((r.stdout??"")+"\n"+(r.stderr??"")).slice(-6000)});
-          }
-          const report={sourceSha:process.env.EXPECTED_SHA,sourceTree:process.env.EXPECTED_TREE,totalFiles:files.length,passedFiles:passed,failedFiles:failures.length,failures,sourceMutation:false,deployment:false,certificationReopened:false,learningJustified:false};
-          fs.writeFileSync("/tmp/report.json",JSON.stringify(report));
-          console.log("TOTAL_TEST_FILES="+files.length);
-          console.log("PASSED_TEST_FILES="+passed);
-          console.log("FAILED_TEST_FILES="+failures.length);
-          console.log("PUBLIC_TEST_DETAILS_EXPOSED=false");
-          NODE
-      - name: Post details privately
-        shell: bash
-        env:
-          SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          PRIVATE_ISSUE: ${{ inputs.private_issue }}
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: All authored Mission Control spawn suites
         run: |
           set -euo pipefail
-          [[ "$PRIVATE_ISSUE" =~ ^[0-9]+$ ]]
-          {
-            echo "FULL_SUITE_READONLY_ISOLATION_RECEIPT_V2"
-            node -e 'const r=require("/tmp/report.json"); for(const k of ["sourceSha","sourceTree","totalFiles","passedFiles","failedFiles"]) console.log(k.toUpperCase()+"="+r[k])'
-            echo "SOURCE_MUTATION=false"
-            echo "DEPLOYMENT=false"
-            echo "CERTIFICATION_REOPENED=false"
-            echo "LEARNING_JUSTIFIED=false"
-            echo
-            echo '```json'
-            node -e 'console.log(JSON.stringify(require("/tmp/report.json").failures,null,2))'
-            echo '```'
-          } >/tmp/body.txt
-          jq -Rs '{body:.}' </tmp/body.txt >/tmp/payload.json
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer $SOURCE_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -H "Content-Type: application/json" \
-            -X POST "https://api.github.com/repos/riggeyb/sentient/issues/$PRIVATE_ISSUE/comments" \
-            --data-binary @/tmp/payload.json >/dev/null
-          echo "PRIVATE_REPORT_POSTED=true"
-          echo "SECRET_VALUES_EXPOSED=false"
+          node --test dist/test/spawn-mission-control-context.test.js
+          node --experimental-strip-types --test tests/spawn-mission-control-context.ts
+          node --test dist/test/spawn*.test.js
+          echo MISSION_CONTROL_SPAWN_SUITES=PASS
+      - name: Full Sentient repository tests
+        run: npm test
