@@ -1,7 +1,10 @@
-name: Director Studio Cloudflare Runtime Proof V4
+name: Director Studio Cloudflare Runtime Proof V5
 
 on:
   workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
 
 permissions:
   contents: read
@@ -9,36 +12,69 @@ permissions:
 jobs:
   proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout exact Director Studio candidate
         uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
-          ref: cf7105954218014f3ef6f95ba56638f473e7fae9
+          ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          fetch-depth: 0
+          fetch-depth: 1
+
       - name: Fence exact source identity
         shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "cf7105954218014f3ef6f95ba56638f473e7fae9"
-          test "$(git rev-parse 'HEAD^{tree}')" = "c6a0840427b4151dc4d05e112f445438aca7a0c9"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          echo "PROOF_CANDIDATE_SHA=$EXPECTED_SHA"
+          echo "PROOF_CANDIDATE_TREE=$EXPECTED_TREE"
           echo "PROOF_CANDIDATE_IDENTITY=PASS"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Source architecture audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          clerk_dep="$(node -e 'const p=require("./package.json"); console.log(Number(Boolean((p.dependencies||{})["@clerk/nextjs"] || (p.devDependencies||{})["@clerk/nextjs"])))')"
+          clerk_refs="$(git grep -nEi '(@clerk/nextjs|clerkMiddleware|ClerkProvider|useAuth\(|useUser\(|CLERK_)' -- ':!SOURCE_PROVENANCE.json' ':!reference-source/**' ':!design-reference/**' || true)"
+          netlify_runtime="$(git grep -nEi '(netlify\.app|NETLIFY_|netlify/functions|@netlify/|netlify.toml)' -- 'app/**' 'components/**' 'lib/**' 'proxy.ts' 'package.json' '.env.example' 'vite.config.ts' 'wrangler.jsonc' || true)"
+          public_token="$(git grep -n 'NEXT_PUBLIC_DIRECTOR_SENTIENT_TOKEN' -- ':!SOURCE_PROVENANCE.json' ':!reference-source/**' ':!design-reference/**' || true)"
+          echo "CLERK_DEPENDENCY_PRESENT=$clerk_dep"
+          echo "CLERK_RUNTIME_REFERENCE_COUNT=$(printf '%s\n' "$clerk_refs" | sed '/^$/d' | wc -l | tr -d ' ')"
+          echo "NETLIFY_ACTIVE_REFERENCE_COUNT=$(printf '%s\n' "$netlify_runtime" | sed '/^$/d' | wc -l | tr -d ' ')"
+          echo "PUBLIC_SENTIENT_TOKEN_REFERENCE_COUNT=$(printf '%s\n' "$public_token" | sed '/^$/d' | wc -l | tr -d ' ')"
+          test "$clerk_dep" = "0"
+          test -z "$clerk_refs"
+          test -z "$public_token"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
       - name: Focused Sentient Cloudflare contract tests
         run: npx tsx --test tests/sentient-cloudflare-contract.test.ts
+
       - name: Vinext compatibility check
         shell: bash
         run: |
           set -euo pipefail
           npx --yes vinext@latest check
           echo "VINEXT_CHECK=PASS"
+
       - name: Build Workers candidate
         shell: bash
         run: |
@@ -46,6 +82,7 @@ jobs:
           npx --yes wrangler@latest setup --yes --build
           npx --yes wrangler@latest deploy --dry-run --outdir "${RUNNER_TEMP}/director-cf-bundle"
           echo "WORKERS_BUILD=PASS"
+
       - name: Deploy one temporary non-production Worker
         id: deploy
         shell: bash
@@ -57,7 +94,7 @@ jobs:
           test -n "$public_url"
           echo "worker_url=$public_url" >> "$GITHUB_OUTPUT"
           echo "TEMPORARY_WORKER_DEPLOY=PASS"
-          # Never print the raw deploy output: it contains a short-lived claim URL.
+
       - name: Start real-time Worker tail
         id: tail
         shell: bash
@@ -69,6 +106,7 @@ jobs:
           echo "$!" > "${RUNNER_TEMP}/director-cf-tail.pid"
           sleep 5
           echo "tail_out=$tail_out" >> "$GITHUB_OUTPUT"
+
       - name: Smoke real Worker and capture invocations
         shell: bash
         env:
@@ -86,6 +124,7 @@ jobs:
           sleep 5
           echo "TEMPORARY_WORKER_SMOKE=PASS"
           echo "UNAUTHENTICATED_OBJECTIVE_BLOCK=PASS"
+
       - name: Stop tail and summarize authoritative CPU fields
         if: always()
         shell: bash
