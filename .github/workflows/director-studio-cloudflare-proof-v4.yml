@@ -9,55 +9,126 @@ permissions:
 jobs:
   proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout exact Director Studio candidate
         uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
-          ref: cf7105954218014f3ef6f95ba56638f473e7fae9
+          ref: 51d2b8e61248ce4c5608af47da2a42ab43204138
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           fetch-depth: 0
+
       - name: Fence exact source identity
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "cf7105954218014f3ef6f95ba56638f473e7fae9"
-          test "$(git rev-parse 'HEAD^{tree}')" = "c6a0840427b4151dc4d05e112f445438aca7a0c9"
+          test "$(git rev-parse HEAD)" = "51d2b8e61248ce4c5608af47da2a42ab43204138"
+          test "$(git rev-parse 'HEAD^{tree}')" = "2a64f91d805d5b7a234c91e6962315835a5d9976"
+          git fetch origin sentient-ui-activation-v1
+          test "$(git rev-parse origin/sentient-ui-activation-v1)" = "51d2b8e61248ce4c5608af47da2a42ab43204138"
+          git checkout -B sentient-ui-activation-v1 "51d2b8e61248ce4c5608af47da2a42ab43204138"
+          echo "INITIAL_DIRECTOR_SHA=51d2b8e61248ce4c5608af47da2a42ab43204138"
+          echo "INITIAL_DIRECTOR_TREE=2a64f91d805d5b7a234c91e6962315835a5d9976"
           echo "PROOF_CANDIDATE_IDENTITY=PASS"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-      - name: Focused Sentient Cloudflare contract tests
-        run: npx tsx --test tests/sentient-cloudflare-contract.test.ts
+
+      - name: Regenerate dependency lock as one mechanical successor
+        id: lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if git diff --quiet -- package-lock.json; then
+            echo "PACKAGE_LOCK_CHANGED=false"
+          else
+            git config user.name "sentient-cloudflare-proof"
+            git config user.email "sentient-cloudflare-proof@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "cloudflare: regenerate vinext dependency lock"
+            git push origin HEAD:sentient-ui-activation-v1
+            echo "PACKAGE_LOCK_CHANGED=true"
+          fi
+          echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "candidate_tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          echo "DIRECTOR_CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "DIRECTOR_CANDIDATE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "PACKAGE_LOCK_REGENERATED=PASS"
+
+      - name: Install exact locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          if npm ls @clerk/nextjs --all --json 2>/dev/null | grep -Fq '"@clerk/nextjs"'; then
+            echo "CLERK_DEPENDENCY_PRESENT=true"
+            exit 1
+          fi
+          echo "CLERK_DEPENDENCY_PRESENT=false"
+
+      - name: Focused Cloudflare security and target contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsx --test \
+            tests/cloudflare-access.test.ts \
+            tests/cloudflare-target-contract.test.ts \
+            tests/sentient-cloudflare-contract.test.ts
+          echo "CLOUDFLARE_TARGET_CONTRACT_TESTS=PASS"
+
+      - name: Typecheck Director Studio
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          echo "DIRECTOR_TYPECHECK=PASS"
+
       - name: Vinext compatibility check
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes vinext@latest check
-          echo "VINEXT_CHECK=PASS"
-      - name: Build Workers candidate
+          npm run check:vinext
+          echo "VINEXT_COMPATIBILITY=PASS"
+
+      - name: Generate Cloudflare types
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@latest setup --yes --build
-          npx --yes wrangler@latest deploy --dry-run --outdir "${RUNNER_TEMP}/director-cf-bundle"
-          echo "WORKERS_BUILD=PASS"
+          npm run cf-typegen
+          echo "CLOUDFLARE_TYPEGEN=PASS"
+
+      - name: Build vinext production candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:vinext
+          echo "VINEXT_BUILD=PASS"
+
+      - name: Dry-run Cloudflare deployment bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx @vinext/cloudflare deploy --dry-run
+          echo "WRANGLER_DRY_RUN=PASS"
+
       - name: Deploy one temporary non-production Worker
         id: deploy
         shell: bash
         run: |
           set -euo pipefail
           out="${RUNNER_TEMP}/director-cf-temporary-deploy.txt"
-          npx --yes wrangler@latest deploy --temporary >"$out" 2>&1
+          npx wrangler deploy --temporary >"$out" 2>&1
           public_url="$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' "$out" | tail -n1)"
           test -n "$public_url"
           echo "worker_url=$public_url" >> "$GITHUB_OUTPUT"
           echo "TEMPORARY_WORKER_DEPLOY=PASS"
-          # Never print the raw deploy output: it contains a short-lived claim URL.
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "CANONICAL_HOST_CHANGE=false"
+          # Never print raw deploy output: it may contain a short-lived claim URL.
+
       - name: Start real-time Worker tail
         id: tail
         shell: bash
@@ -65,10 +136,11 @@ jobs:
           set -euo pipefail
           tail_out="${RUNNER_TEMP}/director-cf-tail.jsonl"
           tail_err="${RUNNER_TEMP}/director-cf-tail.err"
-          (timeout 60s npx --yes wrangler@latest tail --format json >"$tail_out" 2>"$tail_err") &
+          (timeout 60s npx wrangler tail --format json >"$tail_out" 2>"$tail_err") &
           echo "$!" > "${RUNNER_TEMP}/director-cf-tail.pid"
           sleep 5
           echo "tail_out=$tail_out" >> "$GITHUB_OUTPUT"
+
       - name: Smoke real Worker and capture invocations
         shell: bash
         env:
@@ -86,6 +158,7 @@ jobs:
           sleep 5
           echo "TEMPORARY_WORKER_SMOKE=PASS"
           echo "UNAUTHENTICATED_OBJECTIVE_BLOCK=PASS"
+
       - name: Stop tail and summarize authoritative CPU fields
         if: always()
         shell: bash
@@ -101,11 +174,15 @@ jobs:
           import json, math, pathlib, sys
           p = pathlib.Path(sys.argv[1])
           values = []
+          exceeded = 0
           def walk(x):
+              global exceeded
               if isinstance(x, dict):
                   for k, v in x.items():
                       if k in {"cpuTimeMs", "CPUTimeMs"} and isinstance(v, (int, float)):
                           values.append(float(v))
+                      if k == "exceededCpu" and v is True:
+                          exceeded += 1
                       walk(v)
               elif isinstance(x, list):
                   for v in x:
@@ -131,13 +208,17 @@ jobs:
               print(f"CPU_P99_MS={pct(.99):.6g}")
               print(f"CPU_MAX_MS={max(values):.6g}")
               print(f"CPU_EXCEEDED_10MS_COUNT={sum(v>10 for v in values)}")
+              print(f"EXCEEDED_CPU_COUNT={exceeded}")
           else:
               print("CPU_P50_MS=NOT_VERIFIED")
               print("CPU_P95_MS=NOT_VERIFIED")
               print("CPU_P99_MS=NOT_VERIFIED")
               print("CPU_MAX_MS=NOT_VERIFIED")
               print("CPU_EXCEEDED_10MS_COUNT=NOT_VERIFIED")
+              print("EXCEEDED_CPU_COUNT=NOT_VERIFIED")
           PY
+          echo "DIRECTOR_FINAL_SHA=${{ steps.lock.outputs.candidate_sha }}"
+          echo "DIRECTOR_FINAL_TREE=${{ steps.lock.outputs.candidate_tree }}"
           echo "PRODUCTION_DEPLOYMENT=false"
           echo "CANONICAL_HOST_CHANGE=false"
           echo "SECRET_VALUES_EXPOSED=false"
