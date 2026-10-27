@@ -1,0 +1,111 @@
+name: Director Mechanical Lock Generator
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Generate lock from exact Director manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir work
+          cd work
+          cat > package.json <<'JSON'
+{
+  "name": "director-studio-customer-portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1 --port 3048",
+    "build": "prisma generate && node scripts/emit-somcp-receipt-evidence.mjs && next build",
+    "start": "next start --hostname 127.0.0.1 --port 3048",
+    "dev:vinext": "vinext dev",
+    "check:vinext": "vinext check",
+    "build:vinext": "vinext build",
+    "start:vinext": "vinext start",
+    "deploy:cloudflare": "npx @vinext/cloudflare deploy",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.autopilot-convergence.json",
+    "test": "tsx --test tests/*.test.ts",
+    "test:sentient-control-api": "tsx scripts/rehearse-sentient-control-api.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "verify:staging-reconciliation-plan": "node scripts/plan_staging_history_establishment.mjs",
+    "test:staging-reconciliation": "node scripts/rehearse_staging_historical_reconciliation.mjs",
+    "staging:reconcile-and-migrate": "tsx scripts/staging-reconcile-and-migrate.ts",
+    "test:staging-one-shot-reconciliation": "tsx scripts/rehearse_staging_one_shot_reconciliation.ts",
+    "staging:capture-reconciliation-profile": "tsx scripts/staging-capture-reconciliation-profile.ts",
+    "test:staging-profile-capture": "tsx scripts/rehearse_staging_profile_capture.ts",
+    "verify:source": "python3 scripts/verify_sources.py",
+    "report:cost-floors": "tsx scripts/report_cost_floors.ts",
+    "director:tokens": "tsx scripts/report_director_tokens.ts",
+    "measure:f3-audit": "node scripts/measure_f3_audit_cost.mjs",
+    "measure:f3-audit:dry-run": "node scripts/measure_f3_audit_cost.mjs --dry-run",
+    "canary:stripe": "tsx scripts/stripe-canary.ts",
+    "canary:worker:queue": "tsx scripts/queue-worker-rehearsal.ts",
+    "canary:staging-certify": "tsx scripts/staging-certification.ts",
+    "canary:staging-certify:technical": "tsx scripts/staging-certification-technical.ts",
+    "dry-run:counsel": "DIRECTOR_PROVIDER_MODE=fake DIRECTOR_FAKE_ACK=director-studio-staging DIRECTOR_PORTAL_URL=http://127.0.0.1:3048 python3 -m pytest tests/test_counsel_dry_run.py -q",
+    "build:lead-worker-service": "esbuild worker-service/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/lead-worker-service.mjs",
+    "start:lead-worker-service": "node dist/lead-worker-service.mjs",
+    "test:lead-worker-service": "tsx --test tests/lead-worker-service.test.ts tests/production-authority.test.ts",
+    "test:lead-worker-service:postgres": "tsx --test tests/lead-worker-service-postgres.integration.ts",
+    "build:operational-staging-trusted-runner": "esbuild operational-staging-worker/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/operational-staging-trusted-runner.mjs",
+    "start:operational-staging-trusted-runner": "node dist/operational-staging-trusted-runner.mjs",
+    "test:operational-staging-trusted-runner": "tsx --test tests/operational-staging-worker-continuation.test.ts tests/operational-staging-authority-wake.test.ts tests/operational-staging-sentient-transport.test.ts tests/operational-staging-trusted-runner-systemd.test.ts",
+    "build:development-test-worker": "esbuild development-test-worker/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/development-test-worker.mjs",
+    "start:development-test-worker": "node dist/development-test-worker.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "next": "16.3.8",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-server-dom-webpack": "19.3.1",
+    "stripe": "17.7.0",
+    "three": "0.186.0",
+    "vinext": "1.3.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.65.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "0.186.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "@vitejs/plugin-rsc": "0.5.38",
+    "esbuild": "^0.28.2",
+    "prisma": "6.19.3",
+    "tsx": "^4.23.13",
+    "typescript": "5.9.3",
+    "vite": "8.3.5",
+    "wrangler": "4.153.0"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.0"
+    }
+  },
+  "engines": {
+    "node": ">=22 <25"
+  }
+}
+JSON
+          printf '%s  package.json\n' 'b52c69b95bf4747e267ad38f58e94ba59fd0d0d7e1e032b25b88ef329a5f427b' | sha256sum -c -
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          ! grep -Fq '@clerk/nextjs' package-lock.json
+          echo "DIRECTOR_MANIFEST_SHA256=b52c69b95bf4747e267ad38f58e94ba59fd0d0d7e1e032b25b88ef329a5f427b"
+          echo "DIRECTOR_LOCK_SHA256=$(sha256sum package-lock.json | awk '{print $1}')"
+          echo "DIRECTOR_LOCK_GZIP_BASE64_BEGIN"
+          gzip -c package-lock.json | base64 -w 76
+          echo
+          echo "DIRECTOR_LOCK_GZIP_BASE64_END"
