@@ -16,23 +16,23 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: sentient_orchestrator
+          POSTGRES_DB: sentient
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d sentient_orchestrator"
+          --health-cmd "pg_isready -U postgres -d sentient"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 20
+          --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sentient_orchestrator
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,21 +53,22 @@ jobs:
       - name: Install and migrate
         working-directory: sentient-orchestrator
         run: |
-          npm ci --no-audit --no-fund
+          npm install --ignore-scripts --no-audit --no-fund --package-lock=false
           npm run migrate
-      - name: Focus Mission Control tests
+      - name: Run full suite with concise failure receipt
         working-directory: sentient-orchestrator
         shell: bash
         run: |
-          set -o pipefail
-          npx tsx --test tests/mission-control*.test.ts 2>&1 | tee /tmp/mission-control-tests.log
-          rc=${PIPESTATUS[0]}
+          set +e
+          npm test >/tmp/orchestrator-tests.log 2>&1
+          rc=$?
+          set -e
           if [ "$rc" -ne 0 ]; then
-            echo "FOCUSED_TEST_RESULT=FAIL"
-            grep -E '^(not ok|# Subtest:|  error:|  code:|  expected:|  actual:|  operator:)|AssertionError|ERR_ASSERTION'On /tmp/mission-control-tests.log | tail -n 160 || true
+            echo "FULL_TEST_RESULT=FAIL"
+            grep -E '^(not ok|# Subtest:|  error:|  code:|  expected:|  actual:|  operator:)|AssertionError|ERR_ASSERTION|TypeError|ReferenceError|Error:' /tmp/orchestrator-tests.log | tail -n 220 || true
             exit "$rc"
           fi
-          echo "FOCUSED_TEST_RESULT=PASS"
+          echo "FULL_TEST_RESULT=PASS"
       - name: Guard tracked source mutation
         working-directory: sentient-orchestrator
         run: |
