@@ -1,0 +1,57 @@
+name: MVP Exact Immutable Image Inspection
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      parent:
+        required: true
+        type: string
+      skills_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      PARENT: ${{ inputs.parent }}
+      SKILLS: ${{ inputs.skills_sha }}
+      APP: sentient-validation-runner
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect exact immutable image without deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TREE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PARENT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SKILLS" =~ ^[0-9a-f]{40}$ ]]
+          flyctl auth docker >/dev/null
+          image="registry.fly.io/${APP}:phase0-${SHA}"
+          docker pull "$image" >/dev/null
+          actual_sha="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | sed -n 's/^SENTIENT_RUNTIME_SHA=//p')"
+          actual_tree="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | sed -n 's/^SENTIENT_RUNTIME_TREE=//p')"
+          actual_skills="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | sed -n 's/^SENTIENT_SKILLS_SHA=//p')"
+          actual_parent="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | sed -n 's/^SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=//p')"
+          test "$actual_sha" = "$SHA"
+          test "$actual_tree" = "$TREE"
+          test "$actual_skills" = "$SKILLS"
+          test "$actual_parent" = "$PARENT"
+          echo "EXACT_IMAGE_EXISTS=true"
+          echo "IMAGE_RUNTIME_SHA=$actual_sha"
+          echo "IMAGE_RUNTIME_TREE=$actual_tree"
+          echo "IMAGE_SKILLS_SHA=$actual_skills"
+          echo "IMAGE_ACCEPTANCE_PARENT_SHA=$actual_parent"
+          echo "DEPLOYMENT_PERFORMED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
