@@ -1,0 +1,102 @@
+name: Mission Control Exact Failure Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: http://postgres:postgres@127.0.0.1:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fence exact candidate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          echo "DIAGNOSTIC_SOURCE_SHA=$EXPECTED_SHA"
+          echo "DIAGNOSTIC_SOURCE_TREE=$EXPECTED_TREE"
+
+      - name: Run orchestrator tests and print only failing blocks
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd sentient-orchestrator
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock >/tmp/npm-install.log 2>&1
+          install_rc=$?
+          echo "NPM_INSTALL_EXIT=$install_rc"
+          if [ "$install_rc" -ne 0 ]; then
+            tail -n 100 /tmp/npm-install.log \
+              | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]+[^[:space:]]+/\1=[REDACTED]/Ig'
+            exit "$install_rc"
+          fi
+
+          npm test >/tmp/mission-control-tests.log 2>&1
+          test_rc=$?
+          echo "NPM_TEST_EXIT=$test_rc"
+          echo "=== FAILING TEST HEADERS ==="
+          grep -n -E '^(not ok|# Subtest:)' /tmp/mission-control-tests.log \
+            | tail -n 80 \
+            | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g' || true
+
+          echo "=== FAILURE BLOCKS ==="
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          lines = Path("/tmp/mission-control-tests.log").read_text(errors="replace").splitlines()
+          failure_ix = [i for i, line in enumerate(lines) if line.startswith("not ok ")]
+          print(f"FAILURE_COUNT={len(failure_ix)}")
+          for n, i in enumerate(failure_ix, 1):
+              start = max(0, i - 2)
+              end = min(len(lines), i + 36)
+              print(f"--- FAILURE_{n}_BEGIN ---")
+              for line in lines[start:end]:
+                  line = re.sub(r'gh[pousr]_[A-Za-z0-9_]+', '[REDACTED]', line)
+                  line = re.sub(r'flyv1_[A-Za-z0-9_-]+', '[REDACTED]', line)
+                  line = re.sub(r'(?i((authorization|token|secret|password|credential|cookie|api[_-]?key)\s*:=]\s*\S+)', r\'\1=[REDACTED]\'', line)
+                  print(line)
+              print(f"--- FAILURE_{n}_END ---")
+          PY
+          echo "=== TEST SUMMARY ==="
+          grep -E '^# (tests|pass|fail|cancelled|skipped|todo|duration_ms) ' /tmp/mission-control-tests.log | tail -n 10 || true
+          exit "$test_rc"
