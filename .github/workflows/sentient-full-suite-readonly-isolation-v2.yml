@@ -1,4 +1,4 @@
-name: Sentient Mission Control Exact Acceptance
+name: Sentient Mission Control Integration Acceptance
 on:
   workflow_dispatch:
 
@@ -16,93 +16,76 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: sentient_test
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       SENTIENT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sentient_test
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: 75ba9c282b73df74e2f2fa50289d17ecd0597687
+          ref: fc1017ebf9548f5b4b890397af4d782cbbd09957
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
       - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Fence and build
+        with: {node-version: "22"}
+      - name: Fence, build and typecheck
+        shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "75ba9c282b73df74e2f2fa50289d17ecd0597687"
-          test "$(git rev-parse 'HEAD^{tree}')" = "f4cebc41c4775b09ce5f0279b5cb12d4cad52a01"
+          test "$(git rev-parse HEAD)" = "fc1017ebf9548f5b4b890397af4d782cbbd09957"
+          test "$(git rev-parse 'HEAD^{tree}')" = "5093b16ca0b77bd0331b8485c65f0a9d3579943d"
           npm install --no-package-lock --no-audit --no-fund
-          echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_BY_REPOSITORY_DESIGN"
-          npm run build 2>&1 | tee "$RUNNER_TEMP/sentient-build.log"
-          echo "SENTIENT_TYPECHECK=PASS"
-          echo "SENTIENT_BUILD=PASS"
-      - name: Run every compiled test file
+          npm run build
+          echo SENTIENT_TYPECHECK=PASS
+          echo SENTIENT_BUILD=PASS
+      - name: Run every compiled test
+        shell: bash
         run: |
           set -euo pipefail
           files="$(find dist/test -maxdepth 1 -type f -name '*.test.js' -print | sort)"
           test -n "$files"
-          passed=0
-          failed=0
+          passed=0; failed=0
           mkdir -p "$RUNNER_TEMP/sentient-test-logs"
           while IFS= read -r file; do
             [ -n "$file" ] || continue
             name="$(basename "$file")"
-            if timeout 180s node --test "$file" >"$RUNNER_TEMP/sentient-test-logs/$name.log" 2>&1; then
-              passed=$((passed+1))
-            else
-              failed=$((failed+1))
-              echo "FAILED_TEST_FILE=$file"
-              tail -n 160 "$RUNNER_TEMP/sentient-test-logs/$name.log"
-            fi
+            if timeout 180s node --test "$file" >"$RUNNER_TEMP/sentient-test-logs/$name.log" 2>&1; then passed=$((passed+1)); else failed=$((failed+1)); tail -n 160 "$RUNNER_TEMP/sentient-test-logs/$name.log"; fi
           done <<< "$files"
           total=$((passed+failed))
-          printf '{"sourceSha":"%s","sourceTree":"%s","totalFiles":%d,"passedFiles":%d,"failedFiles":%d}\n' \
-            "75ba9c282b73df74e2f2fa50289d17ecd0597687" \
-            "f4cebc41c4775b09ce5f0279b5cb12d4cad52a01" \
-            "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
-          echo "TOTAL_TEST_FILES=$total"
-          echo "PASSED_TEST_FILES=$passed"
-          echo "FAILED_TEST_FILES=$failed"
+          printf '{"sourceSha":"%s","sourceTree":"%s","totalFiles":%d,"passedFiles":%d,"failedFiles":%d}\n' "fc1017ebf9548f5b4b890397af4d782cbbd09957" "5093b16ca0b77bd0331b8485c65f0a9d3579943d" "$total" "$passed" "$failed" > "$RUNNER_TEMP/sentient-full-suite-report.json"
+          echo TOTAL_TEST_FILES=$total
+          echo PASSED_TEST_FILES=$passed
+          echo FAILED_TEST_FILES=$failed
           test "$failed" -eq 0
-          echo "SENTIENT_COMPILED_FULL_SUITE=PASS"
-      - name: Run authored SpawnSentient runtime fixture
+          echo SENTIENT_COMPILED_FULL_SUITE=PASS
+      - name: Run authored SpawnSentient fixture
+        shell: bash
         run: |
           set -euo pipefail
           test -f tests/spawn-mission-control-context.test.ts
           node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
-          echo "SPAWN_MISSION_CONTROL_RUNTIME_FIXTURE=PASS"
-          echo "DYNAMIC_CHILD_AUTO_CONTEXT_TEST=PASS"
-          echo "EFFECTIVE_GRANT_NON_EXPANSION=PASS"
-          echo "CONTEXT_LINEAGE_IDENTITY=PASS"
+          echo DYNAMIC_CHILD_AUTO_CONTEXT_TEST=PASS
+          echo CONTEXT_LINEAGE_IDENTITY=PASS
+          echo EFFECTIVE_GRANT_NON_EXPANSION=PASS
       - name: Verify read-only source
+        shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "75ba9c282b73df74e2f2fa50289d17ecd0597687"
-          test "$(git rev-parse 'HEAD^{tree}')" = "f4cebc41c4775b09ce5f0279b5cb12d4cad52a01"
+          test "$(git rev-parse HEAD)" = "fc1017ebf9548f5b4b890397af4d782cbbd09957"
+          test "$(git rev-parse 'HEAD^{tree}')" = "5093b16ca0b77bd0331b8485c65f0a9d3579943d"
           rm -rf dist node_modules
           test -z "$(git status --porcelain)"
-          echo "SOURCE_MUTATION=false"
-          echo "DEPLOYMENT=false"
-          echo "CERTIFICATION_REOPENED=false"
-          echo "SENTIENT_AUTOMATED_ACCEPTANCE=PASS"
+          echo SOURCE_MUTATION=false
+          echo SENTIENT_INTEGRATION_ACCEPTANCE=PASS
       - name: Upload receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sentient-mission-control-acceptance-postgres
+          name: sentient-mission-control-integration-acceptance
           path: |
-            ${{ runner.temp }}/sentient-build.log
             ${{ runner.temp }}/sentient-full-suite-report.json
             ${{ runner.temp }}/sentient-test-logs
-          if-no-files-found: warn
           retention-days: 7
