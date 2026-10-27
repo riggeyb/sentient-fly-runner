@@ -20,15 +20,15 @@ jobs:
         run: |
           set -euo pipefail
           cat >"$RUNNER_TEMP/db-blockers.mjs" <<'NODE'
-          import pg from "pg";
+          import { Pool } from "pg";
           const cs=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!cs) throw new Error("DB_BINDING_MISSING");
-          const pool=new pg.Pool({connectionString:cs,max:1});
+          const pool=new Pool({connectionString:cs,max:1});
           try {
             const rows=(await pool.query(`
               SELECT pid,state,wait_event_type,wait_event,
-                     now()-query_start AS query_age,
-                     now()-xact_start AS xact_age,
+                     extract(epoch from (now()-query_start))::int AS query_age_s,
+                     CASE WHEN xact_start IS NULL THEN NULL ELSE extract(epoch from (now()-xact_start))::int END AS xact_age_s,
                      pg_blocking_pids(pid) AS blockers,
                      CASE
                        WHEN query ILIKE 'UPDATE %sentient_durable_state%' THEN 'UPDATE_SENTIENT_DURABLE_STATE'
@@ -55,4 +55,4 @@ jobs:
           } finally { await pool.end(); }
           NODE
           B64="$(base64 -w0 "$RUNNER_TEMP/db-blockers.mjs")"
-          timeout 120s flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/tmp/db-blockers.mjs && node /tmp/db-blockers.mjs; rc=\$?; rm -f /tmp/db-blockers.mjs; exit \$rc'"
+          timeout 120s flyctl ssh console -a "$APP" -C "sh -lc 'cd /app && echo $B64 | base64 -d >/app/db-blockers.mjs && node /app/db-blockers.mjs; rc=\$?; rm -f /app/db-blockers.mjs; exit \$rc'"
