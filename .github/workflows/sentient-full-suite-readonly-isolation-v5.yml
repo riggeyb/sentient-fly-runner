@@ -1,0 +1,161 @@
+name: Sentient Exact Readonly Isolation V5
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Exact candidate acceptance
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          set +e
+          mkdir -p /tmp/exact
+          failed=0
+          run_step() {
+            label="$1"; shift
+            "$@" >"/tmp/exact/${label}.log" 2>&1
+            status=$?
+            echo "${label}=$status" >>/tmp/receipt.env
+            if [ "$status" -ne 0 ]; then
+              echo "::group::${label} sanitized failure tail"
+              tail -n 160 "/tmp/exact/${label}.log" \
+                | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig'
+              echo "::endgroup::"
+              failed=1
+            fi
+          }
+
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
+
+          {
+            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V5"
+            echo "SOURCE_SHA=$EXPECTED_SHA"
+            echo "SOURCE_TREE=$EXPECTED_TREE"
+            echo "RUNNER_OS=$(uname -srvmo)"
+            echo "NODE_VERSION=$(node --version)"
+            echo "NPM_VERSION=$(npm --version)"
+            if [ -f package-lock.json ]; then
+              echo "DEPENDENCY_LOCK_IDENTITY=package-lock.json:$(git rev-parse HEAD:package-lock.json)"
+            else
+              echo "DEPENDENCY_LOCK_IDENTITY=ABSENT"
+            fi
+            echo "DEPENDENCY_MANIFEST_IDENTITY=package.json:$(git rev-parse HEAD:package.json)"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >/tmp/receipt.env
+
+          if [ -f package-lock.json ]; then
+            run_step NPM_INSTALL npm ci --no-audit --no-fund
+          else
+            run_step NPM_INSTALL npm install --no-audit --no-fund --no-package-lock
+          fi
+          run_step BUILD npm run build
+
+          run_step CONTINUATION node --test \
+            dist/test/objective-continuation.test.js \
+            dist/test/objective-continuation-readiness.test.js \
+            dist/test/active-work-core.test.js \
+            dist/test/active-work-persistence.test.js
+          run_step PERMANENT_CONTINUATION bash -lc "node --test dist/test/permanent-continuation-*.test.js"
+          run_step OPENROUTER node --test dist/src/model/providers/openrouter.test.js
+          run_step LIBRECHAT node --test dist/src/lab/librechat/bridge.test.js
+
+          run_step WORKER_A npx tsc -p tsconfig.worker-a.json --noEmit
+          run_step WORKER_C npx tsc -p tsconfig.worker-c.json --noEmit
+          run_step WORKER_D npx tsc -p tsconfig.worker-d.json --noEmit
+
+          run_step WORKER_D_ACCEPTANCE bash -lc "node --test dist/test/lab/*.test.js"
+          run_step WORKER_A_RUNTIME bash -lc "node --experimental-strip-types --test tests/*.test.ts"
+          run_step WORKER_C_RETRIEVAL bash -lc "node --experimental-strip-types --test tests/retrieval/*.test.ts"
+          run_step WORKER_B_PERSISTENCE node --test dist/test/persistence.test.js
+          run_step NPM_TEST npm test
+
+          if [ -f dist/test/spawn-mission-control-context.test.js ]; then
+            run_step MC_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
+          else
+            echo "MC_SPAWN_COMPILED=2" >>/tmp/receipt.env
+            failed=1
+          fi
+          if [ -f tests/spawn-mission-control-context.test.ts ]; then
+            run_step MC_SPAWN_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
+          else
+            echo "MC_SPAWN_DIRECT=2" >>/tmp/receipt.env
+            failed=1
+          fi
+
+          for label in CONTINUATION PERMANENT_CONTINUATION WORKER_D_ACCEPTANCE WORKER_A_RUNTIME WORKER_C_RETRIEVAL WORKER_B_PERSISTENCE NPM_TEST MC_SPAWN_COMPILED MC_SPAWN_DIRECT; do
+            f="/tmp/exact/${label}.log"
+            [ -f "$f" ] || continue
+            tests="$(grep -E '^# tests [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            pass="$(grep -E '^# pass [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            fail="$(grep -E '^# fail [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            skip="$(grep -E '^# skipped [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            echo "${label}_TESTS=${tests:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_PASS=${pass:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_FAIL=${fail:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_SKIP=${skip:-NOT_REPORTED}" >>/tmp/receipt.env
+          done
+
+          git diff --quiet && git diff --cached --quiet
+          clean=$?
+          echo "TRACKED_SOURCE_MUTATION=$([ "$clean" -eq 0 ] && echo false || echo true)" >>/tmp/receipt.env
+          [ "$clean" -eq 0 ] || failed=1
+
+          echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>/tmp/receipt.env
+          echo "OVERALL_EXIT=$failed" >>/tmp/receipt.env
+          cat /tmp/receipt.env
+          exit "$failed"
+
+      - name: Upload non-secret receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentient-exact-v5-${{ inputs.sha }}
+          path: /tmp/receipt.env
+          if-no-files-found: error
+          retention-days: 30
