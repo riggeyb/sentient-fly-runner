@@ -1,5 +1,5 @@
 name: Director Mechanical Lock Generator
-on:
+"on":
   workflow_dispatch:
 permissions:
   contents: read
@@ -60,7 +60,7 @@ jobs:
     "test:lead-worker-service:postgres": "tsx --test tests/lead-worker-service-postgres.integration.ts",
     "build:operational-staging-trusted-runner": "esbuild operational-staging-worker/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/operational-staging-trusted-runner.mjs",
     "start:operational-staging-trusted-runner": "node dist/operational-staging-trusted-runner.mjs",
-    "test:operational-staging-trusted-runner": "tsx --test tests/operational-staging-worker-continuation.test.ts tests/operational-staging-authority-wake.test.ts tests/operational-staging-sentient-transport.test.ts tests/operational-staging-trusted-runner-systemd.test.ts",
+    "test:operational-staging-trusted-runner": "tsx --test tests/operational-staging-worker-continuation.test.ts tests/operational-staging-authority-wake.test.ts tests/operational-staging-sentient-transport.test.ts tests/soperational-staging-trusted-runner-systemd.test.ts",
     "build:development-test-worker": "esbuild development-test-worker/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/development-test-worker.mjs",
     "start:development-test-worker": "node dist/development-test-worker.mjs"
   },
