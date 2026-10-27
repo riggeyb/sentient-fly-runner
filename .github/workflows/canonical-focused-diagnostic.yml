@@ -1,71 +1,81 @@
-name: Sentient Mission Control Boundary Repair
+name: Skills Mission Control Failure Isolation
 on:
   workflow_dispatch:
     inputs:
       sha:
+        description: Exact skills candidate SHA
         required: true
         type: string
 permissions:
   contents: read
 jobs:
-  repair:
+  diagnostic:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: hpostgres://postgres:postgres@localhost:5432/sentient
+      EXPECTED_SHA: ${{ inputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: riggeyb/sentient
+          repository: riggeyb/skills
           ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: true
-          fetch-depth: 0
-      - name: Fence and repair only the observed typo
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Fence exact source
         shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          python -<<'PY'
-          from pathlib import Path
-          p = Path("src/spawn/context.ts")
-          s = p.read_text()
-          old = "!number.isInteger(taskPackage.identitySeed.depth)"
-          new = "!Number.isInteger(taskPackage.identitySeed.depth)"
-          if s.count(old) != 1:
-              raise SystemExit(f"unexpected typo count={s.count(old)}")
-          p.write_text(s.replace(old, new, 1))
-          PY
-          git diff --check
-          git diff -- src/spawn/context.ts
-      - name: Install and build
-        run: |
-          npm install --ignore-scripts --no-audit --no-fund --package-lock=false
-          npm run build
-      - name: Run Mission Control spawn acceptance
+          echo "SOURCE_SHA=$EXPECTED_SHA"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - name: Install and migrate
+        working-directory: sentient-orchestrator
         shell: bash
         run: |
           set -euo pipefail
-          node --test dist/test/spawn-mission-control-context.test.js
-          echo "MISSION_CONTROL_SPAWN_TESTS=PASS"
-      - name: Verify canonical context identity
+          npm install --ignore-scripts --no-audit --no-fund --package-lock=false >/dev/null
+          npm run typecheck >/dev/null
+          npm run migrate >/dev/null
+      - name: Execute each test file independently
+        working-directory: sentient-orchestrator
         shell: bash
         run: |
-          set -euo pipefail
-          node --input-type=module - <<'NODE'
-          import { SENTIENT_OPERATING_CONTEXT_V1, sentientOperatingContextDigestV1 } from "./dist/src/spawn/operating-context.js";
-          const d = await sentientOperatingContextDigestV1(SENTIENT_OPERATING_CONTEXT_V1);
-          if (d !== "sha256:ef32887bbc1736dce2ed5a73a90a628160edede479bd686ce47cdf0f7507e209") throw new Error("operating context digest drift");
-          console.log("OPERATING_CONTEXT_DIGEST="+d);
-          NODE
-      - name: Commit exact tested repair
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "sentient-mission-control-acceptance"
-          git config user.email "sentient-mission-control-acceptance@users.noreply.github.com"
-          git add src/spawn/context.ts
-          git diff --cached --quit && { echo "NO_REPAIR_CHANGE"; exit 1; }
-          git commit -m "mission-control: fix child package depth validation"
-          git push origin HEAD:sentient/mission-control-v1
-          echo "REPAIR_PUSHED=true"
+          set -uo pipefail
+          shopt -s nullglob
+          failed=0
+          total=0
+          for file in tests/**/*.test.ts; do
+            total=$((total+1))
+            out="${RUNNER_TEMP}/test-${total}.log"
+            if npx tsx --test "$file" >"$out" 2>&1; then
+              echo "PASS_FILE=$file"
+            else
+              code=$?
+              echo "FAIL_FILE=$file"
+              echo "FAIL_EXIT=$code"
+              tail -n 80 "$out"
+              failed=$((failed+1))
+            fi
+          done
+          echo "TOTAL_TEST_FILES=$total"
+          echo "FAILED_TEST_FILES=$failed"
+          test "$failed" -eq 0
