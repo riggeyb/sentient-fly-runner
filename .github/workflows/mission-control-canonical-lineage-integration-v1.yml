@@ -1,0 +1,135 @@
+name: Mission Control Canonical-Lineage Integration V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_canonical_head:
+        required: true
+        type: string
+      pr_base_sha:
+        required: true
+        type: string
+      target_sha:
+        required: true
+        type: string
+      target_tree:
+        required: true
+        type: string
+      integration_branch:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+      CANONICAL_BRANCH: sentient-production-composition-20261017
+      EXPECTED_CANONICAL_HEAD: ${{ inputs.expected_canonical_head }}
+      PR_BASE_SHA: ${{ inputs.pr_base_sha }}
+      TARGET_SHA: ${{ inputs.target_sha }}
+      TARGET_TREE: ${{ inputs.target_tree }}
+      INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-production-composition-20261017
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Replay bounded accepted delta and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in "$EXPECTED_CANONICAL_HEAD" "$PR_BASE_SHA" "$TARGET_SHA" "$TARGET_TREE"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]]
+          done
+          [[ "$INTEGRATION_BRANCH" =~ ^integration/mission-control-production-[0-9a-f]{8}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CANONICAL_HEAD"
+
+          git fetch origin "$PR_BASE_SHA" "$TARGET_SHA"
+          test "$(git rev-parse "${TARGET_SHA}^{tree}")" = "$TARGET_TREE"
+          git merge-base --is-ancestor "$PRI_BASE_SHA" "$TARGET_SHA"
+
+          mapfile -t commits < <(git rev-list --reverse --ancestry-path "${PR_BASE_SHA}..${TARGET_SHA}")
+          test "${#commits[@]}" -gt 0
+          echo "REPLAY_COMMIT_COUNT=${#commits[@]}"
+
+          git config user.name "sentient-mission-control-integration"
+          git config user.email "sentient-mission-control-integration@users.noreply.github.com"
+          git switch -c "$INTEGRATION_BRANCH"
+          for commit in "${commits[@]}"; do
+            git cherry-pick "$commit"
+          done
+
+          allowed='^(src/local-runtime/ipc\.ts|src/spawn/context\.ts|src/spawn/execution-contracts\.ts|src/spawn/index\.ts|src/spawn/operating-context\.ts|src/state/sanitize\.ts|test/spawn-mission-control-context\.test\.ts|tests/spawn-mission-control-context\.test\.ts)$'
+          unexpected="$(git diff --name-only "$EXPECTED_CANONICAL_HEAD..HEAD" | grep -Ev "$allowed" || true)"
+          if [ -n "$unexpected" ]; then
+            echo "UNEXPECTED_CHANGED_PATHS"
+            printf '%s\n' "$unexpected"
+            exit 30
+          fi
+          git diff --exit-code "$EXPECTED_CANONICAL_HEAD..HEAD" -- fly.toml
+          git diff --check "$EXPECTED_CANONICAL_HEAD..HEAD"
+
+          npm install --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/objective-continuation.test.js \
+            dist/test/objective-continuation-readiness.test.js \
+            dist/test/active-work-core.test.js \
+            dist/test/active-work-persistence.test.js
+          node --test dist/test/permanent-continuation-*.test.js
+          node --test dist/src/model/providers/openrouter.test.js
+          node --test dist/src/lab/librechat/bridge.test.js
+          npx tsc -p tsconfig.worker-a.json --noEmit
+          npx tsc -p tsconfig.worker-c.json --noEmit
+          npx tsc -p tsconfig.worker-d.json --noEmit
+          node --test dist/test/lab/*.test.js
+          node --experimental-strip-types --test tests/*.test.ts
+          node --experimental-strip-types --test tests/retrieval/*.test.ts
+          node --test dist/test/persistence.test.js
+          npm test
+          test -f dist/test/spawn-mission-control-context.test.js
+          node --test dist/test/spawn-mission-control-context.test.js
+          test -f tests/spawn-mission-control-context.test.ts
+          node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
+
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "INTEGRATION_SHA=$(git rev-parse HEAD)"
+          echo "INTEGRATION_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "RESOURCE_ENVELOPE_UNCHANGED=true"
+          echo "ALLOWED_PATHS_ONLY=true"
+          echo "FULL_ACCEPTANCE=PASS"
+
+      - name: Push tested integration descendant
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:refs/heads/${INTEGRATION_BRANCH}"
+          echo "INTEGRATION_BRANCH=${INTEGRATION_BRANCH}"
+          echo "PUSHED_SHA=$(git rev-parse HEAD)"
+          echo "PUSHED_TREE=$(git rev-parse 'HEAD{tree}')"
