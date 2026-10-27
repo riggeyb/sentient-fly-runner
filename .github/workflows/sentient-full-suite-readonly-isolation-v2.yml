@@ -1,4 +1,4 @@
-name: Sentient Exact Readonly Isolation V4
+name: Coordination Substrate Exact Acceptance V1
 
 on:
   workflow_dispatch:
@@ -26,255 +26,90 @@ permissions:
   contents: read
 
 jobs:
-  isolate:
+  substrate:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 35
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
-          POSTGRES_USER: sentient
-          POSTGRES_PASSWORD: sentient
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: sentient
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-cmd "pg_isready -U postgres -d sentient"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: riggeyb/sentient
-          ref: ${{ inputs.integration_branch != '' && inputs.integration_canonical_head || inputs.sha }}
+          repository: riggeyb/skills
+          ref: a6d430ff775044a03f2fca9c63ee6bfa1796f558
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: ${{ inputs.integration_branch != '' }}
-          fetch-depth: ${{ inputs.integration_branch != '' && 0 || 1 }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fence exact PR 245 candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "a6d430ff775044a03f2fca9c63ee6bfa1796f558"
+          test "$(git rev-parse 'HEAD^{tree}')" = "785fb508b67515b1963914196ad7cbee50ccabe2"
+          echo "COORDINATION_SHA=$(git rev-parse HEAD)"
+          echo "COORDINATION_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Build bounded canonical-lineage integration candidate
-        if: ${{ inputs.integration_branch != '' }}
-        id: integration
+      - name: Registry and repository validation
         shell: bash
-        env:
-          CANONICAL_HEAD: ${{ inputs.integration_canonical_head }}
-          PR_BASE_SHA: ${{ inputs.integration_pr_base_sha }}
-          TARGET_SHA: ${{ inputs.sha }}
-          TARGET_TREE: ${{ inputs.tree }}
-          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
         run: |
           set -euo pipefail
-          for value in "$CANONICAL_HEAD" "$PR_BASE_SHA" "$TARGET_SHA" "$TARGET_TREE"; do
-            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          done
-          [[ "$INTEGRATION_BRANCH" =~ ^integration/mission-control-production-[0-9a-f]{8}-v[0-9]+$ ]] || exit 2
-          test "$(git rev-parse HEAD)" = "$CANONICAL_HEAD"
-
-          git fetch origin "$PR_BASE_SHA" "$TARGET_SHA"
-          test "$(git rev-parse "${TARGET_SHA}^{tree}")" = "$TARGET_TREE"
-          git merge-base --is-ancestor "$PR_BASE_SHA" "$TARGET_SHA"
-          git switch -c "$INTEGRATION_BRANCH"
-
-          # These files were byte-identical between PR base and canonical production
-          # before the accepted delta, so exact target versions are safe.
-          git checkout "$TARGET_SHA" -- \
-            src/local-runtime/ipc.ts \
-            src/spawn/context.ts \
-            src/spawn/operating-context.ts \
-            test/spawn-mission-control-context.test.ts \
-            tests/spawn-mission-control-context.test.ts
-
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("src/spawn/execution-contracts.ts")
-          s = p.read_text()
-          import_line = 'import type { SentientOperatingContextV1 } from "./operating-context.js";\n'
-          if import_line not in s:
-              needle = '} from "./request-contracts.js";\n'
-              assert needle in s
-              s = s.replace(needle, needle + import_line, 1)
-          field_needle = '  context: BoundedContextBundle;\n'
-          fields = (
-              '  context: BoundedContextBundle;\n'
-              '  operatingContext: SentientOperatingContextV1;\n'
-              '  operatingContextDigest: string;\n'
-          )
-          if '  operatingContext: SentientOperatingContextV1;\n' not in s:
-              assert field_needle in s
-              s = s.replace(field_needle, fields, 1)
-          assert 'maxCapabilityTier?: CapabilityTierV1;' in s
-          p.write_text(s)
-
-          p = Path("src/spawn/index.ts")
-          s = p.read_text()
-          export_line = 'export * from "./operating-context.js";\n'
-          if export_line not in s:
-              needle = 'export * from "./context.js";\n'
-              assert needle in s
-              s = s.replace(needle, needle + export_line, 1)
-          p.write_text(s)
-
-          p = Path("src/state/sanitize.ts")
-          s = p.read_text()
-          old = '    if (SECRET_KEY.test(key)) {\n'
-          new = (
-              '    if (\n'
-              '      SECRET_KEY.test(key)\n'
-              '      && typeof nested !== "boolean"\n'
-              '      && typeof nested !== "number"\n'
-              '      && nested !== null\n'
-              '    ) {\n'
-          )
-          if old in s:
-              s = s.replace(old, new, 1)
-          assert new in s
-          p.write_text(s)
-          PY
-
-          allowed='^(src/local-runtime/ipc\.ts|src/spawn/context\.ts|src/spawn/execution-contracts\.ts|src/spawn/index\.ts|src/spawn/operating-context\.ts|src/state/sanitize\.ts|test/spawn-mission-control-context\.test\.ts|tests/spawn-mission-control-context\.test\.ts)$'
-          unexpected="$(git diff --name-only "$CANONICAL_HEAD" -- | grep -Ev "$allowed" || true)"
-          if [ -n "$unexpected" ]; then
-            printf 'UNEXPECTED_CHANGED_PATHS\n%s\n' "$unexpected"
-            exit 30
-          fi
-          git diff --exit-code "$CANONICAL_HEAD" -- fly.toml
-          git diff --check "$CANONICAL_HEAD"
-
-          git config user.name "sentient-mission-control-integration"
-          git config user.email "sentient-mission-control-integration@users.noreply.github.com"
-          git add \
-            src/local-runtime/ipc.ts \
-            src/spawn/context.ts \
-            src/spawn/execution-contracts.ts \
-            src/spawn/index.ts \
-            src/spawn/operating-context.ts \
-            src/state/sanitize.ts \
-            test/spawn-mission-control-context.test.ts \
-            tests/spawn-mission-control-context.test.ts
-          git commit -m "mission-control: reconcile accepted spawn boundary onto production lineage"
-
-          echo "INTEGRATION_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "INTEGRATION_TREE=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
-          echo "INTEGRATION_BRANCH=$INTEGRATION_BRANCH" >> "$GITHUB_ENV"
-
-      - name: Exact candidate acceptance
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.integration_branch != '' && env.INTEGRATION_SHA || inputs.sha }}
-          EXPECTED_TREE: ${{ inputs.integration_branch != '' && env.INTEGRATION_TREE || inputs.tree }}
+          pip install -r requirements.txt
+          python scripts/validate_registry.py
+          python scripts/check_evals.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_durable_objective_continuation_v1.py
+          PYTHONDONTWRITEBYTECODE=1 python tests/test_active_work_disclosure_v1.py
+          python scripts/test_repository_edit.py
+          python scripts/test_repository_edit_request.py
+          python scripts/validate_actions_schema.py
+      - name: Orchestrator typecheck
+        working-directory: sentient-orchestrator
         run: |
-          set +e
-          mkdir -p /tmp/exact
-          failed=0
-          run_step() {
-            label="$1"; shift
-            "$@" >"/tmp/exact/${label}.log" 2>&1
-            status=$?
-            echo "${label}=$status" >>/tmp/receipt.env
-            if [ "$status" -ne 0 ]; then
-              echo "::group::${label} sanitized failure tail"
-              tail -n 160 "/tmp/exact/${label}.log" \
-                | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig'
-              echo "::endgroup::"
-              failed=1
-            fi
-          }
-
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
-          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
-
+          set -euo pipefail
+          npm install --ignore-scripts
+          npm run typecheck
+      - name: Postgres migrations
+        working-directory: sentient-orchestrator
+        run: npm run migrate
+      - name: Coordination substrate full tests
+        working-directory: sentient-orchestrator
+        run: npm test
+      - name: Emit non-secret receipt
+        if: always()
+        shell: bash
+        run: |
           {
-            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V4"
-            echo "SOURCE_SHA=$EXPECTED_SHA"
-            echo "SOURCE_TREE=$EXPECTED_TREE"
-            echo "INTEGRATION_MODE=${{ inputs.integration_branch != '' }}"
-            echo "UPSTREAM_ACCEPTED_SHA=${{ inputs.sha }}"
-            echo "UPSTREAM_ACCEPTED_TREE=${{ inputs.tree }}"
-            echo "CANONICAL_BASE_SHA=${{ inputs.integration_canonical_head }}"
+            echo "COORDINATION_SUBSTRATE_EXACT_ACCEPTANCE_V1"
+            echo "SOURCE_SHA=$(git rev-parse HEAD)"
+            echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
             echo "RUNNER_OS=$(uname -srvmo)"
-            echo "NODE_VERSION=$(node --version)"
-            echo "NPM_VERSION=$(npm --version)"
-            echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_EXACT_CANDIDATE"
-            echo "DEPENDENCY_MANIFEST_IDENTITY=package.json:$(git rev-parse HEAD:package.json)"
-            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } >/tmp/receipt.env
-
-          run_step NPM_INSTALL npm install --no-audit --no-fund
-          run_step BUILD npm run build
-
-          run_step CONTINUATION node --test \
-            dist/test/objective-continuation.test.js \
-            dist/test/objective-continuation-readiness.test.js \
-            dist/test/active-work-core.test.js \
-            dist/test/active-work-persistence.test.js
-          run_step PERMANENT_CONTINUATION bash -lc "node --test dist/test/permanent-continuation-*.test.js"
-          run_step OPENROUTER node --test dist/src/model/providers/openrouter.test.js
-          run_step LIBRECHAT node --test dist/src/lab/librechat/bridge.test.js
-          run_step WORKER_A npx tsc -p tsconfig.worker-a.json --noEmit
-          run_step WORKER_C npx tsc -p tsconfig.worker-c.json --noEmit
-          run_step WORKER_D npx tsc -p tsconfig.worker-d.json --noEmit
-          run_step WORKER_D_ACCEPTANCE bash -lc "node --test dist/test/lab/*.test.js"
-          run_step WORKER_A_RUNTIME bash -lc "node --experimental-strip-types --test tests/*.test.ts"
-          run_step WORKER_C_RETRIEVAL bash -lc "node --experimental-strip-types --test tests/retrieval/*.test.ts"
-          run_step WORKER_B_PERSISTENCE node --test dist/test/persistence.test.js
-          run_step NPM_TEST npm test
-          if [ -f dist/test/spawn-mission-control-context.test.js ]; then
-            run_step MC_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
-          else
-            echo "MC_SPAWN_COMPILED=2" >>/tmp/receipt.env
-            failed=1
-          fi
-          if [ -f tests/spawn-mission-control-context.test.ts ]; then
-            run_step MC_SPAWN_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
-          else
-            echo "MC_SPAWN_DIRECT=2" >>/tmp/receipt.env
-            failed=1
-          fi
-          for label in CONTINUATION PERMANENT_CONTINUATION WORKER_D_ACCEPTANCE WORKER_A_RUNTIME WORKER_C_RETRIEVAL WORKER_B_PERSISTENCE NPM_TEST MC_SPAWN_COMPILED MC_SPAWN_DIRECT; do
-            f="/tmp/exact/${label}.log"
-            [ -f "$f" ] || continue
-            tests="$(grep -E '^# tests [0-9]+' "$f" | tail -1 | awk '{print $3}')"
-            pass="$(grep -E '^# pass [0-9]+' "$f" | tail -1 | awk '{print $3}')"
-            fail="$(grep -E '^# fail [0-9]+' "$f" | tail -1 | awk '{print $3}')"
-            skip="$(grep -E '^# skipped [0-9]+' "$f" | tail -1 | awk '{print $3}')"
-            echo "${label}_TESTS=${tests:-NOT_REPORTED}" >>/tmp/receipt.env
-            echo "${label}_PASS=${pass:-NOT_REPORTED}" >>/tmp/receipt.env
-            echo "${label}_FAIL=${fail:-NOT_REPORTED}" >>/tmp/receipt.env
-            echo "${label}_SKIP=${skip:-NOT_REPORTED}" >>/tmp/receipt.env
-          done
-          git diff --quiet && git diff --cached --quiet
-          clean=$?
-          echo "TRACKED_SOURCE_MUTATION=$([ "$clean" -eq 0 ] && echo false || echo true)" >>/tmp/receipt.env
-          [ "$clean" -eq 0 ] || failed=1
-          echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>/tmp/receipt.env
-          echo "OVERALL_EXIT=$failed" >>/tmp/receipt.env
-          cat /tmp/receipt.env
-          exit "$failed"
-
-      - name: Push tested canonical-lineage integration descendant
-        if: ${{ success() && inputs.integration_branch != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$INTEGRATION_TREE"
-          git push origin "HEAD:refs/heads/${INTEGRATION_BRANCH}"
-          echo "PUSHED_INTEGRATION_SHA=$INTEGRATION_SHA"
-          echo "PUSHED_INTEGRATION_TREE=$INTEGRATION_TREE"
-
+            echo "NODE_VERSION=$(node --version 2>/dev/null || true)"
+            echo "PYTHON_VERSION=$(python --version 2>/dev/null || true)"
+            echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > /tmp/coordination-substrate-receipt.env
+          cat /tmp/coordination-substrate-receipt.env
       - name: Upload non-secret receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sentient-exact-${{ inputs.sha }}
-          path: /tmp/receipt.env
+          name: coordination-substrate-a6d430ff
+          path: /tmp/coordination-substrate-receipt.env
           if-no-files-found: error
           retention-days: 30
