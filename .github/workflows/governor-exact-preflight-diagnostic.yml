@@ -14,7 +14,7 @@ jobs:
     env:
       S: ${{ inputs.sha }}
       BASE: 3ce2b2e2104a1000a7a82b4cb0e465bdc1789282
-      EXPECTED_INTEGRATION: ac212168daa84d56af7a1e0e3d8d0277af571db2
+      EXPECTED_INTEGRATION: 574a7181c7db83e63a76cf717dc2a77072a85a1e
       TARGET_TREE: f4cebc41c4775b09ce5f0279b5cb12d4cad52a01
       BRANCH: integration/mission-control-production-75ba9c28
     steps:
