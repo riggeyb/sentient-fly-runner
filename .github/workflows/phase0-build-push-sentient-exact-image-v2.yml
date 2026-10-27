@@ -11,6 +11,9 @@ on:
       parent:
         required: true
         type: string
+      skills_sha:
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -24,7 +27,7 @@ jobs:
       SHA: ${{ inputs.sha }}
       TREE: ${{ inputs.tree }}
       PARENT: ${{ inputs.parent }}
-      SKILLS: d85eb820f18ad6d944ab93b03150d606273891a5
+      SKILLS: ${{ inputs.skills_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +44,7 @@ jobs:
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$TREE" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PARENT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SKILLS" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$TREE"
           test "$(git rev-parse HEAD^)" = "$PARENT"
@@ -49,4 +53,5 @@ jobs:
           rm -f sentient-source.bundle
           echo "EXACT_IMAGE_BUILD_PUSH=PASS"
           echo "GOVERNOR_EXPECTED_IMAGE_TAG=phase0-$SHA"
+          echo "SKILLS_SHA=$SKILLS"
           echo "SECRET_VALUES_EXPOSED=false"
