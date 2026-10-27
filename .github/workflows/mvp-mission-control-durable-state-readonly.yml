@@ -1,0 +1,73 @@
+name: MVP Mission Control Durable State Readonly
+"on":
+  workflow_dispatch:
+    inputs:
+      objective_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect Mission Control durable bootstrap state
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          OBJECTIVE_ID: ${{ inputs.objective_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="sentient-validation-runner"
+          [[ "$OBJECTIVE_ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          SESSION_ID="mission-control:${OBJECTIVE_ID}"
+          cat >"$RUNNER_TEMP/mc-state.mjs" <<'NODE'
+          import pg from "pg";
+          const objectiveId=String(process.env.MC_OBJECTIVE_ID??"").trim();
+          const sessionId=`mission-control:${objectiveId}`;
+          const connectionString=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!connectionString) throw new Error("DB_BINDING_MISSING");
+          const pool=new pg.Pool({connectionString,max:1});
+          try {
+            const ledger=(await pool.query(
+              `SELECT objective_id, revision, updated_at FROM execution_ledgers WHERE objective_id=$1`,
+              [objectiveId]
+            )).rows[0]??null;
+            const session=(await pool.query(
+              `SELECT id, objective_id, status, revision, last_sequence, created_at, updated_at
+               FROM collaboration_sessions WHERE id=$1`,
+              [sessionId]
+            )).rows[0]??null;
+            const participants=(await pool.query(
+              `SELECT count(*)::int AS count FROM collaboration_participants WHERE session_id=$1`,
+              [sessionId]
+            )).rows[0]?.count??0;
+            const messages=(await pool.query(
+              `SELECT count(*)::int AS count FROM collaboration_messages WHERE session_id=$1`,
+              [sessionId]
+            )).rows[0]?.count??0;
+            console.log("MC_DURABLE_STATE="+JSON.stringify({
+              objectiveId,
+              ledgerPresent:!!ledger,
+              ledgerRevision:ledger?.revision??null,
+              ledgerUpdatedAt:ledger?.updated_at??null,
+              sessionPresent:!!session,
+              sessionStatus:session?.status??null,
+              sessionRevision:session?.revision??null,
+              sessionLastSequence:session?.last_sequence??null,
+              sessionCreatedAt:session?.created_at??null,
+              sessionUpdatedAt:session?.updated_at??null,
+              participantCount:participants,
+              messageCount:messages
+            }));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally {
+            await pool.end();
+          }
+          NODE
+          B64="$(base64 -w0 "$RUNNER_TEMP/mc-state.mjs")"
+          timeout 120s flyctl ssh console -a "$APP" -C \
+            "sh -lc 'cd /app && echo $B64 | base64 -d >/tmp/mc-state.mjs && MC_OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/mc-state.mjs; rc=\$?; rm -f /tmp/mc-state.mjs; exit \\$rc'"
