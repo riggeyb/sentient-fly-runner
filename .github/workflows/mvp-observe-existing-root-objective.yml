@@ -1,0 +1,83 @@
+name: MVP Observe Existing Root Objective
+"on":
+  workflow_dispatch:
+    inputs:
+      sha: { required: true, type: string }
+      tree: { required: true, type: string }
+      objective_id: { required: true, type: string }
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+      OID: ${{ inputs.objective_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Verify exact live runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          h="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/healthz")"
+          r="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz")"
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null <<<$"h"
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null <<<$"$r"
+          echo LIVE_EXACT_IDENTITY=PASS
+      - name: GET-only bounded Root projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >"$RUNNER_TEMP/observe.mjs" <<'NODE'
+          const oid=String(process.env.CERT_OBJECTIVE_ID??"").trim();
+          const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
+          if(!oid||!token) throw new Error("observe_binding_missing");
+          const headers={authorization:`Bearer ${token}`};
+          let body=null;
+          let lastError=null;
+          for(let i=0;i<60;i++){
+            try{
+              const r=await fetch(`http://127.0.0.1:8080/v1/objectives/${encodeURIComponent(oid)}`, {headers,signal:AbortSignal.timeout(10000)});
+              if(!r.ok) throw new Error(`status_${r.status}`);
+              body=await r.json();
+              break;
+            }catch(e){lastError=e;await new Promise(r=>setTimeout(r,1000));}
+          }
+          if(!body) throw lastError??new Error("observe_no body");
+          const p=body.rootProjection??null;
+          const result=body?.result?.body?.result?>{};
+          const content=String(result.authoritativeContent??"");
+          const sanitized={
+            objectiveId:body.objectiveId??oid,
+            status:body.status??null,
+            rootProjectionPresent:Boolean(p),
+            rootStatus:p?.rootStatus??null,
+            currentPhase:p?.currentPhase??null,
+            contextVersion:p?.operatingContextVersion??null,
+            contextDigest:p?.operatingContextDigest??null,
+            participantContextCount:Array.isArray(p?.participantOperatingContexts)?p.participantOperatingContexts.length:0,
+            staleContextCount:Array.isArray(p?.staleOperatingContextWorkers)?p.staleOperatingContextWorkers.length:0,
+            acceptedEvidenceCount:Array.isArray(p?.acceptedEvidence)?p.acceptedEvidence.length:0,
+            blockerCount:Array.isArray(p?.blockers)?p.blockers.length:0,
+            workerCount:Array.isArray(p?.workers)?p.workers.length:0,
+            subOrchestratorCount:Array.isArray(p?.subOrchestrators)?p.subOrchestrators.length:0,
+            proofStatus:p?.proofStatus??null,
+            waitingAuthority:p?.waitingAuthority??null,
+            finalResultPresent:typeof p?.finalResult==="string"&&Boolean(p.finalResult.trim()),
+            contractVersion:result.contractVersion??null,
+            missionControlStatus:result.status??null,
+            operatingContextIsNotAuthority:result.operatingContextIsNotAuthority??null,
+            workerEffectsCanonical:result.workerEffectsCanonical??null,
+            sourceRepoKnownFromLiveResult:content.includes("riggeyb/sentient"),
+            operatorBridgeKnownFromLiveResult:content.includes("riggeyb/sentient-fly-runner")
+          };
+          console.log("SANITIZED_EXISTING_ROOT_OBSERVER="+JSON.stringify(sanitized));
+          console.log("SECRET_VALUES_EXPOSED=false");
+          NODE
+          B64="$(base64 -w0 "$RUNNER_TEMP/observe.mjs")"
+          timeout 180s flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/observe.mjs && CERT_OBJECTIVE_ID=$OID node /tmp/observe.mjs; rc=\<$?; rm -f /tmp/observe.mjs; exit \$rc'"
