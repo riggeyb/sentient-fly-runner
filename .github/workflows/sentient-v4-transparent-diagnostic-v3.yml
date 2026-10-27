@@ -13,74 +13,16 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: sentient-validation-runner
-      OBJECTIVE_ID: final-e2e-v3-40557377377-1
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Observe existing Mission Control objective without mutation
+      - name: Read Fly machine state only
         shell: bash
         run: |
           set -euo pipefail
-          cat >/tmp/observe.mjs <<'NODE'
-          import { PostgresSpawnObjectiveRepository } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
-          const oid = process.env.OBJECTIVE_ID;
-          const db = String(process.env.DATABASE_URL ?? process.env.DIRECT_URL ?? "").trim();
-          if (!db || !oid) throw new Error("OBSERVER_BINDING_MISSING");
-          const repo = new PostgresSpawnObjectiveRepository({ connectionString: db });
-          try {
-            const task = await repo.get("task", oid);
-            const root = await repo.getObjectiveContinuation(oid);
-            const snap = await repo.snapshot();
-            const spawn = await repo.spawnSnapshot();
-            const works = (snap.collaborationActiveWork?.records ?? [])
-              .filter((w) => JSON.stringify(w).includes(oid))
-              .map((w) => ({
-                workId: w.workId,
-                status: w.status,
-                participantId: w.participantId,
-                reclaimCount: w.reclaimCount,
-              }));
-            const execs = spawn.records.executions
-              .filter((e) => String(e.identity?.taskId ?? "").startsWith(oid + ":"))
-              .map((e) => ({
-                id: e.id,
-                role: e.identity?.role ?? null,
-                status: e.identity?.status ?? null,
-                taskId: e.identity?.taskId ?? null,
-                parentSpawnId: e.identity?.parentSpawnId ?? null,
-                contextDigest: e.operatingContext?.digest ?? e.contextDigest ?? null,
-                effectiveGrant: e.effectiveGrant ?? null,
-              }));
-            const evidence = (root?.evidenceDependencies ?? []).map((d) => ({
-              id: d.dependencyId,
-              status: d.status,
-              evidenceId: d.evidenceId ?? null,
-              subject: d.subjectIdentity ?? null,
-            }));
-            const authority = (root?.authorityDependencies ?? []).map((d) => ({
-              id: d.dependencyId,
-              status: d.status,
-            }));
-            console.log("MISSION_CONTROL_OBSERVATION=" + JSON.stringify({
-              objectiveId: oid,
-              taskStatus: task?.kind === "task" ? task.status : null,
-              rootSpawnId: root?.identity?.rootSpawnId ?? null,
-              collaborationSessionId: root?.identity?.collaborationSessionId ?? null,
-              revision: root?.revision ?? null,
-              terminal: root?.terminal ?? null,
-              works,
-              execs,
-              evidence,
-              authority,
-            }));
-            console.log("READ_ONLY_OBSERVER=PASS");
-          } finally {
-            await repo.close().catch(() => undefined);
-          }
-          NODE
-          B64="$(base64 -w0 /tmp/observe.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64 | base64 -d >/tmp/observe.mjs && OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/observe.mjs; rc=\$?; rm -f /tmp/observe.mjs; exit \$rc'"
-          rm -f /tmp/observe.mjs
+          flyctl machines list -a "$APP" --json | jq '[.[] | {id,state,region,image,created_at,updated_at}]'
+          flyctl status -a "$APP" || true
+          echo READ_ONLY_FLY_STATE=PASS
