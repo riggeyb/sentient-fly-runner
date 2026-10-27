@@ -24,19 +24,25 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
-      - name: Integrate accepted candidate without touching production
+      - name: Integrate accepted source while preserving production Fly envelope
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE"
           test "$(git rev-parse "$S^{tree}")" = "$TARGET_TREE"
-          git diff --exit-code "$BASE" "$S" -- fly.toml
+          git show "$BASE:fly.toml" > "$RUNNER_TEMP/production-fly.toml"
+          production_fly_sha="$(sha256sum "$RUNNER_TEMP/production-fly.toml" | awk '{print $1}')"
           git config user.name sentient-mission-control-integrator
           git config user.email sentient-mission-control-integrator@users.noreply.github.com
           git merge --no-ff --no-edit "$S"
+          git checkout "$BASE" -- fly.toml
+          git add fly.toml
+          git commit --amend --no-edit
           test "$(git rev-parse HEAD^1)" = "$BASE"
+          test "$(git rev-parse HEAD^2)" = "$S"
           git merge-base --is-ancestor "$S" HEAD
           git diff --exit-code "$BASE" HEAD -- fly.toml
+          test "$(sha256sum fly.toml | awk '{print $1}')" = "$production_fly_sha"
           merged="$(git rev-parse HEAD)"
           tree="$(git rev-parse 'HEAD^{tree}')"
           git push --force-with-lease="refs/heads/$BRANCH:$BASE" origin "HEAD:refs/heads/$BRANCH"
@@ -45,5 +51,6 @@ jobs:
           echo "INTEGRATION_TREE=$tree"
           echo "ACCEPTED_CANDIDATE_ANCESTOR=true"
           echo "PRODUCTION_PARENT=true"
+          echo "FLY_CONFIG_PRESERVED=true"
           echo "FLY_RESOURCE_ENVELOPE_CHANGED=false"
           echo "PRODUCTION_REF_MUTATED=false"
