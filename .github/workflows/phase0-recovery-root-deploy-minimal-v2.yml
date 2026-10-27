@@ -35,7 +35,7 @@ jobs:
       - name: Redeploy existing recovery root exactly
         shell: bash
         env:
-          FLU_API_TOKEN: ${{ secrets.FLU_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           set -euo pipefail
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -55,7 +55,7 @@ jobs:
             flyctl machine start "$id" -a "$GOVERNOR_APP" >/dev/null
           fi
 
-          DB="$(flyctl ssh console -a "$GOVERNOR_APP" -C 'printenv SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL+' 2>/dev/null | tail -n1)"
+          DB="$(flyctl ssh console -a "$GOVERNOR_APP" -C 'printenv SENTIENT_DEPLOYMENT_LEDGER_DATABASE_URL' 2>/dev/null | tail -n1)"
           test -n "$DB"
           echo "::add-mask::$DB"
           printf 'SENTIENT_DATABASE_BOOTSTRAP_URL=%s\n' "$DB" | flyctl secrets import -a "$RECOVERY_APP" --stage >/dev/null
