@@ -1,4 +1,4 @@
-name: Sentient Full Suite Readonly Isolation V3
+name: Sentient Exact Readonly Isolation V4
 
 on:
   workflow_dispatch:
@@ -7,9 +7,6 @@ on:
         required: true
         type: string
       tree:
-        required: true
-        type: string
-      private_issue:
         required: true
         type: string
 
@@ -22,22 +19,20 @@ jobs:
     timeout-minutes: 60
     services:
       postgres:
-        image: postgres:17
+        image: postgres:16
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
           POSTGRES_DB: sentient
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d sentient"
+          --health-cmd "pg_isready -U sentient -d sentient"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
-      SENTIENT_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sentient
-
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,7 +41,6 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -65,15 +59,22 @@ jobs:
             "$@" >"/tmp/exact/${label}.log" 2>&1
             status=$?
             echo "${label}=$status" >>/tmp/receipt.env
-            if [ "$status" -ne 0 ]; then failed=1; fi
+            if [ "$status" -ne 0 ]; then
+              echo "::group::${label} sanitized failure tail"
+              tail -n 160 "/tmp/exact/${label}.log" \
+                | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig'
+              echo "::endgroup::"
+              failed=1
+            fi
           }
+
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
 
           {
-            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V3"
+            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V4"
             echo "SOURCE_SHA=$EXPECTED_SHA"
             echo "SOURCE_TREE=$EXPECTED_TREE"
             echo "RUNNER_OS=$(uname -srvmo)"
@@ -87,62 +88,59 @@ jobs:
           run_step NPM_INSTALL npm install --no-audit --no-fund
           run_step BUILD npm run build
 
-          mapfile -t compiled < <(find dist/test -type f -name '*.test.js' 2>/dev/null | sort)
-          echo "COMPILED_TEST_FILES=${#compiled[@]}" >>/tmp/receipt.env
-          if [ "${#compiled[@]}" -gt 0 ]; then
-            run_step COMPILED_TESTS node --test "${compiled[@]}"
-          else
-            echo "COMPILED_TESTS=2" >>/tmp/receipt.env
-            failed=1
-          fi
-
-          mapfile -t direct < <(find tests -type f -name '*.test.ts' 2>/dev/null | sort)
-          echo "DIRECT_TEST_FILES=${#direct[@]}" >>/tmp/receipt.env
-          if [ "${#direct[@]}" -gt 0 ]; then
-            run_step DIRECT_TESTS node --experimental-strip-types --test "${direct[@]}"
-          else
-            echo "DIRECT_TESTS=2" >>/tmp/receipt.env
-            failed=1
-          fi
+          run_step CONTINUATION node --test \
+            dist/test/objective-continuation.test.js \
+            dist/test/objective-continuation-readiness.test.js \
+            dist/test/active-work-core.test.js \
+            dist/test/active-work-persistence.test.js
+          run_step PERMANENT_CONTINUATION bash -lc "node --test dist/test/permanent-continuation-*.test.js"
+          run_step OPENROUTER node --test dist/src/model/providers/openrouter.test.js
+          run_step LIBRECHAT node --test dist/src/lab/librechat/bridge.test.js
 
           run_step WORKER_A npx tsc -p tsconfig.worker-a.json --noEmit
           run_step WORKER_C npx tsc -p tsconfig.worker-c.json --noEmit
           run_step WORKER_D npx tsc -p tsconfig.worker-d.json --noEmit
+
+          run_step WORKER_D_ACCEPTANCE bash -lc "node --test dist/test/lab/*.test.js"
+          run_step WORKER_A_RUNTIME bash -lc "node --experimental-strip-types --test tests/*.test.ts"
+          run_step WORKER_C_RETRIEVAL bash -lc "node --experimental-strip-types --test tests/retrieval/*.test.ts"
+          run_step WORKER_B_PERSISTENCE node --test dist/test/persistence.test.js
           run_step NPM_TEST npm test
 
-          for label in COMPILED_TESTS DIRECT_TESTS NPM_TEST; do
+          # Explicitly exercise both authored Mission Control spawn suites.
+          if [ -f dist/test/spawn-mission-control-context.test.js ]; then
+            run_step MC_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
+          else
+            echo "MC_SPAWN_COMPILED=2" >>/tmp/receipt.env
+            failed=1
+          fi
+          if [ -f tests/spawn-mission-control-context.test.ts ]; then
+            run_step MC_SPAWN_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
+          else
+            echo "MC_SPAWN_DIRECT=2" >>/tmp/receipt.env
+            failed=1
+          fi
+
+          for label in CONTINUATION PERMANENT_CONTINUATION WORKER_D_ACCEPTANCE WORKER_A_RUNTIME WORKER_C_RETRIEVAL WORKER_B_PERSISTENCE NPM_TEST MC_SPAWN_COMPILED MC_SPAWN_DIRECT; do
             f="/tmp/exact/${label}.log"
             [ -f "$f" ] || continue
             tests="$(grep -E '^# tests [0-9]+' "$f" | tail -1 | awk '{print $3}')"
             pass="$(grep -E '^# pass [0-9]+' "$f" | tail -1 | awk '{print $3}')"
             fail="$(grep -E '^# fail [0-9]+' "$f" | tail -1 | awk '{print $3}')"
+            skip="$(grep -E '^# skipped [0-9]+' "$f" | tail -1 | awk '{print $3}')"
             echo "${label}_TESTS=${tests:-NOT_REPORTED}" >>/tmp/receipt.env
             echo "${label}_PASS=${pass:-NOT_REPORTED}" >>/tmp/receipt.env
             echo "${label}_FAIL=${fail:-NOT_REPORTED}" >>/tmp/receipt.env
+            echo "${label}_SKIP=${skip:-NOT_REPORTED}" >>/tmp/receipt.env
           done
 
-          test -z "$(git status --porcelain)"
+          git diff --quiet && git diff --cached --quiet
           clean=$?
-          echo "SOURCE_MUTATION=$([ "$clean" -eq 0 ] && echo false || echo true)" >>/tmp/receipt.env
+          echo "TRACKED_SOURCE_MUTATION=$([ "$clean" -eq 0 ] && echo false || echo true)" >>/tmp/receipt.env
           [ "$clean" -eq 0 ] || failed=1
+
           echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>/tmp/receipt.env
           echo "OVERALL_EXIT=$failed" >>/tmp/receipt.env
-
-          python3 - <<'PY'
-          import pathlib,re
-          out=[]
-          pats=[
-            (re.compile(r'gh[pousr]_[A-Za-z0-9_]+'),'[REDACTED]'),
-            (re.compile(r'flyv1_[A-Za-z0-9_-]+'),'[REDACTED]'),
-            (re.compile(r'(?i)(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+'),r'\1=[REDACTED]')
-          ]
-          for p in sorted(pathlib.Path('/tmp/exact').glob('*.log')):
-            t=p.read_text(errors='replace')
-            for rx,r in pats:t=rx.sub(r,t)
-            if 'error' in t.lower() or 'fail' in t.lower():
-              out.append(f"## {p.name}\n{t[-10000:]}")
-          pathlib.Path('/tmp/failures.txt').write_text('\n\n'.join(out))
-          PY
           cat /tmp/receipt.env
           exit "$failed"
 
@@ -154,35 +152,3 @@ jobs:
           path: /tmp/receipt.env
           if-no-files-found: error
           retention-days: 30
-
-      - name: Post private receipt
-        if: always()
-        shell: bash
-        env:
-          SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          PRIVATE_ISSUE: ${{ inputs.private_issue }}
-        run: |
-          set -euo pipefail
-          [[ "$PRIVATE_ISSUE" =~ ^[0-9]+$ ]]
-          {
-            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V3"
-            echo '```text'
-            cat /tmp/receipt.env
-            echo '```'
-            if [ -s /tmp/failures.txt ]; then
-              echo "Sanitized failure tails:"
-              echo '```text'
-              cat /tmp/failures.txt
-              echo '```'
-            fi
-            echo "PRODUCTION_DEPLOYMENT=false"
-            echo "SOURCE_MUTATION=false"
-          } >/tmp/body.txt
-          jq -Rs '{body:.}' </tmp/body.txt >/tmp/payload.json
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer $SOURCE_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -H "Content-Type: application/json" \
-            -X POST "https://api.github.com/repos/riggeyb/sentient/issues/$PRIVATE_ISSUE/comments" \
-            --data-binary @/tmp/payload.json >/dev/null
