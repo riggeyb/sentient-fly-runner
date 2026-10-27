@@ -24,7 +24,7 @@ jobs:
       SHA: ${{ inputs.sha }}
       TREE: ${{ inputs.tree }}
       PARENT: ${{ inputs.parent }}
-      SKILLS: d85eb820f18ad6d944ab93b03150d606273891a5
+      SKILLS: b3df9b32b47370a7140d6fe814eeba97564663ab
     steps:
       - uses: actions/checkout@v4
         with:
