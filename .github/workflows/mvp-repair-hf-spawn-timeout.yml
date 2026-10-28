@@ -1,0 +1,72 @@
+name: MVP Repair HF Spawn Timeout
+
+"on":
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_PARENT: 62766f6f582962ef2f3f73d243857e85f952dfbd
+      EXPECTED_TREEE: 674d512e3ed860db67f817f7a93d99c2b3cea76d
+      BRANCH: sentient/hf-spawn-runtime-budget-v1
+    steps:
+      - name: Checkout exact repair branch
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.BRANCH }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Fence parent identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PARENT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+
+      - name: Apply minimal budget repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/application/production-collaboration.ts')
+          s=p.read_text()
+          old='maxRuntimeMs: 60_000,'
+          new='maxRuntimeMs: 120_000,'
+          if s.count(old)!=1: raise SYstemExit('source_fence_failed')
+          p.write_text(s.replace(old,new))
+
+          p=Path('test/job2-production-convergence.test.ts')
+          s=p.read_text()
+          old_name='production collaboration keeps concise zero-cost child budgets inside the 60 second envelope'
+          new_name='production collaboration keeps concise zero-cost child budgets inside the parent 120 second envelope'
+          if s.count(old_name)!=1: raise SystemExit('test_name_fence_failed')
+          s=s.replace(old_name,new_name)
+          old_assert='maxRuntimeMs:\\s*60_000'
+          new_assert='maxRuntimeMs:\\s*120_000'
+          if s.count(old_assert)!=1: raise SystemExit('test_assert_fence_failed')
+          p.write_text(s.replace(old_assert,new_assert))
+          PY
+          git diff --check
+          test "${git diff --name-only}" = $'src/application/production-collaboration.ts\ntest/job2-production-convergence.test.ts'
+
+      - name: Commit exact repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name sentient-mvp-repair
+          git config user.email sentient-mvp-repair@users.noreply.github.com
+          git add src/application/production-collaboration.ts test/job2-production-convergence.test.ts
+          git commit -m "mvp: allow local HF Spawn the parent runtime budget"
+          git push origin HEAD:"$BRANCH"
+          echo "REPAIR_SCOPE=two_files"
+          echo "RESOURCE_EXPANSION=false"
+          echo "AUTHORITY_EXPANSION=false"
