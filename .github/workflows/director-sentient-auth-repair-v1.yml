@@ -1,0 +1,104 @@
+name: Director Sentient Auth Repair V1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient/director-sentient-auth-v1
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Wire scoped Director token
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "7cc2f399b6562ba7b71d363debecf444bddf406e"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/fly/server-runtime.ts")
+          s = p.read_text()
+          reps = [
+            ('import { randomUUID, timingSafeEqual } from "node:crypto";',
+             'import { randomUUID } from "node:crypto";'),
+            ('import { runPhase0CertificationTestV1 } from "./phase0-certification.js";',
+             'import { runPhase0CertificationTestV1 } from "./phase0-certification.js";\nimport { isBearerAuthorized } from "./bearer-auth.js";'),
+            ('const TOKEN = secret("SENTIENT_API_TOKEN");',
+             'const TOKEN = secret("SENTIENT_API_TOKEN");\nconst DIRECTOR_TOKEN = optionalSecret("DIRECTOR_SENTIENT_TOKEN");'),
+            ('if (req.method === "GET" && req.url?.startsWith("/v1/objectives/")) {\n      if (!authorized(req))',
+             'if (req.method === "GET" && req.url?.startsWith("/v1/objectives/")) {\n      if (!objectiveAuthorized(req))'),
+            ('if (req.method !== "POST" || req.url !== "/v1/objectives") {\n      return json(res, 404, { error: "not_found" });\n    }\n    if (!authorized(req))',
+             'if (req.method !== "POST" || req.url !== "/v1/objectives") {\n      return json(res, 404, { error: "not_found" });\n    }\n    if (!objectiveAuthorized(req))'),
+            ('''function authorized(req: IncomingMessage): boolean {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return false;
+  const actual = Buffer.from(header.slice(7));
+  const expected = Buffer.from(TOKEN);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}''',
+             '''function authorized(req: IncomingMessage): boolean {
+  return isBearerAuthorized(req.headers.authorization, TOKEN, DIRECTOR_TOKEN, "general");
+}
+
+function objectiveAuthorized(req: IncomingMessage): boolean {
+  return isBearerAuthorized(req.headers.authorization, TOKEN, DIRECTOR_TOKEN, "director_objective");
+}'''),
+            ('''function secret(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name}_required`);
+  return value;
+}''',
+             '''function secret(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name}_required`);
+  return value;
+}
+
+function optionalSecret(name: string): string | null {
+  return process.env[name]?.trim() || null;
+}'''),
+          ]
+          for old, new in reps:
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f"match_count={n} for {old.splitlines()[0]}")
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "src/fly/server-runtime.ts"
+
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/director-sentient-auth.test.js
+          npm test
+
+      - name: Commit successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-director-auth-operator"
+          git config user.email "sentient-director-auth-operator@users.noreply.github.com"
+          git add src/fly/server-runtime.ts
+          git commit -m "auth: scope dedicated Director bearer credential"
+          git push origin HEAD:sentient/director-sentient-auth-v1
+          echo "BACKEND_SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "BACKEND_SUCCESSOR_TREE=$(git rev-parse 'HEAD^{tree}')"
