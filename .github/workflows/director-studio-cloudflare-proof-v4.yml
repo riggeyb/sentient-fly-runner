@@ -21,22 +21,12 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       DIRECTOR_SENTIENT_TOKEN: ${{ secrets.DIRECTOR_SENTIENT_TOKEN }}
     steps:
-      - name: Require operator bindings
-        shell: bash
-        env:
-          SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          for k in SOURCE_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_ACCESS_TEAM_DOMAIN CF_ACCESS_POLICY_AUD DIRECTOR_SENTIENT_BASE_URL DIRECTOR_SENTIENT_TOKEN; do
-            test -n "${!k:-}" || { echo "MISSING_BINDING=$k"; exit 1; }
-          done
-          echo "OPERATOR_BINDINGS_PRESENT=true"
-
       - uses: actions/checkout@v4
         with:
           path: operator
 
-      - uses: actions/checkout@v4
+      - name: Checkout private Director source
+        uses: actions/checkout@0v4
         with:
           repository: riggeyb/director-studio-beta
           ref: sentient-ui-activation-v1
@@ -44,6 +34,25 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
           path: director
+
+      - name: Fence exact Director candidate
+        shell: bash
+        working-directory: director
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_DIRECTOR_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_DIRECTOR_TREE"
+          test "$(git branch --show-current)" = "$DIRECTOR_BRANCH"
+          echo "DIRECTOR_PRIVATE_CHECKOUT=PASS"
+
+      - name: Require Cloudflare and Director runtime bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_ACCESS_TEAM_DOMAIN CF_ACCESS_POLICY_AUD DIRECTOR_SENTIENT_BASE_URL DIRECTOR_SENTIENT_TOKEN; do
+            test -n "${!k:-}" || { echo "MISSING_BINDING=$k"; exit 1; }
+          done
+          echo "OPERATOR_RUNTIME_BINDINGS_PRESENT=true"
 
       - uses: actions/setup-node@v4
         with:
@@ -60,4 +69,4 @@ jobs:
         run: |
           echo "SOURCE_REPOSITORY=riggeyb/director-studio-beta"
           echo "EXECUTION_REPOSITORY=riggeyb/sentient-fly-runner"
-          echo "PRIVATE_DIRECTOR_ACTIONS_REQUIRED=false"
+          echo "PRIVATE_DIRECTOR_ACTIONS_REQUIRED=false
