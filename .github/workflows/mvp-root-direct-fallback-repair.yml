@@ -21,7 +21,7 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
           path: sentient
-      - uses: actions/setup-nodee@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Apply bounded Root direct fallback
@@ -44,7 +44,12 @@ jobs:
           cd sentient
           npm ci --no-audit --no-fund
           npm run build
-          node --test            dist/test/root-direct-fallback.test.js             dist/test/production-collaboration-verdict.test.js             dist/test/spawn-mission-control-context.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/production-collaboration-restart-recovery.test.js
+          node --test \
+            dist/test/root-direct-fallback.test.js \
+            dist/test/production-collaboration-verdict.test.js \
+            dist/test/spawn-mission-control-context.test.js \
+            dist/test/phase5-collaborative-convergence.test.js \
+            dist/test/production-collaboration-restart-recovery.test.js
           npm test
           echo "ROOT_DIRECT_SUCCESS_TEST=PASS"
           echo "ROOT_DIRECT_STALLED_COGNITION_TEST=PASS"
