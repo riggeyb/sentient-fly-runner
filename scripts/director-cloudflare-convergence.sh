@@ -27,7 +27,11 @@ npm ci --no-audit --no-fund
 echo "PACKAGE_LOCK_INTEGRITY=PASS"
 
 gate=clerk_runtime
-if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json app components lib proxy.ts .env.example 2>/dev/null; then false; fi
+clerk_runtime_file="$(git grep -l -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json app components lib proxy.ts .env.example 2>/dev/null | head -n1 || true)"
+if [ -n "$clerk_runtime_file" ]; then
+  echo "::error::CLERK_RUNTIME_FILE=$clerk_runtime_file"
+  false
+fi
 gate=clerk_lock
 if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package-lock.json 2>/dev/null; then false; fi
 if npm ls @clerk/nextjs --all --json 2>/dev/null | grep -Fq '"@clerk/nextjs"'; then false; fi
