@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: sentient/mvp-ack-before-work-v1
+          ref: sentient/mvp-ack-before-work-1e46-v1
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "63d89cbcd8c2f8d6ad1fc2a26ae12260f5f28062"
+          test "$(git rev-parse HEAD)" = "1e46f8848f5cfdb4d479b1602f85902b4f3d4728"
           python3 - <<'PY'
           from pathlib import Path
           p=Path("src/fly/self-execution.ts")
@@ -51,6 +51,6 @@ jobs:
           git add src/fly/self-execution.ts
           test "$(git diff --cached --name-only)" = "src/fly/self-execution.ts"
           git commit -m "mvp: acknowledge objectives before scheduling work"
-          git push origin HEAD:sentient/mvp-ack-before-work-v1
+          git push origin HEAD:sentient/mvp-ack-before-work-1e46-v1
           echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
           echo "SUCCESSOR_TREE=$(git rev-parse 'HEAD^{tree}')"
