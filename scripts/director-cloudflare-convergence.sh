@@ -91,7 +91,7 @@ if [ -n "$deploy_version" ]; then echo "CLOUDFLARE_DEPLOY_VERSION=$deploy_versio
 echo "DIRECTOR_SENTIENT_TOKEN_BOUND_SERVER_SIDE=true"
 echo "SENTIENT_TOKEN_BROWSER_EXPOSURE=false"
 
-HOST_UUL="$worker_url"
+HOST_URL="$worker_url"
 gate=access_front_door
 code="$(curl -sS -o "$RUNNER_TEMP/a-body" -D "$RUNNER_TEMP/a-head" -w '%{http_code}' --max-time 20 "$HOST_URL" || true)"
 test "$code" != "200"
@@ -101,8 +101,8 @@ echo "UNNECESSARY_ACCESS_DISCOVERY_REMOVED=true"
 echo "CLOUDFLARE_ACCESS_ENABLED=true"
 echo "UNAUTHENTICATED_ACCESS_BLOCKED=true"
 echo "DIRECTOR_STUDIO_CLOUDFLARE_URL=$HOST_URL"
-echo "ACTUTL_USABLE_FRONTEND_URL=$HOST_URL"
-echo "WORKERS_DEW_DEPLOY_URL=$worker_url"
+echo "ACTUAL_USABLE_FRONTEND_URL=$HOST_URL"
+echo "WORKERS_DEV_DEPLOY_URL=$worker_url"
 
 gate=clean_tree
 git diff --quiet
