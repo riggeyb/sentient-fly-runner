@@ -48,15 +48,6 @@ export CF_ACCESS_POLICY_AUD="$real_aud"
 export DIRECTOR_SENTIENT_BASE_URL="$real_base"
 export DIRECTOR_SENTIENT_TOKEN="$real_token"
 
-j="$RUNNER_TEMP/access-apps.json"
-curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get --data-urlencode "aud=$CF_ACCESS_POLICY_AUD" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps" > "$j"
-jq -e '.success == true and (.result|length)==1' "$j" >/dev/null
-domain="$(jq -r '.result[0].domain // empty' "$j")"
-test -n "$domain"
-test "$(jq -r '.result[0].aud // empty' "$j")" = "$CF_ACCESS_POLICY_AUD"
-rm -f "$j"
-echo "CLOUDFLARE_ACCESS_ENABLED=true"
-
 f="$RUNNER_TEMP/director-secrets.env"; log="$RUNNER_TEMP/director-deploy.log"
 umask 077
 printf 'CF_ACCESS_TEAM_DOMAIN=%s\nCF_ACCESS_POLICY_AUD=%s\nDIRECTOR_SENTIENT_BASE_URL=%s\nDIRECTOR_SENTIENT_TOKEN=%s\n' "$CF_ACCESS_TEAM_DOMAIN" "$CF_ACCESS_POLICY_AUD" "$DIRECTOR_SENTIENT_BASE_URL" "$DIRECTOR_SENTIENT_TOKEN" > "$f"
@@ -70,17 +61,17 @@ echo "CLOUDFLARE_DEPLOY_SHA=$(git rev-parse HEAD)"
 echo "CLOUDFLARE_DEPLOY_TREE=$(git rev-parse 'HEAD^{tree}')"
 echo "DIRECTOR_SENTIENT_TOKEN_BOUND_SERVER_SIDE=true"
 
-host_url="https://$domain"
+HOST_URL="$worker_url"
 code="$(curl -sS -o "$RUNNER_TEMP/a-body" -D "$RUNNER_TEMP/a-head" -w '%{http_code}' --max-time 20 "$HOST_URL/" || true)"
 test "$code" != "200"
 if ! grep -qiE 'location:.*cloudflareaccess|cf-access|cloudflare' "$RUNNER_TEMP/a-head" "$RUNNER_TEMP/a-body"; then test "$code" = "401" -o "$code" = "403"; fi
 rm -f "$RUNNER_TEMP/a-body" "$RUNNER_TEMP/a-head"
 echo "UNAUTHENTICATED_ACCESS_BLOCKED=true"
-echo "DIRECTOR_STUDIO_CLOUDFLARE_URL=$host_url"
+echo "DIRECTOR_STUDIO_CLOUDFLARE_URL=$HOST_URL"
 echo "WORKERS_DEV_DEPLOY_URL=$worker_url"
 
 git diff --quiet
-git dif --cached --quiet
+git diff --cached --quiet
 echo "PRIVATE_DIRECTOR_ACTIONS_REQUIRED=false"
 echo "NETLIFY_FALLBACK_USED=false"
 echo "CLERK_FALLBACK_USED=false"
