@@ -81,12 +81,19 @@ jobs:
               echo "failure_gate=$gate" >> "$GITHUB_OUTPUT"
               echo "::error::$marker"
               if [ "$gate" = "tests" ]; then
-                test_line="$(grep -E '^not ok [0-9]+ - ' "$RUNNER_TEMP/director-convergence-tail.log" | head -n1 || true)"
-                if [ -n "$test_line" ]; then
-                  test_name="${test_line#* - }"
-                  test_slug="$(printf '%s' "$test_name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | cut -c1-80)"
+                test_marker="$(grep -Eo 'DIRECTOR_TEST_FAILURE=[A-Za-z0-9._-]+' "$RUNNER_TEMP/director-convergence-tail.log" | tail -n1 || true)"
+                if [ -n "$test_marker" ]; then
+                  test_slug="${test_marker#DIRECTOR_TEST_FAILURE=}"
                   echo "failure_test=$test_slug" >> "$GITHUB_OUTPUT"
-                  echo "::error title=Director test failure::$test_line"
+                  echo "::error::$test_marker"
+                else
+                  test_line="$(grep -E '^not ok [0-9]+ - ' "$RUNNER_TEMP/director-convergence-tail.log" | head -n1 || true)"
+                  if [ -n "$test_line" ]; then
+                    test_name="${test_line#* - }"
+                    test_slug="$(printf '%s' "$test_name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | cut -c1-80)"
+                    echo "failure_test=$test_slug" >> "$GITHUB_OUTPUT"
+                    echo "::error title=Director test failure::$test_line"
+                  fi
                 fi
               fi
             fi
