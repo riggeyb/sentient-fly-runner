@@ -25,9 +25,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "56726f47532b526e03f92e369fc7788c6f5e49cc"
+          test "$(git rev-parse HEAD)" = "c05a4f2d4a45cdc110edd8a397541b7eb8e687bf"
           python3 - <<'PY'
-          from pathlib import Path
+          from pathlib imporet Path
           p = Path("src/fly/self-execution.ts")
           s = p.read_text()
           start_marker = "  public async resumeUnfinished(): Promise<number> {"
@@ -51,7 +51,7 @@ jobs:
             for (const task of tasks) this.#scheduleInheritedRestart(task.id);
             return tasks.length;
           }
-          '''
+          ''
           s = s[:start] + replacement + s[end:]
           old = "        void this.#schedule(objectiveId, true);"
           new = "        await this.#schedule(objectiveId, true);"
@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "56726f47532b526e03f92e369fc7788c6f5e49cc"
+          test "$(git rev-parse HEAD)" = "c05a4f2d4a45cdc110edd8a397541b7eb8e687bf"
           git config user.name "sentient-mvp-activation"
           git config user.email "sentient-mvp-activation@users.noreply.github.com"
           git add src/fly/self-execution.ts
