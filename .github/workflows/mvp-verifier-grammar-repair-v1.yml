@@ -67,8 +67,8 @@ jobs:
           p = Path("test/job2-production-convergence.test.ts")
           s = p.read_text()
           anchor = '  assert.doesNotMatch(collaboration, /maxOutputTokens:\\s*1_024/);\n});\n'
-          addition = '''  assert.doesNotMatch(collaboration, /maxOutputTokens:\\s*1_024/);
-            assert.match(collaboration, /maxOutputTokens:\\s*role === "independent-verification" \\? 8 : 64/);
+          addition = '''  assert.doesNotMatch(collaboration, /maxOutputTokens:\s*1_024/);
+            assert.match(collaboration, /maxOutputTokens:\s*role === "independent-verification" \? 8 : 64/);
             assert.match(collaboration, /Return exactly one verdict token and nothing else/);
             assert.doesNotMatch(collaboration, /Then give a concise rationale/);
             const backend = await readFile("src/spawn/backends/huggingface.ts", "utf8");
@@ -85,12 +85,29 @@ jobs:
       - name: Build and bounded tests
         shell: bash
         run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          npm run build
-          node --test dist/test/job2-production-convergence.test.js
-          npm test
+          set +e
+          failed=0
+          run_step() {
+            label="$1"; shift
+            "$@" >"/tmp/${label}.log" 2>&1
+            rc=$?
+            echo "${label}_EXIT=${rc}"
+            if [ "$rc" -ne 0 ]; then
+              echo "::group::${label} failure tail"
+              tail -n 120 "/tmp/${label}.log"
+              echo "::endgroup::"
+              failed=1
+            fi
+          }
+          run_step NPM_INSTALL npm install --no-audit --no-fund
+          if [ "$failed" -eq 0 ]; then run_step BUILD npm run build; fi
+          if [ "$failed" -eq 0 ]; then run_step JOB2 node --test dist/test/job2-production-convergence.test.js; fi
+          if [ "$failed" -eq 0 ]; then run_step NPM_TEST npm test; fi
           git diff --check
+          diff_rc=$?
+          echo "DIFF_CHECK_EXIT=${diff_rc}"
+          if [ "$diff_rc" -ne 0 ]; then failed=1; fi
+          exit "$failed"
       - name: Commit isolated repair
         shell: bash
         run: |
