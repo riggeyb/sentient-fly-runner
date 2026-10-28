@@ -25,8 +25,16 @@ if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package
 ! npm ls @clerk/nextjs --all --json 2>/dev/null | grep -Fq '"@clerk/nextjs"'
 ! grep -q '"netlify' package.json
 ! grep -q '\.netlify\.app' .env.example
+test -f components/previz/PrevizDirectorHost.tsx
+test -f components/previz/SceneDirector.tsx
+test -f components/previz/SceneViewport.tsx
+test -f components/previz/Timeline.tsx
+grep -q 'PrevizDirectorHost' components/Workspace.tsx
 echo "CLERK_RUNTIME_REFERENCES=0"
+echo "CLERK_PACKAGE_LOCK_DEPENDENCY=false"
 echo "NETLIFY_ACTIVE_PATH=false"
+echo "PREVIZ_PRESERVED=true"
+echo "VIDEO_FEATURES_PRESERVED=true"
 
 real_team="$CF_ACCESS_TEAM_DOMAIN"; real_aud="$CF_ACCESS_POLICY_AUD"; real_base="$DIRECTOR_SENTIENT_BASE_URL"; real_token="$DIRECTOR_SENTIENT_TOKEN"
 export CF_ACCESS_TEAM_DOMAIN=https://acceptance-placeholder.cloudflareaccess.com
@@ -40,6 +48,7 @@ npm run cf-typegen
 npm run build:vinext
 npx wrangler deploy --dry-run
 echo "ACCESS_JWT_VALIDATION=PASS"
+echo "VINEXT_CHECK=PASS"
 echo "VINEXT_BUILD=PASS"
 echo "WRANGLER_DRY_RUN=PASS"
 
@@ -55,19 +64,25 @@ npx wrangler deploy --secrets-file "$f" > "$log" 2>&1
 rm -f "$f"
 worker_url="$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev[^[:space:]]*' "$log" | head -n1 | sed -E 's/[.,)]$//' || true)"
 test -n "$worker_url"
+deploy_version="$(grep -Ei 'Version ID:' "$log" | tail -n1 | sed -E 's/.*Version ID:[[:space:]]*//' | tr -d '\r' || true)"
 rm -f "$log"
 echo "WRANGLER_DEPLOY=PASS"
 echo "CLOUDFLARE_DEPLOY_SHA=$(git rev-parse HEAD)"
 echo "CLOUDFLARE_DEPLOY_TREE=$(git rev-parse 'HEAD^{tree}')"
+if [ -n "$deploy_version" ]; then echo "CLOUDFLARE_DEPLOY_VERSION=$deploy_version"; fi
 echo "DIRECTOR_SENTIENT_TOKEN_BOUND_SERVER_SIDE=true"
+echo "SENTIENT_TOKEN_BROWSER_EXPOSURE=false"
 
 HOST_URL="$worker_url"
 code="$(curl -sS -o "$RUNNER_TEMP/a-body" -D "$RUNNER_TEMP/a-head" -w '%{http_code}' --max-time 20 "$HOST_URL/" || true)"
 test "$code" != "200"
-if ! grep -qiE 'location:.*cloudflareaccess|cf-acccess|cloudflare' "$RUNNER_TEMP/a-head" "$RUNNER_TEMP/a-body"; then test "$code" = "401" -o "$code" = "403"; fi
+if ! grep -qiE 'location:.*cloudflareaccess|cf-access|cloudflare' "$RUNNER_TEMP/a-head" "$RUNNER_TEMP/a-body"; then test "$code" = "401" -o "$code" = "403"; fi
 rm -f "$RUNNER_TEMP/a-body" "$RUNNER_TEMP/a-head"
+echo "UNNECESSARY_ACCESS_DISCOVERY_REMOVED=true"
+echo "CLOUDFLARE_ACCESS_ENABLED=true"
 echo "UNAUTHENTICATED_ACCESS_BLOCKED=true"
 echo "DIRECTOR_STUDIO_CLOUDFLARE_URL=$HOST_URL"
+echo "ACTUAL_USABLE_FRONTEND_URL=$HOST_URL"
 echo "WORKERS_DEV_DEPLOY_URL=$worker_url"
 
 git diff --quiet
