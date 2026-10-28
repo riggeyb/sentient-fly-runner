@@ -46,35 +46,58 @@ jobs:
           const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
           if(!id||!db) throw new Error("CERT_DETAIL_BINDING_MISSING");
           const repo=new Repo({connectionString:db});
-          const clean=(v,n=1000)=>String(v??"").replace(/[\r\n\0]/g," ").slice(0,n);
-          const scrub=(v,d=0)=>{
-            if(d>6)return "[truncated]";
-            if(v===null||typeof v==="boolean"||typeof v==="number")return v;
-            if(typeof v==="string")return clean(v);
-            if(Array.isArray(v))return v.slice(0,40).map(x=>scrub(x,d+1));
-            if(!v||typeof v!=="object")return clean(v);
-            const o={};
-            for(const [k,x] of Object.entries(v)){
-              o[k]=/(token|secret|password|credential|authorization|cookie|database|url)/i.test(k)?"[REDACTED]":scrub(x,d+1);
-            }
-            return o;
-          };
+          const firstToken=v=>typeof v==="string"?(v.trim().split(/\s+/,1)[0]??"").replace(/[^A-Za-z]/g,"").toUpperCase().slice(0,32):null;
           try{
             const task=await repo.get("task",id);
             if(task?.kind!=="task") throw new Error("CERT_DETAIL_TASK_MISSING");
             const md=(task.metadata&&typeof task.metadata==="object"&&!Array.isArray(task.metadata))?task.metadata:{};
             const root=await repo.getObjectiveContinuation(id);
-            const detail={
+            const snap=await repo.spawnSnapshot();
+            const episodes=snap.records.episodes
+              .filter(e=>e.taskId===id)
+              .map(e=>({
+                role:e.role,
+                executionId:e.executionId,
+                finalOutcome:e.finalOutcome,
+                failureClass:e.failureClass,
+                policyDecision:e.policyDecision?.decision??null,
+                policyReasons:e.policyDecision?.reasonCodes??[],
+                verificationOutcome:e.verification?.outcome??null,
+                verificationReasons:e.verification?.reasonCodes??[],
+                verificationEvidenceCount:Array.isArray(e.verification?.evidenceRefs)?e.verification.evidenceRefs.length:0,
+                backend:e.selectedTarget?.backendId??null,
+                provider:e.selectedTarget?.provider??null,
+                model:e.selectedTarget?.model??null
+              }));
+            const results=snap.records.results
+              .filter(r=>r.result?.identity?.taskId===id)
+              .map(r=>({
+                executionId:r.executionId,
+                role:r.result.identity.role,
+                terminalStatus:r.result.terminalStatus,
+                evidenceCount:Array.isArray(r.result.evidenceRefs)?r.result.evidenceRefs.length:0,
+                failureClass:r.result.failure?.class??null,
+                failureRetryable:r.result.failure?.retryable??null,
+                verdictToken:r.result.identity.role==="independent-verification"?firstToken(r.result.output):null,
+                provider:r.result.providerReceipt?.provider??null,
+                model:r.result.providerReceipt?.model??null,
+                revision:r.result.providerReceipt?.revision??null,
+                transport:r.result.providerReceipt?.transport??null,
+                costPolicy:r.result.providerReceipt?.costPolicy??null,
+                modelOutputIsAuthority:r.result.providerReceipt?.modelOutputIsAuthority??null
+              }));
+            console.log("CERT_DETAIL="+JSON.stringify({
+              objectiveId:id,
               taskStatus:task.status,
               taskError:md.error??null,
-              result:md.result??null,
               rootRevision:root?.revision??null,
               rootTerminal:root?.terminal??null,
-              dependencies:(root?.evidenceDependencies??[]).map(d=>({id:d.id,status:d.status,subjectIdentity:d.subjectIdentity,evidenceId:d.evidenceId??null}))
-            };
-            console.log("CERT_DETÁIL="+JSON.stringify(scrub(detail)));
+              dependencies:(root?.evidenceDependencies??[]).map(d=>({id:d.id,status:d.status,evidenceId:d.evidenceId??null})),
+              episodes,
+              results
+            }));
             console.log("SECRET_VALUES_EXPOSED=false");
           } finally { await repo.close().catch(()=>undefined); }
           NODE
           B64="$(base64 -w0 /tmp/detail.mjs)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64|base64 -d >/tmp/detail-${GITHUB_RUN_ID}.mjs; CERT_ID=$ID node /tmp/detail-${GITHUB_RUN_ID}.mjs; rc=\$?; rm -f /tmp/detail-${GITHUB_RUN_ID}.mjs; exit \$rc'"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64|base64 -d >/app/.failure-detail.mjs; CERT_ID=$ID node /app/.failure-detail.mjs; rc=\$?; rm -f /app/.failure-detail.mjs; exit \$rc'"
