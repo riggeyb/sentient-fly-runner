@@ -1,2 +1,114 @@
-import base64, gzip
-exec(compile(gzip.decompress(base64.b64decode("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")).decode(), __file__, "exec"))
+from pathlib import Path
+
+mission = Path("src/application/production-mission-control.ts")
+text = mission.read_text()
+start = text.index("export async function runRootDirectFallbackV1(")
+end = text.index("\nfunction record(", start)
+
+replacement = r'''export async function runRootDirectFallbackV1(input: {
+  input: SentientObjectiveInput;
+  root: RootMissionContext;
+  cognition: Phase1CognitionPort | null;
+  acceptancePolicy: Phase1AcceptancePolicyV1 | null;
+  timeoutMs?: number;
+}): Promise<string | null> {
+  if (input.cognition === null || input.acceptancePolicy === null) return null;
+
+  let turn;
+  try {
+    turn = await withRootDirectTimeoutV1(
+      executeSentientPhase1TurnV1(
+        {
+          requestId: `root-direct:${input.input.objectiveId}`,
+          sessionId: input.input.sessionId,
+          taskId: input.input.objectiveId,
+          userRequest: [
+            "Root Mission Control is producing a direct TIER_0 response because optional delegated evidence was unavailable.",
+            "Do not claim any external action, deployment, mutation, authority grant, or verified child evidence.",
+            `Human request: ${truncateMissionText(input.input.request, 8_000)}`,
+            `Canonical authoritative source repository: ${input.root.operatingContext.authoritativeSourceRepo}.`,
+            `Canonical normal operator bridge: ${input.root.operatingContext.normalSentientOperatorBridge}.`,
+          ].join("\n\n"),
+        },
+        {
+          cognition: input.cognition,
+          acceptancePolicy: input.acceptancePolicy,
+        },
+      ),
+      input.timeoutMs ?? 30_000,
+    );
+  } catch (error) {
+    return deterministicRootDirectFallbackV1(input.input, input.root, message(error));
+  }
+
+  const content =
+    turn.status === "RESPONDED" && typeof turn.authoritativeContent === "string"
+      ? turn.authoritativeContent.trim()
+      : "";
+  if (!content) return null;
+
+  return [
+    content,
+    `Canonical operating context: authoritative source repository ${input.root.operatingContext.authoritativeSourceRepo}; normal operator bridge ${input.root.operatingContext.normalSentientOperatorBridge}.`,
+  ].join("\n\n");
+}
+
+async function withRootDirectTimeoutV1<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("root_direct_fallback_timeout_invalid");
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("root_direct_fallback_timeout")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
+function deterministicRootDirectFallbackV1(
+  input: SentientObjectiveInput,
+  root: RootMissionContext,
+  reason: string,
+): string {
+  return [
+    "Root Mission Control completed a bounded TIER_0 response because optional Root cognition was unavailable within the bounded execution window.",
+    "No external action, deployment, mutation, authority grant, or verified child evidence is claimed.",
+    `Human request: ${truncateMissionText(input.request, 2_000)}`,
+    `Canonical authoritative source repository: ${root.operatingContext.authoritativeSourceRepo}.`,
+    `Canonical normal operator bridge: ${root.operatingContext.normalSentientOperatorBridge}.`,
+    "Highest-value safe next improvement: inspect the most recent objective evidence and repair the smallest verified user-facing defect through the normal governed operator bridge.",
+    `Fallback reason: ${truncateMissionText(reason, 240)}.`,
+  ].join("\n\n");
+}
+'''
+mission.write_text(text[:start] + replacement + text[end:])
+
+test_path = Path("test/root-direct-fallback.test.ts")
+test = test_path.read_text()
+addition = r'''
+test("Root direct fallback terminalizes with trusted context when cognition stalls", async () => {
+  const stalled: Phase1CognitionPort = {
+    async run() {
+      return await new Promise<never>(() => undefined);
+    },
+  };
+  const content = await runRootDirectFallbackV1({
+    input: objective,
+    root: productionRootContext(objective),
+    cognition: stalled,
+    acceptancePolicy: accept,
+    timeoutMs: 5,
+  });
+
+  assert.ok(content);
+  assert.match(content, /bounded TIER_0 response/i);
+  assert.match(content, /No external action, deployment, mutation, authority grant/i);
+  assert.match(content, /riggeyb\/sentient/);
+  assert.match(content, /riggeyb\/sentient-fly-runner/);
+});
+'''
+if "terminalizes with trusted context when cognition stalls" not in test:
+    test_path.write_text(test.rstrip() + "\n\n" + addition.lstrip()
