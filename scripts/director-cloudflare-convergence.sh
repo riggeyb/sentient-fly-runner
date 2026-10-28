@@ -56,7 +56,19 @@ export CF_ACCESS_POLICY_AUD=acceptance-placeholder-aud
 export DIRECTOR_SENTIENT_BASE_URL=https://sentient-acceptance.invalid
 export DIRECTOR_SENTIENT_TOKEN=acceptance-build-placeholder
 gate=tests
-npm test
+test_log="$RUNNER_TEMP/director-tests.log"
+if npm test >"$test_log" 2>&1; then
+  cat "$test_log"
+else
+  failed="$(grep -E '^not ok [0-9]+ - ' "$test_log" | head -n1 | sed -E 's/^not ok [0-9]+ - //' || true)"
+  if [ -z "$failed" ]; then
+    failed="$(grep -E 'ERR_ASSERTION|AssertionError|Error:' "$test_log" | head -n1 || true)"
+  fi
+  slug="$(printf '%s' "${failed:-unknown}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//' | cut -c1-120)"
+  echo "::error::DIRECTOR_TEST_FAILURE=${slug:-unknown}"
+  tail -n 100 "$test_log"
+  false
+fi
 gate=typecheck
 npm run typecheck
 gate=vinext_check
@@ -99,13 +111,13 @@ HOST_URL="$worker_url"
 gate=access_front_door
 code="$(curl -sS -o "$RUNNER_TEMP/a-body" -D "$RUNNER_TEMP/a-head" -w '%{http_code}' --max-time 20 "$HOST_URL" || true)"
 test "$code" != "200"
-if ! grep -qiE 'location:.*cloudflareaccess|cf-access|cloudflare' "$RUNNER_TEMP/a-head" "$RUNNER_TEMP/a-body"; then test "$code" = "401" -o "$code" = "403"; fi
+if ! grep -qiE 'location:.*icloudflareaccess|cf-access|cloudflare' "$RUNNER_TEMP/a-head" "$RUNNER_TEMP/a-body"; then test "$code" = "401" -o "$code" = "403"; fi
 rm -f "$RUNNER_TEMP/a-body" "$RUNNER_TEMP/a-head"
 echo "UNNECESSARY_ACCESS_DISCOVERY_REMOVED=true"
 echo "CLOUDFLARE_ACCESS_ENABLED=true"
 echo "UNAUTHENTICATED_ACCESS_BLOCKED=true"
 echo "DIRECTOR_STUDIO_CLOUDFLARE_URL=$HOST_URL"
-echo "ACTUAL_USABLE_FRONTEND_URL=$HOST_URL"
+echo "ACTUTL_USABLE_FRONTEND_URL=$HOST_URL"
 echo "WORKERS_DEV_DEPLOY_URL=$worker_url"
 
 gate=clean_tree
