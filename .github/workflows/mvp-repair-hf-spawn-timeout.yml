@@ -17,7 +17,7 @@ jobs:
     env:
       EXPECTED_PARENT: 62766f6f582962ef2f3f73d243857e85f952dfbd
       EXPECTED_TREE: 674d512e3ed860db67f817f7a93d99c2b3cea76d
-      BRANCH: sentient/hf-spawn-runtime-budgget-v1
+      BRANCH: sentient/hf-spawn-runtime-budget-v1
     steps:
       - name: Checkout exact repair branch
         uses: actions/checkout@v4
