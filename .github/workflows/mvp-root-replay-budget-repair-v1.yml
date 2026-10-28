@@ -1,0 +1,106 @@
+name: MVP Root Replay Budget Repair V1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      BRANCH: sentient/mvp-root-replay-budget-v1
+      START_SHA: 4fa58f3621f37dcf821a9e6263f4a866832b9044
+    steps:
+      - name: Checkout operator
+        uses: actions/checkout@v4
+        with:
+          path: operator
+          persist-credentials: false
+
+      - name: Checkout exact Sentient repair branch
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient/mvp-root-replay-budget-v1
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Patch exact bounded replay and analysis budget repair
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$START_SHA"
+          test -z "$(git status --porcelain)"
+          python3 ../operator/scripts/mvp-root-replay-budget-v1.py
+          cp ../operator/scripts/mvp-root-replay-budget-v1.test.ts test/mvp-root-replay-idempotency.test.ts
+
+          expected="$(printf '%s\n' \
+            src/application/production-collaboration.ts \
+            src/application/production-mission-control.ts \
+            test/job2-production-convergence.test.ts \
+            test/mvp-root-replay-idempotency.test.ts | sort)"
+          observed="$(git status --porcelain | sed 's/^...//' | sort)"
+          test "$observed" = "$expected"
+          git diff --check
+
+          grep -F 'maxOutputTokens: role === "independent-verification" ? 8 : 32' src/application/production-collaboration.ts
+          grep -F 'export const ROOT_DIRECT_TIMEOUT_MS = 30_000 as const;' src/application/production-mission-control.ts
+
+      - name: Build and bounded regression suite
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run build
+          node --test dist/test/mvp-root-replay-idempotency.test.js
+          node --test dist/test/job2-production-convergence.test.js
+          node --test dist/test/root-direct-fallback.test.js
+          node --test dist/test/mvp-root-fallback-evidence.test.js
+          node --test dist/test/phase5-fly-restart-lease-retry.test.js
+          npm test
+
+      - name: Commit exact tested repair
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse "origin/$BRANCH")" = "$START_SHA"
+
+          git config user.name sentient-mvp-activation
+          git config user.email sentient-mvp-activation@users.noreply.github.com
+          git add \
+            src/application/production-collaboration.ts \
+            src/application/production-mission-control.ts \
+            test/job2-production-convergence.test.ts \
+            test/mvp-root-replay-idempotency.test.ts
+          git diff --cached --check
+          git commit -m "mvp: make Root completion replay-safe and tighten analysis budget"
+
+          NEW_SHA="$(git rev-parse HEAD)"
+          NEW_TREE="$(git rev-parse 'HEAD^{tree}')"
+          git push --force-with-lease="refs/heads/$BRANCH:$START_SHA" origin "HEAD:refs/heads/$BRANCH"
+
+          echo "CANDIDATE_SHA=$NEW_SHA"
+          echo "CANDIDATE_TREE=$NEW_TREE"
+          echo "BASE_SHA=$START_SHA"
+          echo "ANALYSIS_MAX_OUTPUT_TOKENS=32"
+          echo "ANALYSIS_MAX_RUNTIME_MS=60000"
+          echo "ROOT_DIRECT_TIMEOUT_MS=30000"
+          echo "RESOURCE_EXPANSION=false"
+          echo "CAPABILITY_EXPANSION=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "POLICY_WEAKENING=false"
+          echo "EXPLICIT_DISAGREEMENT_FAIL_CLOSED=true"
+          echo "DEPLOYMENT_PERFORMED=false"
