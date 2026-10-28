@@ -69,4 +69,4 @@ jobs:
         run: |
           echo "SOURCE_REPOSITORY=riggeyb/director-studio-beta"
           echo "EXECUTION_REPOSITORY=riggeyb/sentient-fly-runner"
-          echo "PRIVATE_DIRECTOR_ACTIONS_REQUIRED=false
+          echo "PRIVATE_DIRECTOR_ACTIONS_REQUIRED=false"
