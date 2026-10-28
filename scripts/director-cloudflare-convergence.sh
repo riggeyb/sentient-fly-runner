@@ -21,7 +21,7 @@ fi
 npm ci --no-audit --no-fund
 echo "PACKAGE_LOCK_INTEGRITY=PASS"
 
-if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json package-lock.json app lib proxy.ts tests scripts .env.example 2>/dev/null; then exit 1; fi
+if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json package-lock.json app components lib proxy.ts tests scripts .env.example 2>/dev/null; then exit 1; fi
 ! npm ls @clerk/nextjs --all --json 2>/dev/null | grep -Fq '"@clerk/nextjs"'
 ! grep -q '"netlify' package.json
 ! grep -q '\.netlify\.app' .env.example
@@ -64,7 +64,7 @@ echo "DIRECTOR_SENTIENT_TOKEN_BOUND_SERVER_SIDE=true"
 HOST_URL="$worker_url"
 code="$(curl -sS -o "$RUNNER_TEMP/a-body" -D "$RUNNER_TEMP/a-head" -w '%{http_code}' --max-time 20 "$HOST_URL/" || true)"
 test "$code" != "200"
-if ! grep -qiE 'location:.*cloudflareaccess|cf-access|cloudflare' "$RUNNER_TEMP/a-head" "$RUNNER_TEMP/a-body"; then test "$code" = "401" -o "$code" = "403"; fi
+if ! grep -qiE 'location:.*cloudflareaccess|cf-acccess|cloudflare' "$RUNNER_TEMP/a-head" "$RUNNER_TEMP/a-body"; then test "$code" = "401" -o "$code" = "403"; fi
 rm -f "$RUNNER_TEMP/a-body" "$RUNNER_TEMP/a-head"
 echo "UNAUTHENTICATED_ACCESS_BLOCKED=true"
 echo "DIRECTOR_STUDIO_CLOUDFLARE_URL=$HOST_URL"
