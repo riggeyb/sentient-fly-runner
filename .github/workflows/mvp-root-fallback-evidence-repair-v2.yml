@@ -1,0 +1,229 @@
+name: MVP Root Fallback Evidence Repair V2
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      BRANCH: sentient/mvp-root-fallback-evidence-v1
+      START_SHA: 27b1a1060562de9e7efc70f72e1dd1375294032b
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient/mvp-root-fallback-evidence-v1
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - name: Patch exact bounded evidence linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$START_SHA"
+          test -z "$(git status --porcelain)"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def one(path, old, new):
+              p=Path(path); s=p.read_text()
+              if s.count(old)!=1: raise SystemExit(f"{path}: anchor count {s.count(old)} for {old[:60]!r}")
+              p.write_text(s.replace(old,new,1))
+
+          c="src/application/production-collaboration.ts"
+          one(c,
+          '''    const verifierUnavailable =
+                contributions.length >= 2 && verificationDisposition === "UNAVAILABLE";
+          ''',
+          '''    const verifierUnavailable =
+                contributions.length >= 2 && verificationDisposition === "UNAVAILABLE";
+              const verifiedAnalysis = verifierUnavailable ? contributions[0] : undefined;
+              const deterministicallyVerifiedAnalysisContent =
+                verifiedAnalysis?.verification.outcome === "accept"
+                && typeof verifiedAnalysis.result.output === "string"
+                && verifiedAnalysis.result.output.trim()
+                  ? verifiedAnalysis.result.output.trim()
+                  : null;
+              const deterministicallyVerifiedAnalysisEvidenceRefs =
+                verifiedAnalysis?.verification.outcome === "accept"
+                  ? [...verifiedAnalysis.verification.evidenceRefs]
+                  : [];
+          ''')
+          one(c,
+          '''          spawnEpisodes: Object.freeze(episodes),
+          ''',
+          '''          deterministicallyVerifiedAnalysisContent,
+                    deterministicallyVerifiedAnalysisEvidenceRefs: Object.freeze(
+                      deterministicallyVerifiedAnalysisEvidenceRefs,
+                    ),
+                    spawnEpisodes: Object.freeze(episodes),
+          ''')
+
+          m="src/application/production-mission-control.ts"
+          one(m,
+          '''    const converged = collaborationStatus === "CONVERGED";
+          ''',
+          '''    const converged = collaborationStatus === "CONVERGED";
+              const fallbackEvidence = rootFallbackEvidenceV1(row);
+          ''')
+          one(m,
+          '''            acceptancePolicy: this.#rootAcceptancePolicy,
+          ''',
+          '''            acceptancePolicy: this.#rootAcceptancePolicy,
+                      supportingEvidence: fallbackEvidence,
+          ''')
+          one(m,
+          '''    const evidenceRefs = strings(row.evidenceRefs);
+          ''',
+          '''    const evidenceRefs = strings(row.evidenceRefs);
+              const fallbackAcceptedEvidence =
+                rootDirectContent !== null && fallbackEvidence !== null;
+          ''')
+          one(m,
+          '''      await publishWorkerEvidence({
+          ''',
+          '''      const acceptedForRoot =
+                converged || (fallbackAcceptedEvidence && i === 0);
+              await publishWorkerEvidence({
+          ''')
+          one(m, '''        verified: converged,\n''', '''        verified: acceptedForRoot,\n''')
+          one(m, '''      if (converged) {\n''', '''      if (acceptedForRoot) {\n''')
+          one(m,
+          '''            reason: "verified_spawn_contribution",
+                    sourceRef: evidenceRefs[i] ?? "spawn-result",
+          ''',
+          '''            reason: converged
+                      ? "verified_spawn_contribution"
+                      : "verified_spawn_analysis_supporting_root_fallback",
+                    sourceRef: converged
+                      ? evidenceRefs[i] ?? "spawn-result"
+                      : fallbackEvidence!.evidenceRefs[0] ?? "spawn-result",
+          ''')
+          one(m,
+          '''        acceptedEvidenceCount: converged ? workers.length : 0,
+          ''',
+          '''        acceptedEvidenceCount: converged
+                  ? workers.length
+                  : fallbackAcceptedEvidence
+                    ? 1
+                    : 0,
+          ''')
+          old='''export async function runRootDirectFallbackV1(input: {
+            input: SentientObjectiveInput;
+            root: RootMissionContext;
+            cognition: Phase1CognitionPort | null;
+            acceptancePolicy: Phase1AcceptancePolicyV1 | null;
+          }): Promise<string | null> {
+          '''
+          new='''export interface RootFallbackEvidenceV1 {
+            content: string;
+            evidenceRefs: readonly string[];
+          }
+
+          export function rootFallbackEvidenceV1(value: unknown): RootFallbackEvidenceV1 | null {
+            const row = record(value);
+            if (
+              row.status !== "UNAVAILABLE"
+              || row.reason !== "independent_verification_verdict_unparseable"
+            ) return null;
+            const content =
+              typeof row.deterministicallyVerifiedAnalysisContent === "string"
+                ? row.deterministicallyVerifiedAnalysisContent.trim()
+                : "";
+            const evidenceRefs = strings(
+              row.deterministicallyVerifiedAnalysisEvidenceRefs,
+            ).map((ref) => ref.trim()).filter(Boolean);
+            if (!content || evidenceRefs.length === 0) return null;
+            return Object.freeze({ content, evidenceRefs: Object.freeze(evidenceRefs) });
+          }
+
+          export async function runRootDirectFallbackV1(input: {
+            input: SentientObjectiveInput;
+            root: RootMissionContext;
+            cognition: Phase1CognitionPort | null;
+            acceptancePolicy: Phase1AcceptancePolicyV1 | null;
+            supportingEvidence?: RootFallbackEvidenceV1 | null;
+          }): Promise<string | null> {
+          '''
+          one(m,old,new)
+          one(m,
+          '''        "Root Mission Control is producing a direct TIER_0 response because optional delegated evidence was unavailable.",
+                "Do not claim any external action, deployment, mutation, authority grant, or verified child evidence.",
+                `Human request: ${truncateMissionText(input.input.request, 8_000)}`,
+          ''',
+          '''        "Root Mission Control is producing a direct TIER_0 response because the independent verifier verdict was unavailable.",
+                "Do not claim any external action, deployment, mutation, authority grant, or independent semantic confirmation.",
+                ...(input.supportingEvidence == null
+                  ? []
+                  : [
+                      "A delegated independent-analysis artifact passed deterministic local evidence verification. Treat it only as non-authoritative supporting evidence; it has not been independently semantically confirmed.",
+                      `Supporting analysis: ${truncateMissionText(input.supportingEvidence.content, 4_000)}`,
+                    ]),
+                `Human request: ${truncateMissionText(input.input.request, 8_000)}`,
+          ''')
+          PY
+          cat > test/mvp-root-fallback-evidence.test.ts <<'TS'
+          import assert from "node:assert/strict";
+          import test from "node:test";
+          import { productionRootContext } from "../src/application/production-mission-control-context.js";
+          import { rootFallbackEvidenceV1, runRootDirectFallbackV1 } from "../src/application/production-mission-control.js";
+          import type { Phase1AcceptancePolicyV1, Phase1CognitionPort } from "../src/phase1/core-runtime.js";
+
+          const objective={request:"Inspect the current system and identify the highest-value safe improvement.",objectiveId:"fallback-evidence-test",sessionId:"session:fallback-evidence-test",mode:"collaborative" as const,privacy:"private" as const};
+
+          test("fallback evidence is restricted to verifier-unparseable verified analysis",()=>{
+            assert.deepEqual(rootFallbackEvidenceV1({status:"UNAVAILABLE",reason:"independent_verification_verdict_unparseable",deterministicallyVerifiedAnalysisContent:"verified analysis",deterministicallyVerifiedAnalysisEvidenceRefs:["evidence:sha256:abc"]}),{content:"verified analysis",evidenceRefs:["evidence:sha256:abc"]});
+            assert.equal(rootFallbackEvidenceV1({status:"CONFLICT",reason:"explicit_disagreement",deterministicallyVerifiedAnalysisContent:"x",deterministicallyVerifiedAnalysisEvidenceRefs:["evidence:x"]}),null);
+            assert.equal(rootFallbackEvidenceV1({status:"UNAVAILABLE",reason:"independent_verification_verdict_unparseable",deterministicallyVerifiedAnalysisContent:"x",deterministicallyVerifiedAnalysisEvidenceRefs:[]}),null);
+          });
+
+          test("Root fallback labels supporting analysis non-authoritative and still requires acceptance",async()=>{
+            let prompt="";
+            const cognition:Phase1CognitionPort={async run(input){prompt=input.normalizedUserRequest;return {ok:true,provider:"test-local",model:"test-model",revision:"test-revision",text:"Use the smallest bounded repair."};}};
+            const acceptancePolicy:Phase1AcceptancePolicyV1={policyId:"fallback-evidence-test",evaluate(){return {accepted:true,reason:"accepted"};}};
+            const supportingEvidence=rootFallbackEvidenceV1({status:"UNAVAILABLE",reason:"independent_verification_verdict_unparseable",deterministicallyVerifiedAnalysisContent:"Inspect the verified analysis artifact.",deterministicallyVerifiedAnalysisEvidenceRefs:["evidence:sha256:def"]});
+            const content=await runRootDirectFallbackV1({input:objective,root:productionRootContext(objective),cognition,acceptancePolicy,supportingEvidence});
+            assert.ok(content);
+            assert.match(prompt,/non-authoritative supporting evidence/i);
+            assert.match(prompt,/not been independently semantically confirmed/i);
+            assert.match(prompt,/Inspect the verified analysis artifact/);
+          });
+          TS
+          expected="$(printf '%s\n' src/application/production-collaboration.ts src/application/production-mission-control.ts test/mvp-root-fallback-evidence.test.ts | sort)"
+          observed="$(git status --porcelain | sed 's/^...//' | sort)"
+          test "$observed" = "$expected"
+          git diff --check
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run build
+          node --test dist/test/mvp-root-fallback-evidence.test.js
+          node --test dist/test/root-direct-fallback.test.js
+          node --test dist/test/job2-production-convergence.test.js
+          npm test
+      - name: Commit tested repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse "origin/$BRANCH")" = "$START_SHA"
+          git config user.name sentient-mvp-activation
+          git config user.email sentient-mvp-activation@users.noreply.github.com
+          git add src/application/production-collaboration.ts src/application/production-mission-control.ts test/mvp-root-fallback-evidence.test.ts
+          git diff --cached --check
+          git commit -m "mvp: preserve verified analysis evidence through Root fallback"
+          NEW_SHA="$(git rev-parse HEAD)"; NEW_TREE="$(git rev-parse 'HEAD^{tree}')"
+          git push --force-with-lease="refs/heads/$BRANCH:$START_SHA" origin "HEAD:refs/heads/$BRANCH"
+          echo "CANDIDATE_SHA=$NEW_SHA"
+          echo "CANDIDATE_TREE=$NEW_TREE"
+          echo "RESOURCE_EXPANSION=false"
+          echo "CAPABILITY_EXPANSION=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "EXPLICIT_DISAGREE_FAIL_CLOSED=true"
+          echo "FALLBACK_ACCEPTED_EVIDENCE_SCOPE=independent-analysis-only"
