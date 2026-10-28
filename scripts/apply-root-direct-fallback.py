@@ -111,4 +111,4 @@ test("Root direct fallback terminalizes with trusted context when cognition stal
 });
 '''
 if "terminalizes with trusted context when cognition stalls" not in test:
-    test_path.write_text(test.rstrip() + "\n\n" + addition.lstrip()
+    test_path.write_text(test.rstrip() + "\n\n" + addition.lstrip())
