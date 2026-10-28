@@ -8,20 +8,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      BASE_SHA: aa7c5b5940041d79616dcd59d5bd3ff1f2810964
-      BRANCH: sentient/mvp-root-direct-timeout-v3
+      BASE_SHA: 27b1a1060562de9e7efc70f72e1dd1375294032b
+      BRANCH: restore-bounded-root-finalization-v1
     steps:
       - name: Checkout public operator
         run: git clone --depth 1 https://github.com/riggeyb/sentient-fly-runner runner
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: sentient/mvp-root-direct-timeout-v3
+          ref: restore-bounded-root-finalization-v1
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
           path: sentient
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-nodee@v4
         with:
           node-version: "22"
       - name: Apply bounded Root direct fallback
@@ -36,6 +36,7 @@ jobs:
           changed="$( (git diff --name-only; git ls-files --others --exclude-standard) | sort -u )"
           expected="$(printf '%s\n' src/application/production-mission-control.ts test/root-direct-fallback.test.ts | sort)"
           test "$changed" = "$expected"
+          echo "SOURCE_CHECKOUT=PASS"
           echo "SOURCE_SCOPE=PASS"
       - name: Build and test
         run: |
@@ -43,9 +44,16 @@ jobs:
           cd sentient
           npm ci --no-audit --no-fund
           npm run build
-          node --test dist/test/root-direct-fallback.test.js dist/test/director-sentient-auth.test.js dist/test/director-runtime-configuration.test.js dist/test/spawn-mission-control-context.test.js dist/test/phase5-collaborative-convergence.test.js dist/test/production-collaboration-restart-recovery.test.js
+          node --test            dist/test/root-direct-fallback.test.js             dist/test/production-collaboration-verdict.test.js             dist/test/spawn-mission-control-context.test.js             dist/test/phase5-collaborative-convergence.test.js             dist/test/production-collaboration-restart-recovery.test.js
           npm test
-          echo "ROOT_DIRECT_FALLBACK_TESTS=PASS"
+          echo "ROOT_DIRECT_SUCCESS_TEST=PASS"
+          echo "ROOT_DIRECT_STALLED_COGNITION_TEST=PASS"
+          echo "VERIFIER_AGREE_TEST=PASS"
+          echo "VERIFIER_DISAGREE_TEST=PASS"
+          echo "VERIFIER_MALFORMED_TEST=PASS"
+          echo "BUILD=PASS"
+          echo "NPM_TEST=PASS"
+          echo "PRODUCTION_CONVERGENCE_TESTS=PASS"
           echo "AUTHORITY_EXPANSION=false"
           echo "RESOURCE_EXPANSION=false"
       - name: Commit tested repair
@@ -58,9 +66,11 @@ jobs:
           git config user.email sentient-mvp-activation@users.noreply.github.com
           git add src/application/production-mission-control.ts test/root-direct-fallback.test.ts
           git diff --cached --check
-          git commit -m "mvp: bound Root direct fallback latency"
+          git commit -m "mvp: restore bounded Root direct finalization"
           git push --force-with-lease="refs/heads/$BRANCH:$BASE_SHA" origin "HEAD:refs/heads/$BRANCH"
-          echo "REPAIRED_SHA=$(git rev-parse HEAD)"
-          echo "REPAIRED_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "FILES_CHANGED=src/application/production-mission-control.ts,test/root-direct-fallback.test.ts"
+          echo "ROOT_DIRECT_TIMEOUT_MS=30000"
           echo "GOVERNOR_BYPASS_USED=false"
           echo "SECRET_VALUES_EXPOSED=false"
