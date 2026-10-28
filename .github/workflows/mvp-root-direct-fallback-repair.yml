@@ -8,15 +8,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      BASE_SHA: 2624aa3a37bd032b49650e8e64760d2fecd04da8
-      BRANCH: sentient/mvp-root-direct-timeout-v2
+      BASE_SHA: aa7c5b5940041d79616dcd59d5bd3ff1f2810964
+      BRANCH: sentient/mvp-root-direct-timeout-v3
     steps:
       - name: Checkout public operator
         run: git clone --depth 1 https://github.com/riggeyb/sentient-fly-runner runner
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: sentient/mvp-root-direct-timeout-v2
+          ref: sentient/mvp-root-direct-timeout-v3
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
