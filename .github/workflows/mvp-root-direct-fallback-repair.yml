@@ -33,12 +33,7 @@ jobs:
           test "$(git rev-parse "origin/$BRANCH")" = "$BASE_SHA"
           python3 ../runner/scripts/apply-root-direct-fallback.py
           git diff --check
-          changed="$({
-            {
-              git diff --name-only
-              git ls-files --others --exclude-standard
-            } | sort -u
-          )"
+          changed="$( (git diff --name-only; git ls-files --others --exclude-standard) | sort -u )"
           echo "CHANGED_FILES=${changed//$'\n'/,}"
           expected="$(printf '%s\n' src/application/production-mission-control.ts src/fly/production-runtime.ts test/root-direct-fallback.test.ts | sort)"
           echo "EXPECTED_FILES=${expected//$'\n'/,}"
