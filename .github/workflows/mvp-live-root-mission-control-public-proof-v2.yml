@@ -50,7 +50,10 @@ jobs:
           cat >"$RUNNER_TEMP/legacy-auth.mjs" <<'NODE'
           const token=String(process.env.SENTIENT_API_TOKEN??"").trim();
           if(!token) throw new Error("sentient_api_token_missing");
-          const r=await fetch("http://127.0.0.1:8080/v1/engineering/jobs/auth-probe-not-found",{
+          const base="http://127.0.0.1:8080";
+          let r=await fetch(base+"/v1/objectives/auth-probe-legacy",{signal:AbortSignal.timeout(30000)});
+          if(r.status!==401) throw new Error(`legacy_missing_status_${r.status}`);
+          r=await fetch(base+"/v1/objectives/auth-probe-legacy",{
             headers:{authorization:`Bearer ${token}`},
             signal:AbortSignal.timeout(30000)
           });
@@ -59,7 +62,9 @@ jobs:
           console.log("SECRET_VALUES_EXPOSED=false");
           NODE
           B64_LEGACY="$(base64 -w0 "$RUNNER_TEMP/legacy-auth.mjs")"
-          timeout 120s flyctl ssh console -a "$APP" -C             "sh -lc 'echo $B64_LEGACY | base64 -d >/tmp/legacy-auth.mjs && node /tmp/legacy-auth.mjs; rc=\$?; rm -f /tmp/legacy-auth.mjs; exit \$rc'"             | tee "$RUNNER_TEMP/legacy-auth.out"
+          timeout 120s flyctl ssh console -a "$APP" -C \
+            "sh -lc 'echo $B64_LEGACY | base64 -d >/tmp/legacy-auth.mjs && node /tmp/legacy-auth.mjs; rc=\$?; rm -f /tmp/legacy-auth.mjs; exit \$rc'" \
+            | tee "$RUNNER_TEMP/legacy-auth.out"
           grep -Fq 'EXISTING_SENTIENT_API_AUTH_LIVE=PASS' "$RUNNER_TEMP/legacy-auth.out"
 
           cat >"$RUNNER_TEMP/director-proof.mjs" <<'NODE'
