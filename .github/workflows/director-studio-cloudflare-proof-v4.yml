@@ -73,11 +73,21 @@ jobs:
           else
             rc=$?
             echo "CANONICAL_CONVERGENCE=FAIL"
+            tail -n 160 "$log" > "$RUNNER_TEMP/director-convergence-tail.log"
             echo "FAILURE_LOG_TAIL_BEGIN"
-            tail -n 160 "$log"
+            cat "$RUNNER_TEMP/director-convergence-tail.log"
             echo "FAILURE_LOG_TAIL_END"
             exit "$rc"
           fi
+
+      - name: Preserve bounded convergence failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: director-convergence-failure-tail
+          path: ${{ runner.temp }}/director-convergence-tail.log
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Report execution ownership
         run: |
