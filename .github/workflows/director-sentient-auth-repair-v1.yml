@@ -1,7 +1,7 @@
 name: Director Sentient Auth Repair V1
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
