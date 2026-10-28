@@ -1,0 +1,72 @@
+name: MVP Verifier Output Shape Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      objective_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      OID: ${{ inputs.objective_id }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect verifier output shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TREE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          h="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/healthz")"
+          r="$(curl -fsS --max-time 10 "https://${APP}.fly.dev/readyz")
+          jq -e --arg s "$SHA" --arg t "$TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null <<<"$h"
+          jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null <<<"$r"
+          cat >"$RUNNER_TEMP/shape.mjs" <<'NODE'
+          import { PostgresSpawnObjectiveRepository as Repo } from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const id=String(process.env.CERT_ID??"").trim();
+          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!id||!db) throw new Error("binding_missing");
+          const repo=new Repo({connectionString:db});
+          try{
+            const snap=await repo.spawnSnapshot();
+            const row=snap.records.results.find(r=>r.result?.identity?.taskId===id && r.result?.identity?.role==="independent-verification");
+            if(!row) throw new Error("verifier_result_missing");
+            const out=typeof row.result.output==="string"?row.result.output:"";
+            const words=out.toUpperCase().match(/\b[A-Z]+\b/g)??[];
+            const first=(words[0]??"").slice(0,32);
+            const ai=words.findIndex(w=>w==="AGREE");
+            const di=words.findIndex(w=>w==="DISAGREE");
+            console.log("VERIFIER_OUTPUT_SHAPE="+JSON.stringify({
+              lengthChars:out.length,
+              wordCount:words.length,
+              firstToken:first,
+              agreeWordIndex:ai,
+              disagreeWordIndex:di,
+              hasExplicitAgree:ai>=0,
+              hasExplicitDisagree:di>=0
+            }));
+            console.log("SECRET_VALUES_EXPOSED=false";
+          } finally {
+            await repo.close().catch(()=>undefined);
+          }
+          NODE
+          b64="$(base64 -w0 "$RUNNER_TEMP/shape.mjs")"
+          timeout 120s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/app/.verifier-shape.mjs; CERT_ID=$OID node /app/.verifier-shape.mjs; rc=\$?; rm -f /app/.verifier-shape.mjs; exit \$rc'"
