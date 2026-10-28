@@ -27,7 +27,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "c05a4f2d4a45cdc110edd8a397541b7eb8e687bf"
           python3 - <<'PY'
-          from pathlib imporet Path
+          from pathlib import Path
           p = Path("src/fly/self-execution.ts")
           s = p.read_text()
           start_marker = "  public async resumeUnfinished(): Promise<number> {"
@@ -38,7 +38,7 @@ jobs:
           end = s.find(end_marker, start)
           if end < 0:
               raise SystemExit("resume_end_missing")
-          replacement = '''  public async resumeUnfinished(): Promise<number> {
+          replacement = """  public async resumeUnfinished(): Promise<number> {
             const tasks = (await this.#state.list("task"))
               .filter((task) =>
                 task.kind === "task"
@@ -51,7 +51,7 @@ jobs:
             for (const task of tasks) this.#scheduleInheritedRestart(task.id);
             return tasks.length;
           }
-          ''
+          """
           s = s[:start] + replacement + s[end:]
           old = "        void this.#schedule(objectiveId, true);"
           new = "        await this.#schedule(objectiveId, true);"
