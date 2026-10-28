@@ -65,7 +65,19 @@ jobs:
       - name: Run canonical convergence from operator bridge
         shell: bash
         working-directory: director
-        run: bash ../operator/scripts/director-cloudflare-convergence.sh
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/director-convergence.log"
+          if bash ../operator/scripts/director-cloudflare-convergence.sh >"$log" 2>&1; then
+            cat "$log"
+          else
+            rc=$?
+            echo "CANONICAL_CONVERGENCE=FAIL"
+            echo "FAILURE_LOG_TAIL_BEGIN"
+            tail -n 160 "$log"
+            echo "FAILURE_LOG_TAIL_END"
+            exit "$rc"
+          fi
 
       - name: Report execution ownership
         run: |
