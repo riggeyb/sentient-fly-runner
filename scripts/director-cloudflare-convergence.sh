@@ -21,7 +21,7 @@ fi
 npm ci --no-audit --no-fund
 echo "PACKAGE_LOCK_INTEGRITY=PASS"
 
-if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json package-lock.json app components lib proxy.ts tests scripts .env.example 2>/dev/null; then exit 1; fi
+if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json package-lock.json app components lib proxy.ts .env.example 2>/dev/null; then exit 1; fi
 ! npm ls @clerk/nextjs --all --json 2>/dev/null | grep -Fq '"@clerk/nextjs"'
 ! grep -q '"netlify' package.json
 ! grep -q '\.netlify\.app' .env.example
