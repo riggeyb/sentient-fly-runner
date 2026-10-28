@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      EXPECTED_DIRECTOR_SHA: d8aac6758e631209aa1db608671d2d98fb3d0a00
-      EXPECTED_DIRECTOR_TREE: 66aec9b97efd3dd50175c5b649a69916d47a3df2
+      EXPECTED_DIRECTOR_SHA: 63c45ceef151941d5d725be1b6a220a47dbfbc58
+      EXPECTED_DIRECTOR_TREE: 032bae1c37ea08cd641a5506dfbd9f5c149c1e6b
       DIRECTOR_BRANCH: sentient-ui-activation-v1
       SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
