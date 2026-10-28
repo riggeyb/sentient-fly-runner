@@ -8,15 +8,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      BASE_SHA: 53aeaea11bb546a2a191dbe41fbb0ae9207f5f73
-      BRANCH: sentient/root-direct-fallback-v3
+      BASE_SHA: 0a5a64176775657f6b8ee1efb0db9ba9d34b0c86
+      BRANCH: sentient/root-direct-fallback-v4
     steps:
       - name: Checkout public operator
         run: git clone --depth 1 https://github.com/riggeyb/sentient-fly-runner runner
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: sentient/root-direct-fallback-v3
+          ref: sentient/root-direct-fallback-v4
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
