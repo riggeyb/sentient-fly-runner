@@ -26,11 +26,15 @@ gate=npm_ci
 npm ci --no-audit --no-fund
 echo "PACKAGE_LOCK_INTEGRITY=PASS"
 
-gate=source_invariants
-if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json package-lock.json app components lib proxy.ts .env.example 2>/dev/null; then exit 1; fi
-! npm ls @clerk/nextjs --all --json 2>/dev/null | grep -Fq '"@clerk/nextjs"'
-! grep -q '"netlify' package.json
-! grep -q '\.netlify\.app' .env.example
+gate=clerk_runtime
+if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package.json app components lib proxy.ts .env.example 2>/dev/null; then false; fi
+gate=clerk_lock
+if git grep -n -I -E '(@clerk/|ClerkProvider|clerkMiddleware|CLERK_)' -- package-lock.json 2>/dev/null; then false; fi
+if npm ls @clerk/nextjs --all --json 2>/dev/null | grep -Fq '"@clerk/nextjs"'; then false; fi
+gate=netlify
+if grep -q '"netlify' package.json; then false; fi
+if grep -q '\.netlify\.app' .env.example; then false; fi
+gate=previz
 test -f components/previz/PrevizDirectorHost.tsx
 test -f components/previz/SceneDirector.tsx
 test -f components/previz/SceneViewport.tsx
@@ -87,9 +91,9 @@ if [ -n "$deploy_version" ]; then echo "CLOUDFLARE_DEPLOY_VERSION=$deploy_versio
 echo "DIRECTOR_SENTIENT_TOKEN_BOUND_SERVER_SIDE=true"
 echo "SENTIENT_TOKEN_BROWSER_EXPOSURE=false"
 
-HOST_URL="$worker_url"
+HOST_UUL="$worker_url"
 gate=access_front_door
-code="$(curl -sS -o "$RUNNER_TEMP/a-body" -D "$RUNNER_TEMP/a-head" -w '%{http_code}' --max-time 20 "$HOST_URL/" || true)"
+code="$(curl -sS -o "$RUNNER_TEMP/a-body" -D "$RUNNER_TEMP/a-head" -w '%{http_code}' --max-time 20 "$HOST_URL" || true)"
 test "$code" != "200"
 if ! grep -qiE 'location:.*cloudflareaccess|cf-access|cloudflare' "$RUNNER_TEMP/a-head" "$RUNNER_TEMP/a-body"; then test "$code" = "401" -o "$code" = "403"; fi
 rm -f "$RUNNER_TEMP/a-body" "$RUNNER_TEMP/a-head"
@@ -97,7 +101,7 @@ echo "UNNECESSARY_ACCESS_DISCOVERY_REMOVED=true"
 echo "CLOUDFLARE_ACCESS_ENABLED=true"
 echo "UNAUTHENTICATED_ACCESS_BLOCKED=true"
 echo "DIRECTOR_STUDIO_CLOUDFLARE_URL=$HOST_URL"
-echo "ACTUAL_USABLE_FRONTEND_URL=$HOST_URL"
+echo "ACTUTL_USABLE_FRONTEND_URL=$HOST_URL"
 echo "WORKERS_DEW_DEPLOY_URL=$worker_url"
 
 gate=clean_tree
