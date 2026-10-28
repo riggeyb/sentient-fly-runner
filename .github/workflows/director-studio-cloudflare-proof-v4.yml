@@ -75,7 +75,7 @@ jobs:
             rc=$?
             echo "CANONICAL_CONVERGENCE=FAIL"
             tail -n 160 "$log" > "$RUNNER_TEMP/director-convergence-tail.log"
-            marker="$(grep -Eo 'DIRECTOR_GATE_FAILED=[A-Za-z0-9_-]+' "$RUNNER_TEMP/director-convergence-tail.log" | tail -n1 || true)"
+            marker="$(grep -Eo 'DIRECTOR_GATE_FAILED=[A-Za-z0-9._-]+' "$RUNNER_TEMP/director-convergence-tail.log" | tail -n1 || true)"
             if [ -n "$marker" ]; then
               gate="${marker#DIRECTOR_GATE_FAILED=}"
               echo "failure_gate=$gate" >> "$GITHUB_OUTPUT"
@@ -97,6 +97,16 @@ jobs:
                 fi
               fi
             fi
+            dirty_path="$(git diff --name-only | head -n1 || true)"
+            if [ -n "$dirty_path" ]; then
+              dirty_slug="$(printf '%s' "$dirty_path" | tr '/ ' '--' | tr -cd 'A-Za-z0-9._-' | cut -c1-100)"
+              echo "dirty_tracked=$dirty_slug" >> "$GITHUB_OUTPUT"
+              echo "::error::DIRECTOR_DIRTY_TRACKED=$dirty_path"
+            fi
+            receipt_host="$(grep -Eo 'ACTUTL_USABLE_FRONTEND_URL=https://[^[:space:]]+' "$log" | tail -n1 | sed 's#ACTUTL_USABLE_FRONTEND_URL=https://##' | tr -cd 'A-Za-z0-9._-' || true)"
+            receipt_version="$(grep -Eo 'CLOUDFLARE_DEPLOY_VERSION=[A-Za-z0-9-]+' "$log" | tail -n1 | cut -d= -f2 || true)"
+            if [ -n "$receipt_host" ]; then echo "receipt_host=$receipt_host" >> "$GITHUB_OUTPUT"; fi
+            if [ -n "$receipt_version" ]; then echo "receipt_version=$receipt_version" >> "$GITHUB_OUTPUT"; fi
             echo "FAILURE_LOG_TAIL_BEGIN"
             cat "$RUNNER_TEMP/director-convergence-tail.log"
             echo "FAILURE_LOG_TAIL_END"
@@ -107,7 +117,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: director-convergence-failure-${{ steps.canonical_convergence.outputs.failure_gate }}-${{ steps.canonical_convergence.outputs.failure_test }}
+          name: director-convergence-failure-${{ steps.canonical_convergence.outputs.failure_gate }}-${{ steps.canonical_convergence.outputs.dirty_tracked }}-${{ steps.canonical_convergence.outputs.receipt_host }}-${{ steps.canonical_convergence.outputs.receipt_version }}
           path: ${{ runner.temp }}/director-convergence-tail.log
           if-no-files-found: ignore
           retention-days: 1
