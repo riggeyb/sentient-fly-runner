@@ -1,7 +1,10 @@
 name: Director Sentient Auth Repair V1
 
 on:
-  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/director-sentient-auth-repair-v1.yml"
 
 permissions:
   contents: read
