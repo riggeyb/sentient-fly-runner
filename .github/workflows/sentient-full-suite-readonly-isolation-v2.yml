@@ -225,6 +225,7 @@ jobs:
           run_step WORKER_A_RUNTIME bash -lc "node --experimental-strip-types --test tests/*.test.ts"
           run_step WORKER_C_RETRIEVAL bash -lc "node --experimental-strip-types --test tests/retrieval/*.test.ts"
           run_step WORKER_B_PERSISTENCE node --test dist/test/persistence.test.js
+          run_step JOB2_PRODUCTION_CONVERGENCE node --test dist/test/job2-production-convergence.test.js
           run_step NPM_TEST npm test
           if [ -f dist/test/spawn-mission-control-context.test.js ]; then
             run_step MC_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
@@ -238,7 +239,7 @@ jobs:
             echo "MC_SPAWN_DIRECT=2" >>/tmp/receipt.env
             failed=1
           fi
-          for label in CONTINUATION PERMANENT_CONTINUATION WORKER_D_ACCEPTANCE WORKER_A_RUNTIME WORKER_C_RETRIEVAL WORKER_B_PERSISTENCE NPM_TEST MC_SPAWN_COMPILED MC_SPAWN_DIRECT; do
+          for label in CONTINUATION PERMANENT_CONTINUATION WORKER_D_ACCEPTANCE WORKER_A_RUNTIME WORKER_C_RETRIEVAL WORKER_B_PERSISTENCE JOB2_PRODUCTION_CONVERGENCE NPM_TEST MC_SPAWN_COMPILED MC_SPAWN_DIRECT; do
             f="/tmp/exact/${label}.log"
             [ -f "$f" ] || continue
             tests="$(grep -E '^# tests [0-9]+' "$f" | tail -1 | awk '{print $3}')"
@@ -275,6 +276,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sentient-exact-${{ inputs.sha }}
-          path: /tmp/receipt.env
+          path: /tmp/receeipt.env
           if-no-files-found: error
           retention-days: 30
