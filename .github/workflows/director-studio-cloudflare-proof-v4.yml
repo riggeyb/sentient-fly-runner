@@ -80,6 +80,15 @@ jobs:
               gate="${marker#DIRECTOR_GATE_FAILED=}"
               echo "failure_gate=$gate" >> "$GITHUB_OUTPUT"
               echo "::error::$marker"
+              if [ "$gate" = "tests" ]; then
+                test_line="$(grep -E '^not ok [0-9]+ - ' "$RUNNER_TEMP/director-convergence-tail.log" | head -n1 || true)"
+                if [ -n "$test_line" ]; then
+                  test_name="${test_line#* - }"
+                  test_slug="$(printf '%s' "$test_name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | cut -c1-80)"
+                  echo "failure_test=$test_slug" >> "$GITHUB_OUTPUT"
+                  echo "::error title=Director test failure::$test_line"
+                fi
+              fi
             fi
             echo "FAILURE_LOG_TAIL_BEGIN"
             cat "$RUNNER_TEMP/director-convergence-tail.log"
@@ -91,7 +100,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: director-convergence-failure-${{ steps.canonical_convergence.outputs.failure_gate }}
+          name: director-convergence-failure-${{ steps.canonical_convergence.outputs.failure_gate }}-${{ steps.canonical_convergence.outputs.failure_test }}
           path: ${{ runner.temp }}/director-convergence-tail.log
           if-no-files-found: ignore
           retention-days: 1
