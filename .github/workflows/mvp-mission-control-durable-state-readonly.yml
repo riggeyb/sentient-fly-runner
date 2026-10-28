@@ -69,4 +69,4 @@ jobs:
           NODE
           B64="$(base64 -w0 "$RUNNER_TEMP/mc-state.mjs")"
           timeout 120s flyctl ssh console -a "$APP" -C \
-            "sh -lc 'cd /app && echo $B64 | base64 -d >/tmp/mc-state.mjs && MC_OBJECTIVE_ID=$OBJECTIVE_ID node /tmp/mc-state.mjs; status=\$?; rm -f /tmp/mc-state.mjs; exit \$status'"
+            "sh -lc 'cd /app && echo $B64 | base64 -d > /app/.mc-state-proof.mjs && MC_OBJECTIVE_ID=$OBJECTIVE_ID node /app/.mc-state-proof.mjs; status=\$?; rm -f /app/.mc-state-proof.mjs; exit \$status'"
