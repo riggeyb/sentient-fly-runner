@@ -26,7 +26,7 @@ jobs:
           path: operator
 
       - name: Checkout private Director source
-        uses: actions/checkout@0v4
+        uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
           ref: sentient-ui-activation-v1
