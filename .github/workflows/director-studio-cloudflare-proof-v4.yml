@@ -63,6 +63,7 @@ jobs:
           cache-dependency-path: director/package-lock.json
 
       - name: Run canonical convergence from operator bridge
+        id: canonical_convergence
         shell: bash
         working-directory: director
         run: |
@@ -74,8 +75,12 @@ jobs:
             rc=$?
             echo "CANONICAL_CONVERGENCE=FAIL"
             tail -n 160 "$log" > "$RUNNER_TEMP/director-convergence-tail.log"
-            marker="$(grep -E 'DIRECTOR_GATE_FAILED=' "$RUNNER_TEMP/director-convergence-tail.log" | tail -n1 || true)"
-            if [ -n "$marker" ]; then echo "::error::$marker"; fi
+            marker="$(grep -Eo 'DIRECTOR_GATE_FAILED=[A-Za-z0-9_-]+' "$RUNNER_TEMP/director-convergence-tail.log" | tail -n1 || true)"
+            if [ -n "$marker" ]; then
+              gate="${marker#DIRECTOR_GATE_FAILED=}"
+              echo "failure_gate=$gate" >> "$GITHUB_OUTPUT"
+              echo "::error::$marker"
+            fi
             echo "FAILURE_LOG_TAIL_BEGIN"
             cat "$RUNNER_TEMP/director-convergence-tail.log"
             echo "FAILURE_LOG_TAIL_END"
@@ -86,7 +91,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: director-convergence-failure-tail
+          name: director-convergence-failure-${{ steps.canonical_convergence.outputs.failure_gate }}
           path: ${{ runner.temp }}/director-convergence-tail.log
           if-no-files-found: ignore
           retention-days: 1
