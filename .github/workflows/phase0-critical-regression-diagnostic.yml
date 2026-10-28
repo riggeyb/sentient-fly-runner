@@ -55,6 +55,7 @@ jobs:
         run: |
           set -uo pipefail
           tests=(
+            director-sentient-auth
             active-work-core
             active-work-expiry-fencing
             active-work-persistence
