@@ -11,9 +11,8 @@ jobs:
       BASE_SHA: 62766f6f582962ef2f3f73d243857e85f952dfbd
       BRANCH: sentient/root-direct-fallback-v1
     steps:
-      - uses: actions/checkout4v4
-        with:
-          path: runner
+      - name: Checkout public operator
+        run: git clone --depth 1 https://github.com/riggeyb/sentient-fly-runner runner
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
@@ -26,7 +25,6 @@ jobs:
         with:
           node-version: "22"
       - name: Apply bounded Root direct fallback
-        shell: bash
         run: |
           set -euo pipefail
           cd sentient
@@ -38,11 +36,9 @@ jobs:
           changed="$(git diff --name-only | sort)"
           echo "CHANGED_FILES=${changed//$'\n'/,}"
           expected="$(printf '%s\n' src/application/production-mission-control.ts src/fly/production-runtime.ts test/root-direct-fallback.test.ts | sort)"
-          echo "EXPECTED_FILES=${expected//$'\n'/,}"
           test "$changed" = "$expected"
           echo "SOURCE_SCOPE=PASS"
       - name: Build and test
-        shell: bash
         run: |
           set -euo pipefail
           cd sentient
@@ -54,7 +50,6 @@ jobs:
           echo "AUTHORITY_EXPANSION=false"
           echo "RESOURCE_EXPANSION=false"
       - name: Commit tested repair
-        shell: bash
         run: |
           set -euo pipefail
           cd sentient
