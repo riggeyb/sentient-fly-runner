@@ -45,7 +45,8 @@ jobs:
           git checkout "$FAIRNESS_SHA" -- \
             src/fly/self-execution.ts \
             test/final-cert-restart-backlog-serialization.test.ts \
-            test/mvp-recovery-fairness-v2.test.ts
+            test/mvp-recovery-fairness-v2.test.ts \
+            test/phase5-fly-restart-lease-retry.test.ts
 
           # The local-HF serial-admission repair must remain byte-identical to aa7c.
           test "$(git hash-object src/model/providers/local-hf-serial-runner.ts)" = "$(git rev-parse "$AA7C_SHA:src/model/providers/local-hf-serial-runner.ts")"
@@ -57,6 +58,7 @@ jobs:
             src/fly/self-execution.ts \
             test/final-cert-restart-backlog-serialization.test.ts \
             test/mvp-recovery-fairness-v2.test.ts \
+            test/phase5-fly-restart-lease-retry.test.ts \
             test/root-direct-fallback.test.ts | sort)"
           observed="$(git diff --name-only "$START_SHA" -- | sort)"
           test "$observed" = "$expected"
@@ -88,6 +90,7 @@ jobs:
             src/fly/self-execution.ts \
             test/final-cert-restart-backlog-serialization.test.ts \
             test/mvp-recovery-fairness-v2.test.ts \
+            test/phase5-fly-restart-lease-retry.test.ts \
             test/root-direct-fallback.test.ts
           git diff --cached --check
           git commit -m "mvp: compose serial HF admission with fair restart recovery"
