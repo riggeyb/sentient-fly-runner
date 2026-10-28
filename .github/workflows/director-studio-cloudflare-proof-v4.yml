@@ -70,6 +70,13 @@ jobs:
           set -uo pipefail
           log="$RUNNER_TEMP/director-convergence.log"
           if bash ../operator/scripts/director-cloudflare-convergence.sh >"$log" 2>&1; then
+            receipt_host="$(grep -Eo 'ACTUAL_USABLE_FRONTEND_URL=https://[^[:space:]]+' "$log" | tail -n1 | sed 's#ACTUAL_USABLE_FRONTEND_URL=https://##' | tr -cd 'A-Za-z0-9._-' || true)"
+            receipt_version="$(grep -Eo 'CLOUDFLARE_DEPLOY_VERSION=[A-Za-z0-9-]+' "$log" | tail -n1 | cut -d= -f2 || true)"
+            test -n "$receipt_host"
+            test -n "$receipt_version"
+            echo "receipt_host=$receipt_host" >> "$GITHUB_OUTPUT"
+            echo "receipt_version=$receipt_version" >> "$GITHUB_OUTPUT"
+            printf 'ACTUAL_USABLE_FRONTEND_URL=https://%s\nCLOUDFLARE_DEPLOY_VERSION=%s\n' "$receipt_host" "$receipt_version" > "$RUNNER_TEMP/director-cloudflare-success-receipt.txt"
             cat "$log"
           else
             rc=$?
@@ -103,7 +110,7 @@ jobs:
               echo "dirty_tracked=$dirty_slug" >> "$GITHUB_OUTPUT"
               echo "::error::DIRECTOR_DIRTY_TRACKED=$dirty_path"
             fi
-            receipt_host="$(grep -Eo 'ACTUTL_USABLE_FRONTEND_URL=https://[^[:space:]]+' "$log" | tail -n1 | sed 's#ACTUTL_USABLE_FRONTEND_URL=https://##' | tr -cd 'A-Za-z0-9._-' || true)"
+            receipt_host="$(grep -Eo 'ACTUAL_USABLE_FRONTEND_URL=https://[^[:space:]]+' "$log" | tail -n1 | sed 's#ACTUAL_USABLE_FRONTEND_URL=https://##' | tr -cd 'A-Za-z0-9._-' || true)"
             receipt_version="$(grep -Eo 'CLOUDFLARE_DEPLOY_VERSION=[A-Za-z0-9-]+' "$log" | tail -n1 | cut -d= -f2 || true)"
             if [ -n "$receipt_host" ]; then echo "receipt_host=$receipt_host" >> "$GITHUB_OUTPUT"; fi
             if [ -n "$receipt_version" ]; then echo "receipt_version=$receipt_version" >> "$GITHUB_OUTPUT"; fi
@@ -112,6 +119,15 @@ jobs:
             echo "FAILURE_LOG_TAIL_END"
             exit "$rc"
           fi
+
+      - name: Preserve successful deployment receipt
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: director-cloudflare-success-${{ steps.canonical_convergence.outputs.receipt_host }}-${{ steps.canonical_convergence.outputs.receipt_version }}
+          path: ${{ runner.temp }}/director-cloudflare-success-receipt.txt
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Preserve bounded convergence failure
         if: failure()
