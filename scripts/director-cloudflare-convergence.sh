@@ -70,7 +70,19 @@ else
   false
 fi
 gate=typecheck
-npm run typecheck
+typecheck_log="$RUNNER_TEMP/director-typecheck.log"
+if npm run typecheck >"$typecheck_log" 2>&1; then
+  cat "$typecheck_log"
+else
+  diagnostic="$(grep -E '^[^[:space:]].*\([0-9]+,[0-9]+\): error TS[0-9]+:' "$typecheck_log" | head -n1 || true)"
+  if [ -z "$diagnostic" ]; then
+    diagnostic="$(grep -E 'error TS[0-9]+:' "$typecheck_log" | head -n1 || true)"
+  fi
+  slug="$(printf '%s' "${diagnostic:-unknown}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//' | cut -c1-120)"
+  gate="typecheck_${slug:-unknown}"
+  tail -n 80 "$typecheck_log"
+  false
+fi
 gate=vinext_check
 npm run check:vinext
 gate=cf_typegen
