@@ -89,6 +89,21 @@ gate=cf_typegen
 npm run cf-typegen
 gate=vinext_build
 npm run build:vinext
+
+gate=generated_source_hygiene
+dirty_tracked="$(git diff --name-only)"
+if [ -n "$dirty_tracked" ]; then
+  if [ "$dirty_tracked" = "next-env.d.ts" ]; then
+    git restore -- next-env.d.ts
+    echo "GENERATED_NEXT_ENV_RESTORED=true"
+  else
+    echo "::error::UNEXPECTED_TRACKED_MUTATION=$dirty_tracked"
+    false
+  fi
+fi
+git diff --quiet
+git diff --cached --quiet
+
 gate=wrangler_dry_run
 npx wrangler deploy --dry-run
 echo "ACCESS_JWT_VALIDATION=PASS"
@@ -129,7 +144,7 @@ echo "UNNECESSARY_ACCESS_DISCOVERY_REMOVED=true"
 echo "CLOUDFLARE_ACCESS_ENABLED=true"
 echo "UNAUTHENTICATED_ACCESS_BLOCKED=true"
 echo "DIRECTOR_STUDIO_CLOUDFLARE_URL=$HOST_URL"
-echo "ACTUTL_USABLE_FRONTEND_URL=$HOST_URL"
+echo "ACTUAL_USABLE_FRONTEND_URL=$HOST_URL"
 echo "WORKERS_DEV_DEPLOY_URL=$worker_url"
 
 gate=clean_tree
