@@ -20,6 +20,11 @@ jobs:
           fetch-depth: 0
       - name: Patch and prove
         shell: bash
+        env:
+          SENTIENT_RUNTIME_SHA: fc67a71248eb0ad355b0fb6043d93b2acfff4840
+          SENTIENT_RUNTIME_TREE: ec1bf1cf79de9cc4c5eed9498215cdc62030a7d6
+          SENTIENT_RUNTIME_PARENT: 91c0b36526f7bd0fc5d8cae1de9c98677b4998a8
+          SENTIENT_SKILLS_SHA: b3df9b32b47370a7140d6fe814eeba97564663ab
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "fc67a71248eb0ad355b0fb6043d93b2acfff4840"
@@ -27,32 +32,54 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           def one(path, old, new):
-              p=Path(path); s=p.read_text()
-              if s.count(old) != 1: raise SystemExit(f"anchor failure: {path}")
-              p.write_text(s.replace(old,new,1))
-          r="src/model/providers/atlas-hybrid-router.ts"
-          one(r,
+              p = Path(path)
+              s = p.read_text()
+              if s.count(old) != 1:
+                  raise SystemExit(f"anchor failure: {path}")
+              p.write_text(s.replace(old, new, 1))
+
+          router = "src/model/providers/atlas-hybrid-router.ts"
+          one(
+              router,
               'export const DEEPSEEK_V3_2_MODEL_V1 = "deepseek-ai/deepseek-v3.2" as const;\n',
-              'export const DEEPSEEK_V3_2_MODEL_V1 = "deepseek-ai/deepseek-v3.2" as const;\nexport const DOTS3_NOTE_ATLAS_MODEL_V1 = "dots-studio/dots-3-note-prev-free" as const;\n')
-          f="src/fly/production-runtime.ts"
-          one(f,
+              'export const DEEPSEEK_V3_2_MODEL_V1 = "deepseek-ai/deepseek-v3.2" as const;\n'
+              'export const DOTS3_NOTE_ATLAS_MODEL_V1 = "dots-studio/dots-3-note-prev-free" as const;\n'
+              'export function resolveAtlasDots3ModelV1(value: unknown): string {\n'
+              '  if (typeof value !== "string") return DOTS3_NOTE_ATLAS_MODEL_V1;\n'
+              '  return value.trim() || DOTS3_NOTE_ATLAS_MODEL_V1;\n'
+              '}\n'
+          )
+
+          runtime = "src/fly/production-runtime.ts"
+          one(
+              runtime,
               'import { AtlasHybridModelRouterV1, type HybridModelTelemetryV1 } from "../model/providers/atlas-hybrid-router.js";',
-              'import { AtlasHybridModelRouterV1, DOTS3_NOTE_ATLAS_MODEL_V1, type HybridModelTelemetryV1 } from "../model/providers/atlas-hybrid-router.js";')
-          one(f,
-              '  const atlasApiKey = optional(process.env.ATLASCLOUD_API_KEY);\n  const dots3Model = optional(process.env.ATLASCLOUD_DOTS3_MODEL);\n  const atlasClient = atlasApiKey !== null && dots3Model !== null ? new AtlasCloudClientV1({ apiKey: atlasApiKey }) : null;\n',
-              '  const atlasApiKey = optional(process.env.ATLASCLOUD_API_KEY);\n  const dots3Model = resolveAtlasDots3ModelV1(process.env.ATLASCLOUD_DOTS3_MODEL);\n  const atlasClient = atlasApiKey !== null ? new AtlasCloudClientV1({ apiKey: atlasApiKey }) : null;\n')
-          one(f,
-              'function optional(value: unknown): string | null {\n',
-              'export function resolveAtlasDots3ModelV1(value: unknown): string {\n  return optional(value) ?? DOTS3_NOTE_ATLAS_MODEL_V1;\n}\n\nfunction optional(value: unknown): string | null {\n')
-          t="test/atlas-hybrid-production-wiring.test.ts"
-          one(t,
+              'import { AtlasHybridModelRouterV1, resolveAtlasDots3ModelV1, type HybridModelTelemetryV1 } from "../model/providers/atlas-hybrid-router.js";'
+          )
+          one(
+              runtime,
+              '  const atlasApiKey = optional(process.env.ATLASCLOUD_API_KEY);\n'
+              '  const dots3Model = optional(process.env.ATLASCLOUD_DOTS3_MODEL);\n'
+              '  const atlasClient = atlasApiKey !== null && dots3Model !== null ? new AtlasCloudClientV1({ apiKey: atlasApiKey }) : null;\n',
+              '  const atlasApiKey = optional(process.env.ATLASCLOUD_API_KEY);\n'
+              '  const dots3Model = resolveAtlasDots3ModelV1(process.env.ATLASCLOUD_DOTS3_MODEL);\n'
+              '  const atlasClient = atlasApiKey !== null ? new AtlasCloudClientV1({ apiKey: atlasApiKey }) : null;\n'
+          )
+
+          test_path = "test/atlas-hybrid-production-wiring.test.ts"
+          one(
+              test_path,
               'import { AtlasHybridModelRouterV1 } from "../src/model/providers/atlas-hybrid-router.js";',
-              'import { AtlasHybridModelRouterV1, DOTS3_NOTE_ATLAS_MODEL_V1 } from "../src/model/providers/atlas-hybrid-router.js";')
-          one(t,
-              'import { runRootSynthesisV1 } from "../src/application/production-mission-control.js";',
-              'import { runRootSynthesisV1 } from "../src/application/production-mission-control.js";\nimport { resolveAtlasDots3ModelV1 } from "../src/fly/production-runtime.js";')
-          p=Path(t)
-          p.write_text(p.read_text()+'\n\ntest("production Atlas activation defaults Dots3 and preserves override",()=>{\n  assert.equal(resolveAtlasDots3ModelV1(undefined),DOTS3_NOTE_ATLAS_MODEL_V1);\n  assert.equal(resolveAtlasDots3ModelV1("  dots-studio/future-note  "),"dots-studio/future-note");\n});\n')
+              'import { AtlasHybridModelRouterV1, DOTS3_NOTE_ATLAS_MODEL_V1, resolveAtlasDots3ModelV1 } from "../src/model/providers/atlas-hybrid-router.js";'
+          )
+          p = Path(test_path)
+          p.write_text(p.read_text() + '''
+
+test("production Atlas activation defaults Dots3 and preserves override", () => {
+  assert.equal(resolveAtlasDots3ModelV1(undefined), DOTS3_NOTE_ATLAS_MODEL_V1);
+  assert.equal(resolveAtlasDots3ModelV1("  dots-studio/future-note  "), "dots-studio/future-note");
+});
+''')
           PY
           git diff --check
           npm ci --no-audit --no-fund
