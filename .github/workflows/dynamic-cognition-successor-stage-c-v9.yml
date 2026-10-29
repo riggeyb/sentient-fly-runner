@@ -1,0 +1,136 @@
+name: Dynamic Cognition Successor Stage C V9
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  stage_c:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 0
+
+      - name: Exact source fence, apply proven Stage C workspace, build, test, push
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("runner/scripts/dynamic-successor-stage-c-objective-envelope.py")
+          s=p.read_text()
+          q=chr(39)*3
+          fixes=[
+            ("    ''import { isBearerAuthorized }","    "+q+"import { isBearerAuthorized }"),
+            ("      engineeringJob','',","      engineeringJob,"+q+","),
+            ("    ''import {completeProductionObjectiveStateV1","    "+q+"import {completeProductionObjectiveStateV1"),
+          ]
+          for old,new in fixes:
+            n=s.count(old)
+            if n!=1: raise SystemExit(f"quote_fix_mismatch:{old!r}:{n}")
+            s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          python -m py_compile runner/scripts/dynamic-successor-stage-c-objective-envelope.py
+
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+
+          python ../runner/scripts/dynamic-successor-stage-c-objective-envelope.py
+
+          python - <<'PY'
+          from pathlib import Path
+
+          p=Path("src/application/production-mission-control.ts")
+          s=p.read_text()
+          broken='"' + "\n\n" + '"'
+          n=s.count(broken)
+          if n!=2: raise SystemExit(f"newline_fix_mismatch:{n}")
+          p.write_text(s.replace(broken,'"\\n\\n"'))
+
+          p=Path("src/fly/self-execution.ts")
+          s=p.read_text()
+          fixes=[
+            ('  budget: SentientObjectiveInput["budget"] | null;','  budget: NonNullable<SentientObjectiveInput["budget"]> | null;'),
+            ('  let budget: SentientObjectiveInput["budget"] | null = null;','  let budget: NonNullable<SentientObjectiveInput["budget"]> | null = null;'),
+          ]
+          for old,new in fixes:
+            n=s.count(old)
+            if n!=1: raise SystemExit(f"type_fix_mismatch:{old!r}:{n}")
+            s=s.replace(old,new,1)
+          p.write_text(s)
+
+          p=Path("test/dynamic-objective-envelope-runtime-v1.test.ts")
+          s=p.read_text()
+          bs=chr(92)
+          doubled=s.count(bs+bs)
+          if doubled < 1: raise SystemExit("generated_test_regex_escape_fix_not_needed")
+          s=s.replace(bs+bs, bs)
+          old='SentientObjectiveInput'+bs+'["budget"'+bs+']'+bs+'s*'+bs+'|'+bs+'s*null'
+          new='NonNullable<SentientObjectiveInput'+bs+'["budget"'+bs+']>'+bs+'s*'+bs+'|'+bs+'s*null'
+          n=s.count(old)
+          if n!=1: raise SystemExit(f"generated_test_budget_type_assertion_mismatch:{n}")
+          p.write_text(s.replace(old,new,1))
+          PY
+
+          git diff --check
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test \
+            dist/test/dynamic-objective-envelope-runtime-v1.test.js \
+            dist/test/dynamic-hard-stops-core.test.js \
+            dist/test/atlas-hybrid-router.test.js
+          npm test
+
+          git config user.name "Sentient Engineering"
+          git config user.email "sentient-engineering@users.noreply.github.com"
+          git add \
+            src/application/production-composition.ts \
+            src/application/production-mission-control.ts \
+            src/fly/self-execution.ts \
+            src/fly/server-runtime.ts \
+            test/dynamic-objective-envelope-runtime-v1.test.ts
+          git diff --cached --check
+          git commit -m "cognition: persist and propagate objective hard-stop envelope"
+
+          new_sha="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse HEAD^{tree})"
+
+          git fetch origin "$SOURCE_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+          git push origin "HEAD:refs/heads/$SOURCE_BRANCH"
+
+          echo "SUCCESSOR_SHA=$new_sha"
+          echo "SUCCESSOR_TREE=$new_tree"
+          echo "DEPLOYMENT_PERFORMED=false"
