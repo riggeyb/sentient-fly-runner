@@ -17,7 +17,20 @@ one('''  privacy: "public_fixture" | "private";
   budget?: Readonly<BudgetEnvelope>;
   deadline?: string;
   workerPlan?: readonly DynamicWorkerRequestV1[];''')
-one('''  const budgets = defaultBudgets();''','''  const budgets = objectiveSpawnBudgetsV1(input);''')
+one('''function rootExecution(
+  input: ProductionCollaborationInputV1,
+  executionId: string,
+  identity: ProductionCollaborationIdentityV1,
+): SpawnExecutionRecordV1 {
+  const now = new Date().toISOString();
+  const budgets = defaultBudgets();''',
+'''function rootExecution(
+  input: ProductionCollaborationInputV1,
+  executionId: string,
+  identity: ProductionCollaborationIdentityV1,
+): SpawnExecutionRecordV1 {
+  const now = new Date().toISOString();
+  const budgets = objectiveSpawnBudgetsV1(input);''')
 one('''function spawnPolicy(input: ProductionCollaborationInputV1): SpawnPolicyV1 {
   const budgets = defaultBudgets();''',
 '''function spawnPolicy(input: ProductionCollaborationInputV1): SpawnPolicyV1 {
