@@ -33,6 +33,7 @@ jobs:
         with:
           repository: riggeyb/sentient
           ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
       - uses: actions/setup-node@v4
@@ -47,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
+          test "$(git rev-parse 'HEAD{tree}')" = "$SOURCE_TREE"
           echo "SOURCE_CHECKOUT=PASS"
           npm ci --no-audit --no-fund
           npm run build
