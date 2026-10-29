@@ -32,4 +32,4 @@ for (const p of deepPrompts) {
 }
 if (!deepSeek?.ok) throw new Error("deepseek_smoke_failed");
 const deepLatency = deepSeek.result.latencyMs;
-console.log(`DEEPSEEK_OLD_8S_THRESHOLD_EXCEEDED=${deepLatency > 8_000 ? "PASS" : "FAIL"}`);
+console.log(`DEEPSEEK_OLD_8S_THRESHOLD_EXCEEDED=${deepLatency > 8_000 ? "PASS" : "FAIL"}`)
