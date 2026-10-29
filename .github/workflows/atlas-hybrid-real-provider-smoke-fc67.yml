@@ -1,0 +1,137 @@
+name: Atlas Hybrid Real Provider Smoke FC67
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact riggeyb/sentient candidate SHA
+        required: true
+        type: string
+      source_tree:
+        description: Exact riggeyb/sentient candidate tree
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: ${{ inputs.source_sha }}
+      EXPECTED_TREE: ${{ inputs.source_tree }}
+    steps:
+      - name: Validate immutable source inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Guard exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          echo "SOURCE_CHECKOUT=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+          echo "BUILD=PASS"
+
+      - name: Minimal real Atlas calls through candidate AtlasCloudClientV1
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const key = String(process.env.ATLASCLOUD_API_KEY ?? "").trim();
+          if (!key) throw new Error("atlas_secret_unavailable");
+
+          const { AtlasCloudClientV1 } = await import("./dist/src/model/providers/atlas-cloud-client.js");
+          const { ATLAS_DOTS3_VERIFIED_MODEL_ID_V1 } = await import("./dist/src/model/providers/atlas-dots3.js");
+          const { DEEPSEEK_V3_2_MODEL_V1 } = await import("./dist/src/model/providers/atlas-hybrid-router.js");
+
+          const client = new AtlasCloudClientV1({ apiKey: key });
+
+          async function call(label, input) {
+            const result = await client.complete(input);
+            if (!result.ok) {
+              console.log(`${label}_CONNECTIVITY=FAIL`);
+              console.log(`${label}_FAILURE_REASON=${result.reason}`);
+              console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
+              return { ok: false, auth: result.reason !== "authentication" };
+            }
+            const usageCaptured = [result.usage.inputTokens, result.usage.outputTokens, result.usage.totalTokens]
+              .every((value) => typeof value === "number");
+            console.log(`${label}_CONNECTIVITY=PASS`);
+            console.log(`${label}_RESPONSE_VALID=PASS`);
+            console.log(`${label}_USAGE_CAPTURED=${usageCaptured ? "PASS" : "FAIL"}`);
+            console.log(`${label}_INPUT_TOKENS=${result.usage.inputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_CACHED_INPUT_TOKENS=${result.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_OUTPUT_TOKENS=${result.usage.outputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_REASONING_TOKENS=${result.usage.reasoningTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_TOTAL_TOKENS=${result.usage.totalTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
+            console.log(`${label}_FINISH_REASON=${result.finishReason ?? "NOT_REPORTED"}`);
+            console.log(`${label}_PROVIDER_REQUEST_ID_PRESENT=${result.providerRequestId ? "true" : "false"}`);
+            console.log(`ACTUAL_${label}_SMOKE_COST=${result.reportedCostUsd ?? "UNREPORTED"}`);
+            return { ok: usageCaptured, auth: true };
+          }
+
+          const deepSeek = await call("DEEPSEEK", {
+            model: DEEPSEEK_V3_2_MODEL_V1,
+            systemPrompt: "Connectivity test only. You are non-authoritative. Return one tiny JSON object and take no actions.",
+            userPrompt: 'Return exactly {"answer":"ok"}.',
+            maxOutputTokens: 256,
+            timeoutMs: 15_000,
+            requireJsonObject: true,
+            requiredTextValidator: (text) => text.includes("answer"),
+          });
+
+          const dots3 = await call("DOTS3", {
+            model: ATLAS_DOTS3_VERIFIED_MODEL_ID_V1,
+            systemPrompt: "Connectivity test only. You are non-authoritative. Return a tiny answer and take no actions.",
+            userPrompt: "Reply with exactly: ok",
+            maxOutputTokens: 128,
+            timeoutMs: 15_000,
+            requiredTextValidator: (text) => text.trim().length > 0,
+          });
+
+          const authPass = deepSeek.auth && dots3.auth;
+          console.log(`ATLAS_AUTH=${authPass ? "PASS" : "FAIL"}`);
+          console.log(`DEEPSEEK_MODEL=${DEEPSEEK_V3_2_MODEL_V1}`);
+          console.log(`DOTS3_MODEL=${ATLAS_DOTS3_VERIFIED_MODEL_ID_V1}`);
+          console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+          console.log(`REAL_ATLAS_SMOKE=${deepSeek.ok && dots3.ok && authPass ? "PASS" : "FAIL"}`);
+          if (!(deepSeek.ok && dots3.ok && authPass)) process.exit(3);
+          NODE
+
+      - name: Guard clean source and no deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "DEPLOYMENT_PERFORMED=false"
