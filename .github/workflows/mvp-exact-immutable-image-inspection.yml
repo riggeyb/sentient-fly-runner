@@ -38,14 +38,15 @@ jobs:
           [[ "$PARENT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SKILLS" =~ ^[0-9a-f]{40}$ ]]
           flyctl auth docker >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo >/dev/null
           image="registry.fly.io/${APP}:phase0-${SHA}"
-          docker pull "$image" >/dev/null
-          actual_sha="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | sed -n 's/^SENTIENT_RUNTIME_SHA=//p')"
-          actual_tree="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | sed -n 's/^SENTIENT_RUNTIME_TREE=//p')"
-          actual_skills="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | sed -n 's/^SENTIENT_SKILLS_SHA=//p')"
-          actual_parent="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | sed -n 's/^SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=//p')"
-          repo_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$image")"
-          digest="${repo_digest##*@}"
+          skopeo inspect --authfile "$HOME/.docker/config.json" "docker://${image}" > /tmp/image.json
+          actual_sha="$(jq -r '.Env[]? | select(startswith("SENTIENT_RUNTIME_SHA=")) | split("=")[1]' /tmp/image.json)"
+          actual_tree="$(jq -r '.Env[]? | select(startswith("SENTIENT_RUNTIME_TREE=")) | split("=")[1]' /tmp/image.json)"
+          actual_skills="$(jq -r '.Env[]? | select(startswith("SENTIENT_SKILLS_SHA=")) | split("=")[1]' /tmp/image.json)"
+          actual_parent="$(jq -r '.Env[]? | select(startswith("SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=")) | split("=")[1]' /tmp/image.json)"
+          digest="$(jq -r '.Digest' /tmp/image.json)"
           test "$actual_sha" = "$SHA"
           test "$actual_tree" = "$TREE"
           test "$actual_skills" = "$SKILLS"
