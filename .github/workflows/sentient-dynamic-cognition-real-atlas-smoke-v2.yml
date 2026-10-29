@@ -1,0 +1,70 @@
+name: Sentient Dynamic Cognition Real Atlas Smoke V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Validate immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.source_sha }}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${{ inputs.source_tree }}" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Checkout exact Sentient source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: sentient
+
+      - name: Verify exact source
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.source_tree }}"
+          test -z "$(git status --porcelain)"
+          echo "SOURCE_CHECKOUT=PASS"
+
+      - name: Build exact candidate
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          echo "BUILD=PASS"
+
+      - name: Real Atlas threshold and abort smoke
+        working-directory: sentient
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLLOUD_API_KEY }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { AtlasCloudClientV1 } from "./dist/src/model/providers/atlas-cloud-client.js";
+          import { DEEPSEEK_V3_2_MODEL_V1 } from "./dist/src/model/providers/atlas-hybrid-router.js";
+          import { ATLAS_DOTS3_VERIFIED_MODEL_ID_V1 } from "./dist/src/model/providers/atlas-dots3.js";
+
+          const key = process.env.ATLASCLOUD_API_KEY?.trim();
+          if (!ey) key;
