@@ -1,0 +1,194 @@
+name: Dynamic Cognition Phase1 Hard Stop Patch V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: dynamic-cognition-hard-stops-v1
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 2
+      - name: Patch Phase1 hard stop
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("src/phase1/core-runtime.ts")
+          s=p.read_text()
+          def repl(old,new,count=1):
+              global s
+              n=s.count(old)
+              if n != count:
+                  raise SystemExit(f"phase1 patch mismatch expected={count} actual={n}: {old[:80]!r}")
+              s=s.replace(old,new,count)
+
+          repl(
+          '''export interface Phase1CognitionPort {
+            run(requirements: TaskRequirementsV1): Promise<ModelResult | unknown>;
+          }''',
+          '''export interface Phase1InvocationControlV1 {
+            objectiveId: string;
+            executionId: string;
+            parentExecutionId?: string;
+            workerId?: string;
+            absoluteDeadlineMs: number;
+            maxInputTokens?: number;
+            maxOutputTokens?: number;
+            maxCostMicros?: number;
+            signal: AbortSignal;
+          }
+
+          export interface Phase1CognitionPort {
+            run(
+              requirements: TaskRequirementsV1,
+              control?: Phase1InvocationControlV1,
+            ): Promise<ModelResult | unknown>;
+          }''')
+
+          repl(
+          '''  options: {
+              cognition?: Phase1CognitionPort | undefined;
+              acceptancePolicy?: Phase1AcceptancePolicyV1 | undefined;
+            } = {},''',
+          '''  options: {
+              cognition?: Phase1CognitionPort | undefined;
+              acceptancePolicy?: Phase1AcceptancePolicyV1 | undefined;
+              invocationControl?: Phase1InvocationControlV1 | undefined;
+            } = {},''')
+
+          repl(
+          '''  let rawCandidate: unknown;
+            try {
+              rawCandidate = await options.cognition.run(requirements);
+            } catch {
+              return result(requirements, "COGNITION_UNAVAILABLE", null, { kind: "NONE", accepted: false });
+            }
+            const candidate = subordinateResult(rawCandidate);''',
+          '''  const control = options.invocationControl;
+            if (control && !phase1InvocationLiveV1(control)) {
+              return result(requirements, "COGNITION_UNAVAILABLE", null, { kind: "NONE", accepted: false });
+            }
+            let rawCandidate: unknown;
+            try {
+              const pending = options.cognition.run(requirements, control);
+              rawCandidate = control === undefined
+                ? await pending
+                : await awaitLivePhase1ResultV1(pending, control);
+            } catch {
+              return result(requirements, "COGNITION_UNAVAILABLE", null, { kind: "NONE", accepted: false });
+            }
+            if (rawCandidate === PHASE1_LATE_RESULT_V1 || (control && !phase1InvocationLiveV1(control))) {
+              return result(requirements, "COGNITION_UNAVAILABLE", null, {
+                kind: "MODEL_RESULT",
+                accepted: false,
+                rejectionReason: "late_model_output_rejected",
+              });
+            }
+            const candidate = subordinateResult(rawCandidate);''')
+
+          repl(
+          '''  const policy = options.acceptancePolicy;
+            const policyId = policy ? normalizedPolicyId(policy) : null;'',
+          '''  if (control && !phase1InvocationLiveV1(control)) {
+              return result(requirements, "COGNITION_UNAVAILABLE", null, {
+                kind: "MODEL_RESULT",
+                accepted: false,
+                provider: candidate.provider,
+                model: candidate.model,
+                revision: candidate.revision,
+                rejectionReason: "late_model_output_rejected",
+              });
+            }
+            const policy = options.acceptancePolicy;
+            const policyId = policy ? normalizedPolicyId(policy) : null;''')
+
+          repl(
+          '''    if (!decision || decision.accepted !== true) {''',
+          '''    if (control && !phase1InvocationLiveV1(control)) {
+                return result(requirements, "SUBORDINATE_RESULT_REJECTED", null, {
+                  kind: "MODEL_RESULT",
+                  accepted: false,
+                  provider: candidate.provider,
+                  model: candidate.model,
+                  revision: candidate.revision,
+                  acceptancePolicyId: policyId,
+                  rejectionReason: "late_model_output_rejected",
+                });
+              }
+              if (!decision || decision.accepted !== true) {''')
+
+          repl(
+          '''function normalizedPolicyId(policy: Phase1AcceptancePolicyV1): string | null {''',
+          '''const PHASE1_LATE_RESULT_V1 = Symbol("phase1-late-result");
+
+          export function phase1InvocationLiveV1(
+            control: Pick<Phase1InvocationControlV1, "absoluteDeadlineMs" | "signal">,
+            nowMs = Date.now(),
+          ): boolean {
+            return !control.signal.aborted
+              && Number.isFinite(control.absoluteDeadlineMs)
+              && nowMs < control.absoluteDeadlineMs;
+          }
+
+          async function awaitLivePhase1ResultV1(
+            pending: Promise<ModelResult | unknown>,
+            control: Phase1InvocationControlV1,
+          ): Promise<ModelResult | unknown | typeof PHASE1_LATE_RESULT_V1> {
+            if (!phase1InvocationLiveV1(control)) return PHASE1_LATE_RESULT_V1;
+            return new Promise((resolve, reject) => {
+              let settled = false;
+              const remainingMs = Math.max(1, control.absoluteDeadlineMs - Date.now());
+              const finish = (value: ModelResult | unknown | typeof PHASE1_LATE_RESULT_V1, failed = false) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                control.signal.removeEventListener("abort", onAbort);
+                if (failed) reject(value);
+                else resolve(value);
+              };
+              const onAbort = () => finish(PHASE1_LATE_RESULT_V1);
+              const timer = setTimeout(onAbort, remainingMs);
+              control.signal.addEventListener("abort", onAbort, { once: true });
+              pending.then(
+                (value) => finish(phase1InvocationLiveV1(control) ? value : PHASE1_LATE_RESULT_V1),
+                (error) => finish(error, true),
+              );
+            });
+          }
+
+          function normalizedPolicyId(policy: Phase1AcceptancePolicyV1): string | null {''')
+
+          p.write_text(s)
+          PY
+          git diff --check
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build
+          node --test dist/test/phase1.test.js
+          git config user.name sentient-dynamic-cognition-engineering
+          git config user.email sentient-dynamic-cognition-engineering@users.noreply.github.com
+          git add src/phase1/core-runtime.ts
+          git commit -m "cognition: hard-stop Phase1 model results before acceptance"
+          git push origin HEAD:refs/heads/dynamic-cognition-hard-stops-v1
