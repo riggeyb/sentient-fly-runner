@@ -1,0 +1,47 @@
+name: Atlas Final OCI Inspection 20261029
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      SHA: 1f7c96af36cb25584738c51c1840c16d0b0c9560
+      TREE: ff065dec74ca49c48e962de67e6d7e8c3dd34b51
+      PARENT: 88d4b8d60a02c4fb76c35f5355bf4a35fe67c4c8
+      SKILLS: b3df9b32b47370a7140d6fe814eeba97564663ab
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect OCI config without pulling layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl auth docker >/dev/null
+          image="registry.fly.io/${APP}:phase0-${SHA}"
+          inspect="$(docker buildx imagetools inspect "$image")"
+          digest="$(printf '%s\n' "$inspect" | sed -n 's/^Digest:[[:space:]]*//p' | head -n1)"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image_json="$(docker buildx imagetools inspect --format '{{json .Image}}' "$image")"
+          env_json="$(jq -c '.config.Env // .Config.Env // []' <<<"$image_json")"
+          has() { jq -e --arg v "$1" 'index($v) != null' <<<"$env_json" >/dev/null; }
+          has "SENTIENT_RUNTIME_SHA=$SHA"
+          has "SENTIENT_RUNTIME_TREE=$TREE"
+          has "SENTIENT_SKILLS_SHA=$SKILLS"
+          has "SENTIENT_PHASE0_ACCEPTANCE_BASE_SHA=$PARENT"
+          echo "EXACT_IMAGE_EXISTS=true"
+          echo "IMAGE_RUNTIME_SHA=$SHA"
+          echo "IMAGE_RUNTIME_TREE=$TREE"
+          echo "IMAGE_SKILLS_SHA=$SKILLS"
+          echo "IMAGE_ACCEPTANCE_PARENT_SHA=$PARENT"
+          echo "IMAGE_TAG=phase0-$SHA"
+          echo "IMAGE_DIGEST=$digest"
+          echo "IMAGE_INSPECTED=PASS"
+          echo "DEPLOYMENT_PERFORMED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
