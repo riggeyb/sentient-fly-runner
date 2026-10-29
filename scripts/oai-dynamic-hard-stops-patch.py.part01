@@ -1,0 +1,68 @@
+ait awaitModelInvocationV1(envelope, async () => {
+        const common = {
+          userPrompt: requirements.normalizedUserRequest,
+          maxInputTokens: maxInputTokens ?? (this.#stage === "synthesis" ? 8_192 : 4_096),
+          maxOutputTokens: maxOutputTokens ?? defaultOutput,
+          ...(maxCostMicros === null ? {} : { maxCostMicros }),
+          timeoutMs: remainingModelInvocationMsV1(envelope),
+          signal: envelope.signal,
+        };
+        return this.#stage === "synthesis"
+          ? this.#router.synthesis({
+              ...common,
+              systemPrompt: "Synthesize only accepted verified context. Preserve human intent. Never invent effects or authority.",
+            })
+          : this.#router.cognition({
+              ...common,
+              systemPrompt: "Dynamically interpret intent, success criteria, subgoals, plans, revisions, evidence needs, worker requests, and one or many candidate results within the external envelope. Cognitive scope never grants effect authority.",
+            });
+      });
+      if (!result.ok) return phase1HardStopFailure("terminal_unavailable", result.telemetry);
+      const observed = aggregateUsage(result.telemetry);
+      return {
+        ok: true,
+        provider: result.provider,
+        model: result.model,
+        text: result.text,
+        toolCalls: [],
+        usage: {
+          ...(observed.inputTokens === null ? {} : { inputTokens: observed.inputTokens }),
+          ...(observed.outputTokens === null ? {} : { outputTokens: observed.outputTokens }),
+          ...(observed.totalTokens === null ? {} : { totalTokens: observed.totalTokens }),
+        },
+        latencyMs: totalLatency(result.telemetry),
+        finishReason: "stop",
+        metadata: {
+          modelOutputIsAuthority: false,
+          sentientOwnsAcceptance: true,
+          governorOwnsEffectAuthority: true,
+          governorGovernsThought: false,
+          cognitiveScopeDoesNotGrantEffectAuthority: true,
+          stage: this.#stage,
+          invocationId: envelope.invocationId,
+          absoluteDeadline: envelope.absoluteDeadline,
+          outputSha256: result.outputSha256,
+          telemetry: jsonValue(result.telemetry),
+        },
+      };
+    } catch (error) {
+      return phase1HardStopFailure(error instanceof Error ? error.message : String(error));
+    }
+  }'''
+Path(p).write_text(s[:a] + new_run + s[b:])
+
+replace_once(
+    p,
+    '        : `Perform bounded ${input.identity.role} analysis. Return a concise subordinate contribution. Do not claim completion or effect authority.`,',
+    '        : `Perform bounded ${input.identity.role} cognition. Dynamically reason, revise, and return one or many useful subordinate results. Never claim completion or effect authority.`,',
+)
+replace_once(
+    p,
+    '      timeoutMs: Math.min(budget.maxRuntimeMs, 28_000),\n      signal: input.signal,',
+    '      timeoutMs: budget.maxRuntimeMs,\n      signal: input.signal,',
+)
+replace_once(
+    p,
+    '    if (!result.ok) return failure("failed", "atlas_hybrid_terminal_unavailable");',
+    '    if (input.signal.aborted) return failure("timed_out", "late_model_output_rejected");\n'
+    '    if (!result.ok) return fa
