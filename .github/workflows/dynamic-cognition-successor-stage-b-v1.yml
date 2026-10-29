@@ -1,0 +1,89 @@
+name: Dynamic Cognition Successor Stage B V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: Exact isolated Sentient branch
+        required: true
+        type: string
+      expected_sha:
+        description: Exact Sentient head before mutation
+        required: true
+        type: string
+      expected_tree:
+        description: Exact Sentient tree before mutation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  stage_b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted runner
+        uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout exact Sentient branch
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+          path: sentient
+
+      - name: Fence exact source and apply synthesis hard stop
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+        run: |
+          set -euo pipefail
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          python ../runner/scripts/dynamic-successor-stage-b-synthesis.py
+          git diff --check
+          test "$(git diff --name-only)" = "src/application/production-mission-control-synthesis.ts"
+
+      - name: Build and regression tests
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test             dist/test/dynamic-hard-stops-core.test.js             dist/test/atlas-hybrid-router.test.js
+          npm test
+
+      - name: Commit and concurrency-safe push
+        shell: bash
+        working-directory: sentient
+        env:
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "Sentient Engineering"
+          git config user.email "sentient-engineering@users.noreply.github.com"
+          git add src/application/production-mission-control-synthesis.ts
+          git diff --cached --check
+          git commit -m "cognition: bind root synthesis to objective hard stop"
+          new_sha="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse HEAD^{tree})"
+          git fetch origin "$SOURCE_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+          git push origin "HEAD:refs/heads/$SOURCE_BRANCH"
+          echo "SUCCESSOR_SHA=$new_sha"
+          echo "SUCCESSOR_TREE=$new_tree"
+          echo "DEPLOYMENT_PERFORMED=false"
