@@ -39,6 +39,7 @@ jobs:
         with:
           repository: riggeyb/sentient
           ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           fetch-depth: 0
           path: sentient
 
