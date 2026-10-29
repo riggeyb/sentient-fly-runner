@@ -54,7 +54,8 @@ jobs:
           git show "${EXPERIMENTAL_GOVERNOR_SHA}:src/deployment-governor/convergence.ts" > src/deployment-governor/convergence.ts
           git show "${EXPERIMENTAL_GOVERNOR_SHA}:src/deployment-governor/deployment.ts" > src/deployment-governor/deployment.ts
           cp runner/runner-fixtures/governor-convergence-v1.test.ts test/governor-convergence-v1.test.ts
-          sed -i 's/const SKILLS = "b".repeat(40);/const SKILLS = "b3df9b32b47370a7140d6fe814e5ba97564663ab";/' test/governor-convergence-v1.test.ts
+          sed -i 's/const SKILLS = "b".repeat(40);/const SKILLS = "b3df9b32b47370a7140d6fe814eeba97564663ab";/' test/governor-convergence-v1.test.ts
+          sed -i 's/const list = await runFlyctl(/const list = await run(/' runner/scripts/governor_convergence_patch.py
 
           python runner/scripts/governor_convergence_patch.py
           git diff --check
