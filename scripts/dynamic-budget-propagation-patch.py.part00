@@ -1,0 +1,162 @@
+from pathlib import Path
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = Path(path)
+    text = p.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: expected exactly one match, found {count}")
+    p.write_text(text.replace(old, new, 1))
+
+replace_once(
+    "src/phase1/core-runtime.ts",
+    '''  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxCostMicros?: number;''',
+    '''  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxTotalTokens?: number;
+  maxCostMicros?: number;''',
+)
+
+replace_once(
+    "src/model/providers/atlas-cloud-client.ts",
+    '''  systemPrompt: string;
+  userPrompt: string;
+  maxOutputTokens: number;''',
+    '''  systemPrompt: string;
+  userPrompt: string;
+  maxInputTokens?: number;
+  maxOutputTokens: number;
+  maxTotalTokens?: number;''',
+)
+replace_once(
+    "src/model/providers/atlas-cloud-client.ts",
+    '''    if (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0) {
+      throw new Error("atlascloud_max_output_tokens_invalid");
+    }
+    if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {''',
+    '''    if (
+      input.maxInputTokens !== undefined
+      && (!Number.isSafeInteger(input.maxInputTokens) || input.maxInputTokens <= 0)
+    ) {
+      throw new Error("atlascloud_max_input_tokens_invalid");
+    }
+    if (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0) {
+      throw new Error("atlascloud_max_output_tokens_invalid");
+    }
+    if (
+      input.maxTotalTokens !== undefined
+      && (!Number.isSafeInteger(input.maxTotalTokens) || input.maxTotalTokens <= 0)
+    ) {
+      throw new Error("atlascloud_max_total_tokens_invalid");
+    }
+    if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {''',
+)
+replace_once(
+    "src/model/providers/atlas-cloud-client.ts",
+    '''    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);''',
+    '''    const conservativeInputTokens =
+      Buffer.byteLength(input.systemPrompt, "utf8")
+      + Buffer.byteLength(input.userPrompt, "utf8");
+    if (
+      input.maxInputTokens !== undefined
+      && conservativeInputTokens > input.maxInputTokens
+    ) {
+      return this.#failure(
+        model,
+        "context_limit",
+        "atlascloud_input_token_ceiling_exceeded_before_dispatch",
+        started,
+        null,
+      );
+    }
+    const outputCeiling = input.maxTotalTokens === undefined
+      ? input.maxOutputTokens
+      : Math.min(input.maxOutputTokens, input.maxTotalTokens - conservativeInputTokens);
+    if (outputCeiling <= 0) {
+      return this.#failure(
+        model,
+        "context_limit",
+        "atlascloud_total_token_ceiling_exhausted_before_dispatch",
+        started,
+        null,
+      );
+    }
+
+    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);''',
+)
+replace_once(
+    "src/model/providers/atlas-cloud-client.ts",
+    '''          max_tokens: input.maxOutputTokens,''',
+    '''          max_tokens: outputCeiling,''',
+)
+replace_once(
+    "src/model/providers/atlas-cloud-client.ts",
+    '''    const reportedCost = reportedCostUsd(row);
+    if (''',
+    '''    const usage = parseUsage(record(row.usage));
+    if (
+      input.maxTotalTokens !== undefined
+      && usage.totalTokens !== null
+      && usage.totalTokens > input.maxTotalTokens
+    ) {
+      return this.#failure(
+        model,
+        "context_limit",
+        "atlascloud_reported_total_tokens_exceeded_limit",
+        started,
+        providerRequestId,
+      );
+    }
+    const reportedCost = reportedCostUsd(row);
+    if (''',
+)
+replace_once(
+    "src/model/providers/atlas-cloud-client.ts",
+    '''      usage: parseUsage(record(row.usage)),''',
+    '''      usage,''',
+)
+
+replace_once(
+    "src/model/providers/atlas-hybrid-router.ts",
+    '''  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxCostMicros?: number;''',
+    '''  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxTotalTokens?: number;
+  maxCostMicros?: number;''',
+)
+replace_once(
+    "src/model/providers/atlas-hybrid-router.ts",
+    '''          maxOutputTokens: Math.min(input.maxOutputTokens ?? step.maxOutput, step.maxOutput),
+timeoutMs: attemptTimeout,''',
+    '''          ...(input.maxInputTokens === undefined ? {} : { maxInputTokens: input.maxInputTokens }),
+maxOutputTokens: Math.min(input.maxOutputTokens ?? step.maxOutput, step.maxOutput),
+...(input.maxTotalTokens === undefined ? {} : { maxTotalTokens: input.maxTotalTokens }),
+timeoutMs: attemptTimeout,''',
+)
+replace_once(
+    "src/model/providers/atlas-hybrid-router.ts",
+    '''      const localStarted = this.#now();
+      const remaining = Math.max(1, overall - (this.#now() - started));''',
+    '''      const localStarted = this.#now();
+      const totalCeiling = input.maxTotalTokens;
+      if (totalCeiling !== undefined && totalCeiling < 2) {
+        fallbackReason = "context_limit";
+        continue;
+      }
+      const localInputCeiling = Math.min(
+        input.maxInputTokens ?? 4_096,
+        totalCeiling === undefined ? Number.MAX_SAFE_INTEGER : Math.max(1, totalCeiling - 1),
+      );
+      const localOutputCeiling = Math.min(
+        input.maxOutputTokens ?? step.maxOutput,
+        step.maxOutput,
+        totalCeiling === undefined ? Number.MAX_SAFE_INTEGER : totalCeiling - localInputCeiling,
+      );
+      if (localOutputCeiling <= 0) {
+        fallbackReason = "context_limit";
+        continue;
+      }
