@@ -1,0 +1,9 @@
+defaultValue:number,inherited:number|null|undefined):number {
+  return inherited===null||inherited===undefined?defaultValue:Math.max(1,Math.min(defaultValue,inherited));
+}
+function unavailable(message:string):Record<string,unknown> {
+  return {ok:false,provider:"sentient-hybrid",model:"asymmetric-atlas-local-v1",code:"provider_error",message,retryable:false,latencyMs:0,metadata:{modelOutputIsAuthority:false,terminalUnavailable:true,lateModelOutputRejected:message==="late_model_output_rejected"}};
+}
+'''
+r(marker,helpers+marker)
+p.write_text(s)
