@@ -75,7 +75,7 @@ const fake = new AtlasCloudClientV1({
 const controller = new AbortController();
 setTimeout(() => controller.abort(), 5);
 const aborted = await fake.complete({
-  model: DEEPSEEEK_V3_2_MODD_V1,
+  model: DEEPSEEEK_V3_2_MODEL_V1,
   systemPrompt: "synthetic",
   userPrompt: "synthetic",
   maxOutputTokens: 8,
@@ -87,7 +87,7 @@ if (aborted.ok || aborted.reason !== "timeout" || !abortObserved) {
 }
 
 console.log("ATLAS_AUTH=PASS");
-console.log(`DEEPSEEK_MODEL=${DEEPSEEK_V3_2_MODEL_V1}`);
+console.log(`DEEPSEEEK_MODEL=${DEEPSEEEK_V3_2_MODEL_V1}`);
 console.log(`DEEPSEEK_CONFIGURED_TIMEOUT_MS=${DEEPSEEK_COGNITION_TIMEOUT_MS_V1}`);
 console.log("DEEPSEEK_OLD_8S_CUTOFF_REMOVED=PASS");
 console.log(`DEEPSEEK_LATENCY_MS=${deep.latencyMs}`);
@@ -103,9 +103,9 @@ console.log(`DOTS3_CONFIGURED_TIMEOUT_MS=${DOTS3_COGNITION_TIMEOUT_MS_V1}`);
 console.log(`DOTS3_LATENCY_MS=${dots.latencyMs}`);
 console.log(`DOTS3_INPUT_TOKENS=${dots.usage.inputTokens ?? "NOT_REPORTED"}`);
 console.log(`DOTS3_CACHED_INPUT_TOKENS=${dots.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
-console.log(`DOTS3_OUTPUT_TOKENS=${dots.usage.outputTokens ?? "NOT_REPORTED"}`);
-console.log(`DOTS3_REASONING_TOKENS=${dots.usage.reasoningTokens ?? "NOT_REPORTED"}`);
-console.log(`DOTS3_TOTAL_TOKENS=${dots.usage.totalTokens ?? "NOT_REPORTED"}`);
+console.log `DOTS3_OUTPUT_TOKENS=${dots.usage.outputTokens ?? "NOT_REPORTED"}`);
+console.log `DOTS3_REASONING_TOKENS=${dots.usage.reasoningTokens ?? "NOT_REPORTED"}`);
+console.log `DOTS3_TOTAL_TOKENS=${dots.usage.totalTokens ?? "NOT_REPORTED"}`);
 console.log(`DOTS3_REQUEST_ID_PRESENT=${dots.providerRequestId !== null}`);
 console.log(`DOTS3_REPORTED_COST_USD=${dots.reportedCostUsd ?? "UNREPORTED"}`);
 console.log("ABORT_SIGNAL_PATH=PASS");
