@@ -31,14 +31,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for n in 10 11 12 13 14 15; do
+          for n in 10 11 12 13 14 17; do
             gh api "repos/riggeyb/sentient-fly-runner/issues/$n" --jq '.body' > "/tmp/atlas-patch-$n.py"
           done
       - name: Apply bounded patches
         shell: bash
         run: |
           set -euo pipefail
-          for n in 10 11 12 13 14 15; do
+          for n in 10 11 12 13 14 17; do
             python "/tmp/atlas-patch-$n.py"
           done
           git diff --check
