@@ -51,7 +51,6 @@ jobs:
 
           composition = Path("src/application/production-composition.ts")
           text = composition.read_text()
-
           text, n1 = re.subn(
               r'dots3Role:\s*"presentation_only"',
               'dots3Role: "co_cognition_and_synthesis"',
@@ -79,22 +78,21 @@ jobs:
           old = "ATLAS_HYBRID_ROUTE_MODD_ID_V1"
           if text.count(old) != 1:
               raise SystemExit("adapter_typo_cardinality_failed")
-          adapter.write_text(text.replace(old, "ATLAS_HYBRID_ROUTE_MODEL_ID_V1"))
+          text = text.replace(old, "ATLAS_HYBRID_ROUTE_MODEL_ID_V1")
+          text = "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
+          adapter.write_text(text)
 
           test_file = Path("test/atlas-hybrid-router.test.ts")
           text = test_file.read_text()
           if text.count("DEEPSEEK_V3_2_MODD_V1") != 1:
               raise SystemExit("test_symbol_typo_cardinality_failed")
           text = text.replace("DEEPSEEK_V3_2_MODD_V1", "DEEPSEEK_V3_2_MODEL_V1")
-          if text.count('const DOTS = "rednote-hilab/dots.llm1.inst";') != 1:
+          old_dots = 'const DOTS = "rednote-hilab/dots.llm1.inst";'
+          if text.count(old_dots) != 1:
               raise SystemExit("test_dots_sentinel_cardinality_failed")
-          text = text.replace(
-              'const DOTS = "rednote-hilab/dots.llm1.inst";',
-              'const DOTS = "test/dots3-note-unresolved";',
-          )
+          text = text.replace(old_dots, 'const DOTS = "test/dots3-note-unresolved";')
           test_file.write_text(text)
           PY
-
           git diff --check
           git config user.name "sentient-atlas-engineering"
           git config user.email "sentient-atlas-engineering@users.noreply.github.com"
