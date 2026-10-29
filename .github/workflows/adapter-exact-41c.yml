@@ -1,0 +1,36 @@
+name: Adapter Exact 41c
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Exact patch
+        env:
+          TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/riggeyb/sentient-fly-runner operator
+          git -c http.extraheader="AUTHORIZATION: bearer $TOKEN" clone -q https://github.com/riggeyb/sentient sentient
+          cd sentient
+          git checkout -q sentient-dynamic-cognition-hard-stops-v1-final-20261029
+          test "$(git rev-parse HEAD)" = "41c18a7725b5b2e3621ad342036c3c0dce804c6e"
+          test "$(git show -s --format=%T HEAD)" = "98015386e575a9d49453846dd211dc01d4d0fe57"
+          test "$(git -C ../operator hash-object scripts/dynamic-adapter-final.part0)" = "9cb19832037eb09b3c62f877c88649735575a298"
+          test "$(git -C ../operator hash-object scripts/dynamic-adapter-final.part1)" = "dcddca481f8a206f68518c4cc6e8cc2f4807464c"
+          test "$(git -C ../operator hash-object scripts/dynamic-adapter-final.part2)" = "33c52ab56beffd7022f1e5754e77e1b78ccfd8c5"
+          cat ../operator/scripts/dynamic-adapter-final.part{0,1,2} >/tmp/p.py
+          python /tmp/p.py
+          git diff --check
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build
+          node --test dist/test/atlas-hybrid-router.test.js dist/test/atlas-hybrid-adapters.test.js
+          test "$(git diff --name-only)" = "src/model/providers/atlas-hybrid-adapters.ts"
+          git config user.name sentient-dynamic-cognition-engineering
+          git config user.email sentient-dynamic-cognition-engineering@users.noreply.github.com
+          git add src/model/providers/atlas-hybrid-adapters.ts
+          git commit -m "cognition: propagate hard-stop envelopes through hybrid adapters"
+          git -c http.extraheader="AUTHORIZATION: bearer $TOKEN" push -q origin HEAD:sentient-dynamic-cognition-hard-stops-v1-final-20261029
