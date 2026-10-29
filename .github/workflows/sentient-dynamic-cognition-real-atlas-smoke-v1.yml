@@ -23,6 +23,7 @@ jobs:
         with:
           repository: riggeyb/sentient
           ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           fetch-depth: 1
           path: sentient
 
@@ -49,12 +50,8 @@ jobs:
           set -euo pipefail
           node --input-type=module <<'NODE'
           import { AtlasCloudClientV1 } from "./dist/src/model/providers/atlas-cloud-client.js";
-          import {
-            DEEPSEEK_V3_2_MODEL_V1,
-          } from "./dist/src/model/providers/atlas-hybrid-router.js";
-          import {
-            ATLAS_DOTS3_VERIFIED_MODEL_ID_V1,
-          } from "./dist/src/model/providers/atlas-dots3.js";
+          import { DEEPSEEK_V3_2_MODEL_V1 } from "./dist/src/model/providers/atlas-hybrid-router.js";
+          import { ATLAS_DOTS3_VERIFIED_MODEL_ID_V1 } from "./dist/src/model/providers/atlas-dots3.js";
 
           const apiKey = process.env.ATLASCLOUD_API_KEY;
           if (!apiKey) throw new Error("ATLASCLOUD_API_KEY unavailable");
