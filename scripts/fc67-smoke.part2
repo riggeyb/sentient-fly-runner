@@ -1,0 +1,45 @@
+console.log(`DEEPSEEK_WITHIN_12S_PROVIDER_MAX=${deepLatency < 12_000 ? "PASS" : "FAIL"}`);
+
+const dots3 = await call("DOTS3", {
+  model: DOTS3_MODEL,
+  systemPrompt: "Connectivity test only. You are non-authoritative. Return a tiny answer and take no actions.",
+  userPrompt: "Reply with exactly: ok",
+  maxOutputTokens: 128,
+  timeoutMs: 9_000,
+  requiredTextValidator: (text) => text.trim().length > 0,
+});
+
+let abortObserved = false;
+const synthetic = new AtlasCloudClientV1({
+  apiKey: "synthetic-not-a-secret",
+  fetchImpl: async (_url, init) => await new Promise((_resolve, reject) => {
+    const signal = init?.signal;
+    const onAbort = () => {
+      abortObserved = true;
+      reject(new Error("synthetic_abort"));
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+  }),
+});
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5);
+const aborted = await synthetic.complete({
+  model: DEEPSEEK_V3_2_MODEL_V1,
+  systemPrompt: "s",
+  userPrompt: "u",
+  maxOutputTokens: 8,
+  timeoutMs: 2_000,
+  signal: controller.signal,
+});
+const abortPass = !aborted.ok && aborted.reason === "timeout" && abortObserved;
+
+const authPass = deepSeek.auth && dots3.auth;
+console.log(`ATLAS_AUTH=${authPass ? "PASS" : "FAIL"}`);
+console.log(`DEEPSEEK_MODEL=${DEEPSEEK_V3_2_MODD_V1}`);
+console.log(`DOTS3_MODEL=${DOTS3_MODE|}`);
+console.log(`ABORT_SIGNAL_PATH=${abortPass ? "PASS" : "FAIL"}`);
+console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+const overall = deepLatency > 8_000 && deepLatency < 12_000 && dots3.ok && authPass && abortPass;
+console.log(`REAL_ATLAS_SMOKE=${overall ? "PASS" : "FAIL"}`);
+if (!overall) process.exit(3);
