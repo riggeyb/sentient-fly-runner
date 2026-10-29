@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$START_SHA"
           test -z "$(git status --porcelain)"
-          python3 ../operator/scripts/mvp-root-replay-budget-v1.py
+          python3 ../operator/scripts/mvp-root-replay-budget-v2.py
           cp ../operator/scripts/mvp-root-replay-budget-v1.test.ts test/mvp-root-replay-idempotency.test.ts
 
           expected="$(printf '%s\n' \
