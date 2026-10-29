@@ -1,0 +1,58 @@
+name: Dynamic Cognition Hard Stops Core Patch V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: operator
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 1
+          path: sentient
+      - name: Apply and verify reuse-first hard-stop core
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
+          cat ../operator/scripts/dynamic-core-patch.gz.part0 ../operator/scripts/dynamic-core-patch.gz.part1 > /tmp/dynamic-core-patch.py.gz
+          test "$(sha256sum /tmp/dynamic-core-patch.py.gz | awk '{print $1}')" = "1bc551af8db79b968842cea329b26b81c1d05c2f99949bcea98eab86df386eb0"
+          gzip -dc /tmp/dynamic-core-patch.py.gz > /tmp/dynamic-core-patch.py
+          test "$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')" = "483d376880ee5a37fe69ab32099e615d661ce3edce639a8d09f15be111449e6b"
+          python /tmp/dynamic-core-patch.py
+          git diff --check
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build
+          node --test dist/test/dynamic-hard-stops-core.test.js dist/test/atlas-cloud-client.test.js dist/test/atlas-hybrid-router.test.js dist/test/local-hf-worker-isolation.test.js
+          git config user.name "sentient-dynamic-cognition-engineering"
+          git config user.email "sentient-dynamic-cognition-engineering@users.noreply.github.com"
+          git add src/application/contracts.ts src/application/objective-budget.ts src/phase1/core-runtime.ts src/model/providers/huggingface.ts src/model/providers/atlas-cloud-client.ts src/model/providers/atlas-hybrid-router.ts src/model/providers/atlas-hybrid-adapters.ts src/spawn/orchestrator.ts test/dynamic-hard-stops-core.test.ts test/atlas-hybrid-router.test.ts
+          git commit -m "cognition: reuse existing budgets and signals for hard model stops"
+          git push origin HEAD:refs/heads/dynamic-cognition-hard-stops-v1
