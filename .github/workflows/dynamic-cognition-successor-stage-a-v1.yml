@@ -1,0 +1,73 @@
+name: Dynamic Cognition Successor Stage A V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  stage_a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          fetch-depth: 0
+          path: sentient
+      - name: Guard and apply
+        working-directory: sentient
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          git fetch --no-tags origin d135bf7c391aeca2b31623bb00afa0f34c792571
+          cat ../runner/scripts/dynamic-successor-stage-a.part0 ../runner/scripts/dynamic-successor-stage-a.part1 ../runner/scripts/dynamic-successor-stage-a.part2 > /tmp/stage-a.py
+          python -m py_compile /tmp/stage-a.py
+          python /tmp/stage-a.py
+          git diff --check
+      - name: Build and focused tests
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/dynamic-provider-timeout-v1.test.js dist/test/governor-convergence-v1.test.js dist/test/atlas-hybrid-router.test.js
+      - name: Commit
+        working-directory: sentient
+        env:
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Sentient Engineering"
+          git config user.email "sentient-engineering@users.noreply.github.com"
+          git add src/model/providers/atlas-hybrid-router.ts src/deployment-governor/convergence.ts src/deployment-governor/deployment.ts src/deployment-governor/policy.ts test/governor-convergence-v1.test.ts test/dynamic-provider-timeout-v1.test.ts
+          test -n "$(git status --porcelain)"
+          git commit -m "runtime: stage-aware model stops and Governor convergence fence"
+          git push origin "HEAD:${SOURCE_BRANCH}"
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git rev-parse HEAD^{tree})"
+          echo "DEPLOYMENT_PERFORMED=false"
