@@ -1,0 +1,71 @@
+src/model/providers/atlas-hybrid-router.ts",
+'''  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxCostMicros?: number | null;''',
+'''  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxTotalTokens?: number;
+  maxCostMicros?: number;''')
+replace_once("src/model/providers/atlas-hybrid-router.ts",
+'''          maxOutputTokens: Math.min(input.maxOutputTokens ?? step.maxOutput, step.maxOutput),
+          timeoutMs: attemptMs,''',
+'''          ...(input.maxInputTokens === undefined ? {} : { maxInputTokens: input.maxInputTokens }),
+          maxOutputTokens: Math.min(input.maxOutputTokens ?? step.maxOutput, step.maxOutput),
+          ...(input.maxTotalTokens === undefined ? {} : { maxTotalTokens: input.maxTotalTokens }),
+          timeoutMs: attemptMs,''')
+replace_once("src/model/providers/atlas-hybrid-router.ts",
+'''      const localStarted = Date.now();
+      try {
+        const completion = await this.#local.complete({
+          systemPrompt: localPrompt(defaultStage, input.systemPrompt),
+          userPrompt: input.userPrompt,
+          maxInputTokens: input.maxInputTokens ?? 4_096,
+          maxOutputTokens: Math.min(input.maxOutputTokens ?? step.maxOutput, step.maxOutput),
+          signal: attemptSignal,
+        });''',
+'''      const localStarted = Date.now();
+      try {
+        const requestedOutput = Math.min(input.maxOutputTokens ?? step.maxOutput, step.maxOutput);
+        const totalCeiling = input.maxTotalTokens;
+        if (totalCeiling !== undefined && totalCeiling < 2) {
+          fallbackReason = "context_limit";
+          continue;
+        }
+        const localOutputCeiling = totalCeiling === undefined
+          ? requestedOutput
+          : Math.min(requestedOutput, Math.max(1, totalCeiling - 1));
+        const localInputCeiling = totalCeiling === undefined
+          ? (input.maxInputTokens ?? 4_096)
+          : Math.min(input.maxInputTokens ?? 4_096, Math.max(1, totalCeiling - localOutputCeiling));
+        const completion = await this.#local.complete({
+          systemPrompt: localPrompt(defaultStage, input.systemPrompt),
+          userPrompt: input.userPrompt,
+          maxInputTokens: localInputCeiling,
+          maxOutputTokens: localOutputCeiling,
+          signal: attemptSignal,
+        });''')
+
+replace_once("src/model/providers/atlas-hybrid-adapters.ts",
+'''  public async run(requirements: TaskRequirementsV1, invocation?: ModelInvocationEnvelopeV1): Promise<unknown> {
+    if (invocation && !modelInvocationLiveV1(invocation)) return unavailable("invocation_dead_before_dispatch");
+    const controls = invocationControls(invocation);''',
+'''  public async run(requirements: TaskRequirementsV1, invocation?: ModelInvocationEnvelopeV1): Promise<unknown> {
+    if (invocation && !modelInvocationLiveV1(invocation)) return unavailable("invocation_dead_before_dispatch");
+    if (
+      invocation
+      && (invocation.maxInputTokens === 0 || invocation.maxOutputTokens === 0 || invocation.maxTotalTokens === 0)
+    ) return unavailable("token_budget_exhausted");
+    const controls = invocationControls(invocation);''')
+replace_once("src/model/providers/atlas-hybrid-adapters.ts",
+'''  public async classify<L extends string>(input: {
+    component: CognitiveComponentV1;
+    text: string;
+    allowedLabels: readonly L[];
+  }): Promise<HfPredictionV1<L>> {''',
+'''  public async classify<L extends string>(input: {
+    component: CognitiveComponentV1;
+    text: string;
+    allowedLabels: readonly L[];
+    invocation?: ModelInvocationEnvelopeV1;
+  }): Promise<HfPredictionV1<L>> {''')
+repla
