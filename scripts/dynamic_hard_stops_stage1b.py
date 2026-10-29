@@ -20,20 +20,19 @@ phase1.write_text(text.replace("MODEL_RESULT_", "MODEL_RESULT"))
 replace_once(
     "src/application/contracts.ts",
     'import type { SpawnExecutionBackendV1 } from "../spawn/execution-contracts.js";',
-    'import type { SpawnExecutionBackendV1 } from "../spawn/execution-contracts.js";
-'
-    'import type { SpawnBudgetsV1 } from "../spawn/request-contracts.js";',
+    '''import type { SpawnExecutionBackendV1 } from "../spawn/execution-contracts.js";
+import type { SpawnBudgetsV1 } from "../spawn/request-contracts.js";''',
 )
 replace_once(
     "src/application/contracts.ts",
-    """export interface SentientObjectiveInput {
+    '''export interface SentientObjectiveInput {
   request: string;
   objectiveId: string;
   sessionId: string;
   mode: ObjectiveMode;
   privacy: "public_fixture" | "private";
-}""",
-    """export interface SentientObjectiveInput {
+}''',
+    '''export interface SentientObjectiveInput {
   request: string;
   objectiveId: string;
   sessionId: string;
@@ -41,16 +40,16 @@ replace_once(
   privacy: "public_fixture" | "private";
   budget?: SpawnBudgetsV1;
   absoluteDeadline?: string;
-}""",
+}''',
 )
 replace_once(
     "src/application/contracts.ts",
-    """export function validateObjectiveInput(input: SentientObjectiveInput): void {
+    '''export function validateObjectiveInput(input: SentientObjectiveInput): void {
   required(input.request, "request");
   required(input.objectiveId, "objectiveId");
   required(input.sessionId, "sessionId");
-}""",
-    """export function validateObjectiveInput(input: SentientObjectiveInput): void {
+}''',
+    '''export function validateObjectiveInput(input: SentientObjectiveInput): void {
   required(input.request, "request");
   required(input.objectiveId, "objectiveId");
   required(input.sessionId, "sessionId");
@@ -69,22 +68,22 @@ export function validateObjectiveBudgetV1(budget: SpawnBudgetsV1): void {
     }
   }
   if (budget.maxRuntimeMs <= 0) throw new Error("objective_budget_maxRuntimeMs_must_be_positive");
-}""",
+}''',
 )
 
 replace_once(
     "src/model/providers/atlas-hybrid-adapters.ts",
     'import type { JsonObject, JsonValue } from "../types.js";',
-    """import type { JsonObject, JsonValue } from "../types.js";
+    '''import type { JsonObject, JsonValue } from "../types.js";
 import {
   modelInvocationIsLiveV1,
   modelInvocationRemainingMsV1,
   type ModelInvocationEnvelopeV1,
-} from "../model-invocation-envelope.js";""",
+} from "../model-invocation-envelope.js";''',
 )
 replace_once(
     "src/model/providers/atlas-hybrid-adapters.ts",
-    """  public async run(requirements: TaskRequirementsV1): Promise<unknown> {
+    '''  public async run(requirements: TaskRequirementsV1): Promise<unknown> {
     const result = this.#stage === "synthesis"
       ? await this.#router.synthesis({
           systemPrompt: "Synthesize only from supplied accepted and verified context. Never invent effects or authority.",
@@ -97,8 +96,8 @@ replace_once(
           userPrompt: requirements.normalizedUserRequest,
           maxInputTokens: 4_096,
           maxOutputTokens: 384,
-        });""",
-    """  public async run(
+        });''',
+    '''  public async run(
     requirements: TaskRequirementsV1,
     invocation?: ModelInvocationEnvelopeV1 | undefined,
   ): Promise<unknown> {
@@ -114,10 +113,9 @@ replace_once(
         metadata: {
           modelOutputIsAuthority: false,
           terminalUnavailable: true,
-        },
-      };
+        };
     }
-    const remainingMs = invocation === undefine
+    const remainingMs = invocation === undefined
       ? undefined
       : Math.max(1, modelInvocationRemainingMsV1(invocation));
     const common = invocation === undefined
@@ -141,7 +139,7 @@ replace_once(
           maxInputTokens: Math.min(invocation?.maxInputTokens ?? 4_096, 4_096),
           maxOutputTokens: Math.min(invocation?.maxOutputTokens ?? 384, 384),
           ...common,
-        });""",
+        });''',
 )
 
 print("stage1b applied")
