@@ -1,0 +1,142 @@
+eason : null,
+      providerRequestId,
+      reportedCostUsd: reportedCost,
+    };''')
+
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''export const ATLAS_CLOUD_ATTEMPT_TIMEOUT_MS_V1 = 8_000 as const;
+export const LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1 = 10_000 as const;''',
+'''export const ATLAS_CLOUD_ATTEMPT_TIMEOUT_MS_V1 = 15_000 as const;
+export const LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1 = 15_000 as const;
+export const HYBRID_ATTEMPT_SAFETY_MARGIN_MS_V1 = 250 as const;''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''export interface HybridCompletionSuccessV1 {
+  ok: true;
+  provider: HybridProviderV1;
+  model: string;
+  text: string;
+  outputSha256: `sha256:${string}`;
+  telemetry: readonly HybridModelTelemetryV1[];
+}''',
+'''export interface HybridCompletionSuccessV1 {
+  ok: true;
+  provider: HybridProviderV1;
+  model: string;
+  text: string;
+  structuredOutput: unknown | null;
+  outputSha256: `sha256:${string}`;
+  telemetry: readonly HybridModelTelemetryV1[];
+}''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''  readonly #telemetrySink: HybridTelemetrySinkV1 | null;
+
+  public constructor(input: {
+    atlasClient?: AtlasCloudClientV1 | null;
+    dots3Model?: string | null;
+    localRuntime: LocalHuggingFaceRuntimeV1;
+    telemetrySink?: HybridTelemetrySinkV1 | null;
+  }) {''',
+'''  readonly #telemetrySink: HybridTelemetrySinkV1 | null;
+  readonly #now: () => number;
+
+  public constructor(input: {
+    atlasClient?: AtlasCloudClientV1 | null;
+    dots3Model?: string | null;
+    localRuntime: LocalHuggingFaceRuntimeV1;
+    telemetrySink?: HybridTelemetrySinkV1 | null;
+    now?: () => number;
+  }) {''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''    this.#local = input.localRuntime;
+    this.#telemetrySink = input.telemetrySink ?? null;''',
+'''    this.#local = input.localRuntime;
+    this.#telemetrySink = input.telemetrySink ?? null;
+    this.#now = input.now ?? Date.now;''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''    const overall = input.timeoutMs ?? ATLAS_HYBRID_OVERALL_TIMEOUT_MS_V1;
+    if (!Number.isFinite(overall) || overall <= 0 || overall > ATLAS_HYBRID_OVERALL_TIMEOUT_MS_V1) {
+      throw new Error("atlas_hybrid_timeout_outside_root_contract");
+    }
+    const started = Date.now();''',
+'''    const overall = input.timeoutMs ?? ATLAS_HYBRID_OVERALL_TIMEOUT_MS_V1;
+    if (!Number.isFinite(overall) || overall <= 0 || overall > 2_147_483_647) {
+      throw new Error("atlas_hybrid_timeout_invalid");
+    }
+    const started = this.#now();''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''      if (Date.now() - started >= overall) break;
+      const attemptNumber = index + 1;''',
+'''      const remainingBeforeAttempt = overall - (this.#now() - started);
+      if (input.signal?.aborted || remainingBeforeAttempt <= HYBRID_ATTEMPT_SAFETY_MARGIN_MS_V1) break;
+      const attemptNumber = index + 1;''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''        const remaining = Math.max(1, overall - (Date.now() - started));
+        const result = await this.#atlas.complete({''',
+'''        const remaining = Math.max(1, overall - (this.#now() - started));
+        const attemptTimeout = Math.max(
+          1,
+          Math.min(ATLAS_CLOUD_ATTEMPT_TIMEOUT_MS_V1, remaining - HYBRID_ATTEMPT_SAFETY_MARGIN_MS_V1),
+        );
+        const result = await this.#atlas.complete({''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''          timeoutMs: Math.min(ATLAS_CLOUD_ATTEMPT_TIMEOUT_MS_V1, remaining),''',
+'''          timeoutMs: attemptTimeout,''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''        });
+        if (result.ok) {''',
+'''        });
+        if (input.signal?.aborted || this.#now() - started >= overall) {
+          const telemetry = failedAtlasTelemetry(
+            step.model,
+            stage,
+            attemptNumber,
+            "timeout",
+            result.latencyMs,
+            fallbackReason,
+            result.providerRequestId,
+          );
+          attempts.push(telemetry);
+          this.#emit(telemetry);
+          fallbackReason = "timeout";
+          continue;
+        }
+        if (result.ok) {''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''              model: result.model,
+              text,
+              outputSha256: sha256Text(text),''',
+'''              model: result.model,
+              text,
+              structuredOutput: result.structuredOutput,
+              outputSha256: sha256Text(text),''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''      const localStarted = Date.now();
+      const remaining = Math.max(1, overall - (Date.now() - started));
+      const timeout = Math.min(LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1, remaining);''',
+'''      const localStarted = this.#now();
+      const remaining = Math.max(1, overall - (this.#now() - started));
+      const timeout = Math.max(
+        1,
+        Math.min(LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1, remaining - HYBRID_ATTEMPT_SAFETY_MARGIN_MS_V1),
+      );''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''        const text = completion.text.trim();
+        const valid = text.length > 0''',
+'''        if (signal.aborted || this.#now() - started >= overall) {
+          throw new Error("local_hf_generation_cancelled");
+        }
+        const text = completion.text.trim();
+        const valid = text.length > 0''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''            model: LOCAL_HF_MODEL_V1,
+            text,
+            outputSha256: completion.outputSha256,''',
+'''            model: LOCAL_HF_MODEL_V1,
+            text,
+            structuredOutput: null,
+            outputSha256: completion.outputSha256,''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''          latencyMs: Date.now() - localStarted,''',
+'''          latencyMs: this.#now() - localStarted,''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''    'Return only one JSON object of the form {"answer":"cand
