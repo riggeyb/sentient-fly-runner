@@ -91,4 +91,4 @@ jobs:
           echo "DOTS3_COST_WINDOW_AFTER_USD=$after_dots"
           echo "ACTUAL_DOTS3_SMOKE_COST_USD=$dots_delta"
           echo "COST_DELTA_CAPTURED=PASS"
-          echo "ATLASCLOUD_SECRET_EXPOSED=false
+          echo "ATLASCLOUD_SECRET_EXPOSED=false"
