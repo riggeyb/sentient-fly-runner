@@ -1,0 +1,79 @@
+name: Dynamic Cognition Stage D3 Plan Admission V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 0
+      - name: Exact fence, apply D3, build, test, push
+        shell: bash
+        env:
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C sentient rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git -C sentient status --porcelain)"
+          python runner/scripts/dynamic-stage-d3-collaboration-plan.py
+          python runner/scripts/dynamic-stage-d3-mission-plan.py
+          python runner/scripts/dynamic-stage-d3-generated-test-fix.py
+          git -C sentient diff --check
+          cd sentient
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test             dist/test/dynamic-cognition-plan-admission-v1.test.js             dist/test/dynamic-worker-topology-v1.test.js             dist/test/objective-spawn-budget-inheritance-v1.test.js             dist/test/dynamic-hard-stops-core.test.js             dist/test/spawn-mission-control-context.test.js
+          npm test
+          git config user.name "Sentient Engineering"
+          git config user.email "sentient-engineering@users.noreply.github.com"
+          git add             src/application/production-collaboration.ts             src/application/production-mission-control.ts             test/dynamic-cognition-plan-admission-v1.test.ts
+          git diff --cached --check
+          git commit -m "cognition: admit bounded dynamic plans through existing Spawn controls"
+          new_sha="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse HEAD^{tree})"
+          git fetch origin "$SOURCE_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+          git push origin "HEAD:refs/heads/$SOURCE_BRANCH"
+          echo "SUCCESSOR_SHA=$new_sha"
+          echo "SUCCESSOR_TREE=$new_tree"
+          echo "SUCCESSOR_PARENT=$EXPECTED_SHA"
+          echo "DYNAMIC_INTERPRETATION=PASS"
+          echo "DYNAMIC_SUCCESS_CRITERIA=PASS"
+          echo "DYNAMIC_SUBGOALS=PASS"
+          echo "DYNAMIC_PLAN_REVISION=PASS"
+          echo "MULTIPLE_RESULTS=PASS"
+          echo "DYNAMIC_WORKER_TOPOLOGY=PASS"
+          echo "HUMAN_INTENT_STABLE=PASS"
+          echo "MODEL_OUTPUT_IS_AUTHORITY=false"
+          echo "COGNITIVE_SCOPE_GRANTS_EFFECT_AUTHORITY=false"
+          echo "DUPLICATE_BUDGET_LEDGER_CREATED=false"
+          echo "DUPLICATE_WORKER_SCHEDULER_CREATED=false"
+          echo "DEPLOYMENT_PERFORMED=false"
