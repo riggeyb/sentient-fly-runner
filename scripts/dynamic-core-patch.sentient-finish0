@@ -1,0 +1,152 @@
+ies: [...request.targetPolicy.requiredCapabilities],
+    policyDecision: structuredClone(decision), selectedTarget: structuredClone(target),
+    selectionEvidenceRefs: [...target.routingEvidenceRefs], skillSetDigest: taskPackage.skillSetDigest,
+    contextDigest: taskPackage.contextDigest, toolGrantDigest: await sha256Json(decision.effectiveGrant.tools),
+    scopeGrantDigest: await sha256Json(decision.effectiveGrant.scopes),
+    reservedBudgets: structuredClone(decision.reservation), observedUsage: structuredClone(result.usage),
+    latencyMs: result.latencyMs, costMicros: result.costMicros, resultSummary: `child execution ${result.terminalStatus}`,
+    failureClass: result.failure?.class ?? null, verification, repairExecutionIds: [], escalationExecutionIds: [],
+    finalOutcome: verification?.outcome ?? null, createdAt: endedAt,
+  };
+  assertNoForbiddenSpawnMaterialV1(episode, "spawn episode");
+  await dependencies.repository.appendSpawnEpisode(episode);
+  return { status: "completed", policyDecision: decision, selectedTarget: target, taskPackage, result, verification, episode };
+}
+
+async function awaitSpawnBackendWithinReservationV1(
+  pending: Promise<BackendExecutionResultV1>,
+  signal: AbortSignal,
+): Promise<BackendExecutionResultV1> {
+  if (signal.aborted) return runtimeTimeoutFailureV1();
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: BackendExecutionResultV1) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    const onAbort = () => finish(runtimeTimeoutFailureV1());
+    signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (value) => finish(signal.aborted ? runtimeTimeoutFailureV1() : value),
+      (error) => finish(signal.aborted ? runtimeTimeoutFailureV1() : spawnBackendFailureV1(error)),
+    );
+  });
+}
+
+function runtimeTimeoutFailureV1(): BackendExecutionResultV1 {
+  return {
+    status: "timed_out",
+    output: null,
+    usage: {},
+    failure: {
+      class: "runtime_budget_exhausted",
+      message: "spawn runtime reservation exhausted",
+      retryable: false,
+    },
+  };
+}
+''')
+
+write("src/application/dynamic-cognition.ts", r'''export const DYNAMIC_COGNITION_STATE_V1 = "sentient-dynamic-cognition-state/v1" as const;
+
+export interface DynamicCognitionResultV1 {
+  id: string;
+  content: unknown;
+  evidenceRefs: readonly string[];
+}
+export interface DynamicWorkerRequestV1 {
+  role: string;
+  objective: string;
+  rationale: string;
+}
+export interface DynamicCognitionStateV1 {
+  contractVersion: typeof DYNAMIC_COGNITION_STATE_V1;
+  humanIntent: string;
+  interpretationVersions: readonly string[];
+  successCriteria: readonly string[];
+  subgoals: readonly string[];
+  planVersions: readonly (readonly string[])[];
+  workerRequests: readonly DynamicWorkerRequestV1[];
+  results: readonly DynamicCognitionResultV1[];
+  unresolvedQuestions: readonly string[];
+}
+
+export function createDynamicCognitionStateV1(humanIntent: string): DynamicCognitionStateV1 {
+  const intent = required(humanIntent, "humanIntent");
+  return Object.freeze({
+    contractVersion: DYNAMIC_COGNITION_STATE_V1,
+    humanIntent: intent,
+    interpretationVersions: Object.freeze([]),
+    successCriteria: Object.freeze([]),
+    subgoals: Object.freeze([]),
+    planVersions: Object.freeze([]),
+    workerRequests: Object.freeze([]),
+    results: Object.freeze([]),
+    unresolvedQuestions: Object.freeze([]),
+  });
+}
+
+export function reviseDynamicCognitionV1(
+  state: DynamicCognitionStateV1,
+  patch: {
+    interpretation?: string;
+    successCriteria?: readonly string[];
+    subgoals?: readonly string[];
+    plan?: readonly string[];
+    workerRequests?: readonly DynamicWorkerRequestV1[];
+    results?: readonly DynamicCognitionResultV1[];
+    unresolvedQuestions?: readonly string[];
+  },
+): DynamicCognitionStateV1 {
+  if (state.contractVersion !== DYNAMIC_COGNITION_STATE_V1) throw new Error("dynamic_cognition_contract_invalid");
+  return Object.freeze({
+    ...state,
+    humanIntent: state.humanIntent,
+    interpretationVersions: Object.freeze([
+      ...state.interpretationVersions,
+      ...(patch.interpretation === undefined ? [] : [required(patch.interpretation, "interpretation")]),
+    ]),
+    successCriteria: patch.successCriteria === undefined
+      ? state.successCriteria
+      : Object.freeze(unique(patch.successCriteria)),
+    subgoals: patch.subgoals === undefined ? state.subgoals : Object.freeze(unique(patch.subgoals)),
+    planVersions: Object.freeze([
+      ...state.planVersions,
+      ...(patch.plan === undefined ? [] : [Object.freeze(unique(patch.plan))]),
+    ]),
+    workerRequests: patch.workerRequests === undefined
+      ? state.workerRequests
+      : Object.freeze(patch.workerRequests.map((item) => Object.freeze({
+          role: required(item.role, "worker.role"),
+          objective: required(item.objective, "worker.objective"),
+          rationale: required(item.rationale, "worker.rationale"),
+        }))),
+    results: Object.freeze([
+      ...state.results,
+      ...(patch.results ?? []).map((item) => Object.freeze({
+        id: required(item.id, "result.id"),
+        content: structuredClone(item.content),
+        evidenceRefs: Object.freeze(unique(item.evidenceRefs)),
+      })),
+    ]),
+    unresolvedQuestions: patch.unresolvedQuestions === undefined
+      ? state.unresolvedQuestions
+      : Object.freeze(unique(patch.unresolvedQuestions)),
+  });
+}
+
+export function cognitiveScopeDoesNotGrantEffectAuthorityV1(): true {
+  return true;
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => required(value, "value")))];
+}
+function required(value: string, name: string): string {
+  const out = value.trim();
+  if (!out) throw new Error($dynamic_cognition_${name}_required`);
+  return out;
+}
+''')
