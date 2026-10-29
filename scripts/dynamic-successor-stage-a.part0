@@ -1,0 +1,70 @@
+from pathlib import Path
+import subprocess
+
+REF = "d135bf7c391aeca2b31623bb00afa0f34c792571"
+
+def read(path: str) -> str:
+    return Path(path).read_text()
+
+def write(path: str, text: str) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+
+def one(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one match, got {count}")
+    return text.replace(old, new, 1)
+
+for path in [
+    "src/deployment-governor/convergence.ts",
+    "src/deployment-governor/deployment.ts",
+    "src/deployment-governor/policy.ts",
+    "test/governor-convergence-v1.test.ts",
+]:
+    content = subprocess.check_output(["git", "show", f"{REF}:{path}"], text=True)
+    write(path, content)
+
+p = "src/model/providers/atlas-hybrid-router.ts"
+s = read(p)
+s = one(
+    s,
+    '''export const ATLAS_CLOUD_ATTEMPT_TIMEOUT_MS_V1 = 15_000 as const;
+export const LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1 = 15_000 as const;''',
+    '''export const DEEPSEEK_COGNITION_TIMEOUT_MS_V1 = 12_000 as const;
+export const DOTS3_COGNITION_TIMEOUT_MS_V1 = 9_000 as const;
+export const DOTS3_SYNTHESIS_TIMEOUT_MS_V1 = 10_000 as const;
+export const DEEPSEEK_SYNTHESIS_FALLBACK_TIMEOUT_MS_V1 = 11_000 as const;
+export const LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1 = 6_000 as const;''',
+    "timeout constants",
+)
+s = one(
+    s,
+    '''        { kind: "atlas" as const, model: DEEPSEEK_V3_2_MODEL_V1, maxOutput: DEEPSEEK_COGNITION_MAX_OUTPUT_TOKENS_V1 },
+        { kind: "atlas" as const, model: this.#dots3Model, maxOutput: DOTS3_COGNITION_MAX_OUTPUT_TOKENS_V1 },
+        { kind: "local" as const, model: LOCAL_HF_MODEL_V1, maxOutput: input.maxOutputTokens ?? 1_024 },''',
+    '''        { kind: "atlas" as const, model: DEEPSEEK_V3_2_MODEL_V1, maxOutput: DEEPSEEK_COGNITION_MAX_OUTPUT_TOKENS_V1, timeoutMs: DEEPSEEK_COGNITION_TIMEOUT_MS_V1 },
+        { kind: "atlas" as const, model: this.#dots3Model, maxOutput: DOTS3_COGNITION_MAX_OUTPUT_TOKENS_V1, timeoutMs: DOTS3_COGNITION_TIMEOUT_MS_V1 },
+        { kind: "local" as const, model: LOCAL_HF_MODEL_V1, maxOutput: input.maxOutputTokens ?? 1_024, timeoutMs: LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1 },''',
+    "cognition plan",
+)
+s = one(
+    s,
+    '''        { kind: "atlas" as const, model: this.#dots3Model, maxOutput: DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS_V1 },
+        {
+          kind: "atlas" as const,
+          model: DEEPSEEK_V3_2_MODEL_V1,
+          maxOutput: DEEPSEEK_SYNTHESIS_FALLBACK_MAX_OUTPUT_TOKENS_V1,
+          telemetryStage: "synthesis_fallback" as const,
+        },
+        { kind: "local" as const, model: LOCAL_HF_MODEL_V1, maxOutput: input.maxOutputTokens ?? 1_024 },''',
+    '''        { kind: "atlas" as const, model: this.#dots3Model, maxOutput: DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS_V1, timeoutMs: DOTS3_SYNTHESIS_TIMEOUT_MS_V1 },
+        {
+          kind: "atlas" as const,
+          model: DEEPSEEK_V3_2_MODEL_V1,
+          maxOutput: DEEPSEEK_SYNTHESIS_FALLBACK_MAX_OUTPUT_TOKENS_V1,
+          timeoutMs: DEEPSEEK_SYNTHESIS_FALLBACK_TIMEOUT_MS_V1,
+          telemetryStage: "synthesis_fallback" as const,
+        },
+        { kind: "local" 
