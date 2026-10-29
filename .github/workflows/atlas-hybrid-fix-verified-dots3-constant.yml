@@ -1,0 +1,47 @@
+name: Atlas Hybrid Fix Verified Dots3 Constant
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: d69e18e18d7a71c89e3293121e2f8dc88780b573
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Exact deterministic correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "d69e18e18d7a71c89e3293121e2f8dc88780b573"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("src/fly/production-runtime.ts")
+          s = p.read_text()
+          old = "ATLAS_DOTS3_VERIFIEED_MODEL_ID_V1"
+          new = "ATLAS_DOTS3_VERIFIED_MODEL_ID_V1"
+          if s.count(old) != 1:
+              raise SystemExit(f"expected one typo anchor, found {s.count(old)}")
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git diff --check
+          grep -q 'ATLASCLOUD_DOTS3_MODEL) ?? ATLAS_DOTS3_VERIFIED_MODEL_ID_V1' src/fly/production-runtime.ts
+          ! grep -q 'VERIFIEED' src/fly/production-runtime.ts
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+          git config user.name "sentient-atlas-engineering"
+          git config user.email "sentient-atlas-engineering@users.noreply.github.com"
+          git add src/fly/production-runtime.ts
+          git diff --cached --check
+          git commit -m "fix: correct verified Dots3 model constant"
+          git push origin HEAD:atlas-hybrid-cognition-mvp-v1-fc67-repair
