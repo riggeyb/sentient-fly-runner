@@ -1,0 +1,81 @@
+: "local", inputTokens: 3, outputTokens: 2, totalTokens: 5 };
+  }
+}
+
+function fixture(
+  atlasSteps: AtlasStep[],
+  localLatencyMs = 1_000,
+  localFail = false,
+) {
+  let now = 0;
+  const advance = (ms: number) => { now += ms; };
+  const atlas = new VirtualAtlas(advance, [...atlasSteps]);
+  const local = new VirtualLocal(advance, localLatencyMs, localFail);
+  const router = new AtlasHybridModelRouterV1({
+    atlasClient: atlas as unknown as AtlasCloudClientV1,
+    dots3Model: DOTS,
+    localRuntime: new LocalHuggingFaceRuntimeV1({ runner: local }),
+    now: () => now,
+  });
+  return { router, atlas, local, now: () => now };
+}
+
+test("stage maxima are asymmetric and DeepSeek 9.4s succeeds without fallback", async () => {
+  assert.equal(DEEPSEEK_COGNITION_TIMEOUT_MS_V1, 12_000);
+  assert.equal(DOTS3_COGNITION_TIMEOUT_MS_V1, 9_000);
+  assert.equal(DOTS3_SYNTHESIS_TIMEOUT_MS_V1, 10_000);
+  assert.equal(DEEPSEEK_SYNTHESIS_FALLBACK_TIMEOUT_MS_V1, 11_000);
+  assert.equal(LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1, 6_000);
+
+  const x = fixture([{ latencyMs: 9_400, text: '{"answer":"deep-success"}' }]);
+  const result = await x.router.cognition({ systemPrompt: "s", userPrompt: "u", timeoutMs: 28_000 });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.model, DEEPSEEK_V3_2_MODEL_V1);
+    assert.equal(result.text, "deep-success");
+    assert.equal(result.telemetry.length, 1);
+  }
+  assert.equal(x.atlas.calls.length, 1);
+  assert.equal(x.local.calls, 0);
+  assert.equal(x.atlas.calls[0]?.timeoutMs, 12_000);
+});
+
+test("DeepSeek beyond its hard stop falls through to Dots3 within remaining budget", async () => {
+  const x = fixture([
+    { latencyMs: 12_001, text: '{"answer":"late-deep"}' },
+    { latencyMs: 8_500, text: '{"answer":"dots-success"}' },
+  ]);
+  const result = await x.router.cognition({ systemPrompt: "s", userPrompt: "u", timeoutMs: 28_000 });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.model, DOTS);
+    assert.equal(result.text, "dots-success");
+    assert.equal(result.telemetry[0]?.fallbackReason, "timeout");
+  }
+  assert.equal(x.atlas.calls.length, 2);
+  assert.equal(x.local.calls, 0);
+  assert.ok(x.now() < 28_000);
+});
+
+test("two Atlas overruns leave one bounded local attempt; all failure paths terminate", async () => {
+  const local = fixture([
+    { latencyMs: 12_001, text: '{"answer":"late-deep"}' },
+    { latencyMs: 9_001, text: '{"answer":"late-dots"}' },
+  ], 1_000);
+  const localResult = await local.router.cognition({ systemPrompt: "s", userPrompt: "u", timeoutMs: 28_000 });
+  assert.equal(localResult.ok && localResult.provider === "huggingface-local", true);
+  assert.equal(local.local.calls, 1);
+  assert.ok(local.now() < 28_000);
+
+  const terminal = fixture([
+    { latencyMs: 12_001, text: '{"answer":"late-deep"}' },
+    { latencyMs: 9_001, text: '{"answer":"late-dots"}' },
+  ], 5_500, true);
+  const terminalResult = await terminal.router.cognition({ systemPrompt: "s", userPrompt: "u", timeoutMs: 28_000 });
+  assert.equal(terminalResult.ok, false);
+  assert.equal(terminal.local.calls, 1);
+  assert.ok(terminal.now() < 28_000);
+});
+''')
+
+print("stage-a patch prepared")
