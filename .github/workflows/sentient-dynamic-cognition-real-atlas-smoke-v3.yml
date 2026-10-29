@@ -47,7 +47,7 @@ jobs:
 
       - name: Real Atlas threshold, Dots3, and abort smoke
         env:
-          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLLOUD_API_KEY }}
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
         run: node scripts/dynamic-real-atlas-smoke-v2.mjs
 
       - name: Final clean-source fence
