@@ -1,0 +1,54 @@
+
+Path("test/governor-convergence-fence.test.ts").write_text(r'''import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import { machineConvergenceEvidenceV1 } from "../src/deployment-governor/fly-exec.js";
+import {
+  SENTIENT_DEPLOYMENT_APP,
+  type SentientCandidateDeploymentInput,
+} from "../src/deployment-governor/policy.js";
+
+const candidate: SentientCandidateDeploymentInput = {
+  sha: "a".repeat(40),
+  tree: "b".repeat(40),
+  skillsSha: "c".repeat(40),
+};
+
+test("machine convergence requires running candidate image and concrete machine version", () => {
+  const expected = `registry.fly.io/${SENTIENT_DEPLOYMENT_APP}:phase0-${candidate.sha}@sha256:${"d".repeat(64)}`;
+  const matched = machineConvergenceEvidenceV1({
+    id: "machine-1",
+    state: "started",
+    version: 42,
+    config: { image: expected },
+  }, candidate);
+  assert.equal(matched.ok, true);
+  assert.equal(matched.version, "42");
+  assert.equal(matched.imageRef, expected);
+
+  assert.equal(machineConvergenceEvidenceV1({
+    state: "started",
+    version: 43,
+    config: { image: `registry.fly.io/${SENTIENT_DEPLOYMENT_APP}:phase0-${"e".repeat(40)}` },
+  }, candidate).ok, false);
+
+  assert.equal(machineConvergenceEvidenceV1({
+    state: "starting",
+    version: 44,
+    config: { image: expected },
+  }, candidate).ok, false);
+
+  assert.equal(machineConvergenceEvidenceV1({
+    state: "started",
+    config: { image: expected },
+  }, candidate).ok, false);
+});
+
+test("application readiness clock starts only after machine convergence fence", async () => {
+  const source = await readFile("src/deployment-governor/deployment.ts", "utf8");
+  const convergenceIndex = source.indexOf("await fly.waitCandidateMachineConvergence(candidate)");
+  const readinessIndex = source.indexOf("await fly.waitReady(candidate)");
+  assert.ok(convergenceIndex >= 0);
+  assert.ok(readinessIndex > convergenceIndex);
+});
+''')
