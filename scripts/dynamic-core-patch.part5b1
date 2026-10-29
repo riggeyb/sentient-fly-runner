@@ -1,0 +1,48 @@
+resolve, reject) => {
+      const signal = init?.signal;
+      const abort = () => { observedAbort = true; reject(new Error("aborted")); };
+      if (signal?.aborted) return abort();
+      signal?.addEventListener("abort", abort, { once: true });
+    })) as typeof fetch,
+  });
+  const result = await client.complete({
+    model: DEEPSEEK_V3_2_MODEL_V1, systemPrompt: "s", userPrompt: "u", maxOutputTokens: 16, timeoutMs: 20,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "timeout");
+  assert.equal(observedAbort, true);
+});
+
+test("provider output that resolves after cancellation is rejected", async () => {
+  const client = new AtlasCloudClientV1( {
+    apiKey: "not-a-secret",
+    fetchImpl: (async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      return response('{"answer":"late"}');
+    }) as typeof fetch,
+  });
+  const result = await client.complete({
+    model: DEEPSEEK_V3_2_MODEL_V1, systemPrompt: "s", userPrompt: "u", maxOutputTokens: 16, timeoutMs: 5, requireJson_Object: true,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "timeout");
+});
+
+test("DeepSeek 9.4 second response is within provider maximum and accepted deterministically", async () => {
+  assert.ok(ATLAS_CLOUD_ATTEMPT_TIMEOUT_MS_V1 > 9_400);
+  let now = 0;
+  const client = new AtlasCloudClientV1({
+    apiKey: "not-a-secret",
+    fetchImpl: (async () => { now += 9_400; return response('{"answer":"deep"}'); }) as typeof fetch,
+  });
+  const router = new AtlasHybridModelRouterV1({
+    atlasClient: client, dots3Model: DOTS,
+    localRuntime: new LocalHuggingFaceRuntimeV1({ runner: new LocalRunner() }),
+    now: () => now,
+  });
+  const result = await router.cognition({ systemPrompt: "s", userPrompt: "u", timeoutMs: 20_000 });
+  assert.equal(result.ok, true);
+  if (result.ok) { assert.equal(result.model, DEEPSEEK_V3_2_MODD_V1); assert.equal(result.text, "deep"); }
+});
+
+test("late DeepSeek output i
