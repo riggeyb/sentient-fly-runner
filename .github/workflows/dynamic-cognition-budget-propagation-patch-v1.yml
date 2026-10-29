@@ -1,0 +1,83 @@
+name: Dynamic Cognition Budget Propagation Patch V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Exact engineering branch
+        required: true
+        type: string
+      expected_sha:
+        description: Exact branch head before mutation
+        required: true
+        type: string
+      expected_tree:
+        description: Exact tree before mutation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted runner
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout exact Sentient engineering branch
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+          path: sentient
+
+      - name: Fence exact source and assemble bounded patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/dynamic-budget-propagation-patch.py.part00               scripts/dynamic-budget-propagation-patch.py.part01               scripts/dynamic-budget-propagation-patch.py.part02               scripts/dynamic-budget-propagation-patch.py.part03               > /tmp/dynamic-budget-propagation-patch.py
+          cd sentient
+          test "$(git rev-parse HEAD)" = "${{ inputs.expected_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.expected_tree }}"
+          test -z "$(git status --porcelain)"
+          python3 /tmp/dynamic-budget-propagation-patch.py
+          git diff --check
+          git status --short
+
+      - name: Build and focused hard-stop tests
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+          node --test             dist/test/dynamic-hard-stops-core.test.js             dist/test/dynamic-objective-budget-runtime.test.js             dist/test/atlas-hybrid-router.test.js
+
+      - name: Commit and concurrency-safe push
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-dynamic-cognition-engineering"
+          git config user.email "sentient-dynamic-cognition-engineering@users.noreply.github.com"
+          git add             src/phase1/core-runtime.ts             src/model/providers/atlas-cloud-client.ts             src/model/providers/atlas-hybrid-router.ts             src/model/providers/atlas-hybrid-adapters.ts             src/fly/server-runtime.ts             src/fly/self-execution.ts             src/application/production-composition.ts             test/dynamic-objective-budget-runtime.test.ts
+          git diff --cached --check
+          git commit -m "cognition: propagate external objective budgets to model hard stops"
+          new_sha="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse HEAD^{tree})"
+          git fetch origin "${{ inputs.branch }}"
+          remote_sha="$(git rev-parse FETCH_HEAD)"
+          test "$remote_sha" = "${{ inputs.expected_sha }}"
+          git push origin "HEAD:refs/heads/${{ inputs.branch }}"
+          echo "SUCCESSOR_SHA=$new_sha"
+          echo "SUCCESSOR_TREE=$new_tree"
+          echo "TRACKED_SOURCE_MUTATION=false"
