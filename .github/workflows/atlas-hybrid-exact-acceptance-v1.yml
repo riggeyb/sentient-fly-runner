@@ -49,6 +49,7 @@ jobs:
         with:
           node-version: 22
       - name: Exact acceptance
+        shell: bash
         run: |
           set +e
           failed=0
@@ -67,7 +68,7 @@ jobs:
           if [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] \
             && [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] \
             && [ "$(git rev-parse HEAD)" = "$EXPECTED_SHA" ] \
-            && [ "$(git rev-pars`'HEAD^{tree}')" = "$EXPECTED_TREE" ]; then
+            && [ "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" ]; then
             echo "SOURCE_CHECKOUT=PASS"
           else
             echo "SOURCE_CHECKOUT=FAIL"; exit 2
