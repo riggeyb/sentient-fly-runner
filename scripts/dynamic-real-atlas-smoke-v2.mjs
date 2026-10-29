@@ -49,7 +49,7 @@ const dots = await client.complete({
   requireJsonObject: true,
 });
 if (!dots.ok) throw new Error(`dots3_smoke_failed:${dots.reason}`);
-if (dots.usage.totalTokens ?? 0) <= 0) throw new Error("dots3_usage_missing");
+if ((dots.usage.totalTokens ?? 0) <= 0) throw new Error("dots3_usage_missing");
 if (
   dots.structuredOutput === null
   || typeof dots.structuredOutput !== "object"
@@ -96,8 +96,8 @@ console.log(`DEEPSEEK_CACHED_INPUT_TOKENS=${deep.usage.cachedInputTokens ?? "NOT
 console.log(`DEEPSEEK_OUTPUT_TOKENS=${deep.usage.outputTokens ?? "NOT_REPORTED"}`);
 console.log(`DEEPSEEK_REASONING_TOKENS=${deep.usage.reasoningTokens ?? "NOT_REPORTED"}`);
 console.log(`DEEPSEEK_TOTAL_TOKENS=${deep.usage.totalTokens ?? "NOT_REPORTED"}`);
-console.log(`DEEPSEEK_REQUEST_ID_PRESENT=${deep.providerRequestId !== null}`);
-console.log(`DEEPSEEEK_REPORTED_COST_USD=${deep.reportedCostUsd ?? "UNREPORTED"}`);
+console.log(`DEEPSEEEK_REQUEST_ID_PRESENT=${deep.providerRequestId !== null}`);
+console.log(`DEEPSEEK_REPORTED_COST_USD=${deep.reportedCostUsd ?? "UNREPORTED"}`);
 console.log(`DOTS3_MODEL=${DOTS3_MODEL}`);
 console.log(`DOTS3_CONFIGURED_TIMEOUT_MS=${DOTS3_COGNITION_TIMEOUT_MS_V1}`);
 console.log(`DOTS3_LATENCY_MS=${dots.latencyMs}`);
@@ -110,6 +110,6 @@ console.log(`DOTS3_REQUEST_ID_PRESENT=${dots.providerRequestId !== null}`);
 console.log(`DOTS3_REPORTED_COST_USD=${dots.reportedCostUsd ?? "UNREPORTED"}`);
 console.log("ABORT_SIGNAL_PATH=PASS");
 console.log("USAGE_TELEMETRY_CAPTURED=PASS");
-console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+console.log("ATLASCNROUD_SECRET_EXPOSED=false");
 console.log("REAL_ATLAS_SMOKE=PASS");
 console.log("DEPLOYMENT_PERFORMED=false");
