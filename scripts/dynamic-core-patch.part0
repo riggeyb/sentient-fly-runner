@@ -1,0 +1,162 @@
+
+from pathlib import Path
+
+def write(path, text):
+    Path(path).write_text(text)
+
+def replace(path, old, new, count=1):
+    p=Path(path)
+    s=p.read_text()
+    actual=s.count(old)
+    if actual != count:
+        raise SystemExit(f"{path}: expected {count} occurrences, found {actual}: {old[:100]!r}")
+    p.write_text(s.replace(old,new,count))
+
+replace("src/application/contracts.ts",
+'''import type { Phase1AcceptancePolicyV1, Phase1CognitionPort } from "../phase1/core-runtime.js";''',
+'''import type { BudgetEnvelope } from "sentient-orchestrator/worker-protocol";
+import type { Phase1AcceptancePolicyV1, Phase1CognitionPort } from "../phase1/core-runtime.js";''')
+replace("src/application/contracts.ts",
+'''export interface SentientObjectiveInput {
+  request: string;
+  objectiveId: string;
+  sessionId: string;
+  mode: ObjectiveMode;
+  privacy: "public_fixture" | "private";
+}''',
+'''export interface SentientObjectiveInput {
+  request: string;
+  objectiveId: string;
+  sessionId: string;
+  mode: ObjectiveMode;
+  privacy: "public_fixture" | "private";
+  /** External ceiling using the existing worker-protocol budget vocabulary. */
+  budget?: Readonly<BudgetEnvelope>;
+  /** Optional externally supplied absolute ISO-8601 deadline. */
+  deadline?: string;
+}''')
+
+write("src/application/objective-budget.ts", r'''import type { BudgetEnvelope } from "sentient-orchestrator/worker-protocol";
+import type { SentientObjectiveInput } from "./contracts.js";
+
+export const DEFAULT_OBJECTIVE_DURATION_MS_V1 = 30_000 as const;
+export const MAX_ABORT_TIMEOUT_MS_V1 = 2_147_483_647 as const;
+
+export interface ObjectiveExecutionEnvelopeV1 {
+  objectiveId: string;
+  absoluteDeadlineMs: number;
+  maxTokens: number | null;
+  maxCostMicros: number | null;
+}
+
+export function normalizeBudgetEnvelopeV1(value: unknown): Readonly<BudgetEnvelope> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("objective_budget_must_be_object");
+  const row = value as Record<string, unknown>;
+  const budget: BudgetEnvelope = {};
+  if (row.maxTokens !== undefined) {
+    if (!Number.isSafeInteger(row.maxTokens) || Number(row.maxTokens) <= 0) throw new Error("objective_max_tokens_invalid");
+    budget.maxTokens = Number(row.maxTokens);
+  }
+  if (row.maxCostUsd !== undefined) {
+    if (typeof row.maxCostUsd !== "number" || !Number.isFinite(row.maxCostUsd) || row.maxCostUsd < 0) {
+      throw new Error("objective_max_cost_usd_invalid");
+    }
+    budget.maxCostUsd = row.maxCostUsd;
+  }
+  if (row.maxDurationSeconds !== undefined) {
+    if (typeof row.maxDurationSeconds !== "number" || !Number.isFinite(row.maxDurationSeconds) || row.maxDurationSeconds <= 0) {
+      throw new Error("objective_max_duration_seconds_invalid");
+    }
+    budget.maxDurationSeconds = row.maxDurationSeconds;
+  }
+  for (const key of Object.keys(row)) {
+    if (!["maxTokens", "maxCostUsd", "maxDurationSeconds"].includes(key)) {
+      throw new Error(`objective_budget_field_unsupported:${key}`);
+    }
+  }
+  return Object.freeze(budget);
+}
+
+export function objectiveExecutionEnvelopeV1(
+  input: Pick<SentientObjectiveInput, "objectiveId" | "budget" | "deadline">,
+  startedMs = Date.now(),
+): ObjectiveExecutionEnvelopeV1 {
+  if (!Number.isFinite(startedMs)) throw new Error("objective_started_time_invalid");
+  const budget = normalizeBudgetEnvelopeV1(input.budget);
+  const durationDeadline = budget?.maxDurationSeconds === undefined
+    ? null
+    : startedMs + Math.floor(budget.maxDurationSeconds * 1_000);
+  const explicitDeadline = input.deadline === undefined
+    ? null
+    : parseAbsoluteDeadlineV1(input.deadline);
+  const absoluteDeadlineMs =
+    durationDeadline !== null && explicitDeadline !== null
+      ? Math.min(durationDeadline, explicitDeadline)
+      : durationDeadline ?? explicitDeadline ?? (startedMs + DEFAULT_OBJECTIVE_DURATION_MS_V1);
+  if (absoluteDeadlineMs <= startedMs) throw new Error("objective_deadline_elapsed");
+  const maxCostMicros = budget?.maxCostUsd === undefined
+    ? null
+    : Math.floor(budget.maxCostUsd * 1_000_000);
+  return Object.freeze({
+    objectiveId: input.objectiveId,
+    absoluteDeadlineMs,
+    maxTokens: budget?.maxTokens ?? null,
+    maxCostMicros,
+  });
+}
+
+export function remainingObjectiveMsV1(
+  envelope: Pick<ObjectiveExecutionEnvelopeV1, "absoluteDeadlineMs">,
+  nowMs = Date.now(),
+): number {
+  return Math.max(0, Math.floor(envelope.absoluteDeadlineMs - nowMs));
+}
+
+export function objectiveAbortSignalV1(
+  envelope: Pick<ObjectiveExecutionEnvelopeV1, "absoluteDeadlineMs">,
+  nowMs = Date.now(),
+): AbortSignal {
+  const remaining = remainingObjectiveMsV1(envelope, nowMs);
+  return AbortSignal.timeout(Math.max(1, Math.min(MAX_ABORT_TIMEOUT_MS_V1, remaining)));
+}
+
+export function parseAbsoluteDeadlineV1(value: string): number {
+  const normalized = value.trim();
+  if (!normalized) throw new Error("objective_deadline_invalid");
+  const parsed = Date.parse(normalized);
+  if (!Number.isFinite(parsed)) throw new Error("objective_deadline_invalid");
+  return parsed;
+}
+''')
+
+replace("src/phase1/core-runtime.ts",
+'''export interface Phase1CognitionPort {
+  run(requirements: TaskRequirementsV1): Promise<ModelResult | unknown>;
+}''',
+'''export interface Phase1InvocationControlV1 {
+  objectiveId: string;
+  executionId: string;
+  parentExecutionId?: string;
+  workerId?: string;
+  absoluteDeadlineMs: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxCostMicros?: number;
+  signal: AbortSignal;
+}
+
+export interface Phase1CognitionPort {
+  run(
+    requirements: TaskRequirementsV1,
+    control?: Phase1InvocationControlV1,
+  ): Promise<ModelResult | unknown>;
+}''')
+replace("src/phase1/core-runtime.ts",
+'''  options: {
+    cognition?: Phase1CognitionPort | undefined;
+    acceptancePolicy?: Phase1AcceptancePolicyV1 | undefined;
+  } = {},''',
+'''  options: {
+    cognition?: Phase1CognitionPort | undefined;
+    acceptancePolicy?: Phase1Acc
