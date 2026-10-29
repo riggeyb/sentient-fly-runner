@@ -1,0 +1,68 @@
+name: Atlas Hybrid Deployment Ready Patch
+
+"on":
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: fc67a71248eb0ad355b0fb6043d93b2acfff4840
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Patch and prove
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "fc67a71248eb0ad355b0fb6043d93b2acfff4840"
+          test "$(git rev-parse 'HEAD^{tree}')" = "ec1bf1cf79de9cc4c5eed9498215cdc62030a7d6"
+          python - <<'PY'
+          from pathlib import Path
+          def one(path, old, new):
+              p=Path(path); s=p.read_text()
+              if s.count(old) != 1: raise SystemExit(f"anchor failure: {path}")
+              p.write_text(s.replace(old,new,1))
+          r="src/model/providers/atlas-hybrid-router.ts"
+          one(r,
+              'export const DEEPSEEK_V3_2_MODEL_V1 = "deepseek-ai/deepseek-v3.2" as const;\n',
+              'export const DEEPSEEK_V3_2_MODEL_V1 = "deepseek-ai/deepseek-v3.2" as const;\nexport const DOTS3_NOTE_ATLAS_MODEL_V1 = "dots-studio/dots-3-note-prev-free" as const;\n')
+          f="src/fly/production-runtime.ts"
+          one(f,
+              'import { AtlasHybridModelRouterV1, type HybridModelTelemetryV1 } from "../model/providers/atlas-hybrid-router.js";',
+              'import { AtlasHybridModelRouterV1, DOTS3_NOTE_ATLAS_MODEL_V1, type HybridModelTelemetryV1 } from "../model/providers/atlas-hybrid-router.js";')
+          one(f,
+              '  const atlasApiKey = optional(process.env.ATLASCLOUD_API_KEY);\n  const dots3Model = optional(process.env.ATLASCLOUD_DOTS3_MODEL);\n  const atlasClient = atlasApiKey !== null && dots3Model !== null ? new AtlasCloudClientV1({ apiKey: atlasApiKey }) : null;\n',
+              '  const atlasApiKey = optional(process.env.ATLASCLOUD_API_KEY);\n  const dots3Model = resolveAtlasDots3ModelV1(process.env.ATLASCLOUD_DOTS3_MODEL);\n  const atlasClient = atlasApiKey !== null ? new AtlasCloudClientV1({ apiKey: atlasApiKey }) : null;\n')
+          one(f,
+              'function optional(value: unknown): string | null {\n',
+              'export function resolveAtlasDots3ModelV1(value: unknown): string {\n  return optional(value) ?? DOTS3_NOTE_ATLAS_MODEL_V1;\n}\n\nfunction optional(value: unknown): string | null {\n')
+          t="test/atlas-hybrid-production-wiring.test.ts"
+          one(t,
+              'import { AtlasHybridModelRouterV1 } from "../src/model/providers/atlas-hybrid-router.js";',
+              'import { AtlasHybridModelRouterV1, DOTS3_NOTE_ATLAS_MODEL_V1 } from "../src/model/providers/atlas-hybrid-router.js";')
+          one(t,
+              'import { runRootSynthesisV1 } from "../src/application/production-mission-control.js";',
+              'import { runRootSynthesisV1 } from "../src/application/production-mission-control.js";\nimport { resolveAtlasDots3ModelV1 } from "../src/fly/production-runtime.js";')
+          p=Path(t)
+          p.write_text(p.read_text()+'\n\ntest("production Atlas activation defaults Dots3 and preserves override",()=>{\n  assert.equal(resolveAtlasDots3ModelV1(undefined),DOTS3_NOTE_ATLAS_MODEL_V1);\n  assert.equal(resolveAtlasDots3ModelV1("  dots-studio/future-note  "),"dots-studio/future-note");\n});\n')
+          PY
+          git diff --check
+          npm ci --no-audit --no-fund
+          npm run build
+          npm run test:atlas
+          npm test
+
+          git config user.name "sentient-atlas-engineering"
+          git config user.email sentient-atlas-engineering@users.noreply.github.com
+          git add src/model/providers/atlas-hybrid-router.ts src/fly/production-runtime.ts test/atlas-hybrid-production-wiring.test.ts
+          git diff --cached --check
+          git commit -m "atlas: default Dots3 to provider-resolved model"
+          git push origin HEAD:atlas-hybrid-cognition-mvp-v1-deployment-ready-20261029
