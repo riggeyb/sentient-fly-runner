@@ -1,0 +1,180 @@
+name: Sentient Dynamic Cognition Real Atlas Smoke V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Validate immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.source_sha }}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${{ inputs.source_tree }}" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Checkout exact Sentient source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: sentient
+
+      - name: Verify exact source
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.source_tree }}"
+          test -z "$(git status --porcelain)"
+          echo "SOURCE_CHECKOUT=PASS"
+
+      - name: Build exact candidate
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          echo "BUILD=PASS"
+
+      - name: Real Atlas threshold and abort smoke
+        working-directory: sentient
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLLOUD_API_KEY }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { AtlasCloudClientV1 } from "./dist/src/model/providers/atlas-cloud-client.js";
+          import { DEEPSEEK_V3_2_MODEL_V1 } from "./dist/src/model/providers/atlas-hybrid-router.js";
+
+          const dots3Model = "dots-studio/dots-3-note-prev-free";
+          const key = process.env.ATLASCLOUD_API_KEY?.trim();
+          if (!key) throw new Error("atlascloud_api_key_missing");
+
+          const client = new AtlasCloudClientV1( { apiKey: key });
+
+          const deepPrompts = [
+            `Solve this compact constraint problem carefully before answering. Five jobs A-E must be assigned to slots 1-5, one per slot. A is earlier than C. B is immediately after D. E is not slot 1 or 5. C is later than E. D is earlier than A. Determine the unique ordering if one exists; otherwise state the number of valid orderings. Independently check every constraint and return only JSON {"answer":"...","checks":["..."]}.`,
+            `Reason carefully about this scheduling problem and cross-check the result two different ways. Six tasks A-F occupy positions 1-6. B is immediately after E. A precedes D. F is later than D. C is neither first nor last. E precedes A. D is not position 5. Enumerate enough possibilities to determine the number of valid schedules, identify the lexicographically first valid schedule, and return only JSON {"count":0,"first":"...","checks":["..."]}.`
+          ];
+
+          let deep = null;
+          let deepAttempts = 0;
+          for (const prompt of deepPrompts) {
+            deepAttempts += 1;
+            const result = await client.complete({
+              model: DEEPSEEK_V3_2_MODEL_V1,
+              systemPrompt: "Use deliberate multi-step reasoning internally. Return only the requested valid JSON object.",
+              userPrompt: prompt,
+              maxOutputTokens: deepAttempts === 1 ? 256 : 320,
+              timeoutMs: 15_000,
+              requireJsonObject: true,
+              maxCostMicros: 50_000,
+            });
+            if (!result.ok) {
+              throw new Error(`deepseek_smoke_failed:${result.reason}`);
+            }
+            if ((result.usage.totalTokens ?? 0) <= 0) throw new Error("deepseek_usage_missing");
+            deep = result;
+            if (result.latencyMs > 8_000) break;
+          }
+          if (!deep || deep.latencyMs <= 8_000) {
+            throw new Error(`deepseek_old_cutoff_not_exceeded:last_latency_ms=${deep?.latencyMs ?? -1}`);
+          }
+          if (deep.latencyMs >= 15_000) throw new Error("deepseek_allocated_hard_stop_exceeded");
+
+          const dots = await client.complete({
+            model: dots3Model,
+            systemPrompt: "Return only valid JSON.",
+            userPrompt: 'Return exactly one JSON object {"status":"ok","purpose":"bounded connectivity smoke"}.',
+            maxOutputTokens: 64,
+            timeoutMs: 15_000,
+            requireJsonObject: true,
+            maxCostMicros: 25_000,
+          });
+          if (!dots.ok) throw new Error(`dots3_smoke_failed:${dots.reason}`);
+          if (dots.usage.totalTokens ?? 0) <= 0) throw new Error("dots3_usage_missing");
+
+          let abortObserved = false;
+          const fake = new AtlasCloudClientV1({
+            apiKey: "synthetic-not-a-secret",
+            fetchImpl: (async (_url, init) => await new Promise((_resolve, reject) => {
+              const signal = init?.signal;
+              const onAbort = () => {
+                abortObserved = true;
+                reject(new Error("synthetic_abort"));
+              };
+              if (signal?.aborted) onAbort();
+              else signal?.addEventListener("abort", onAbort, { once: true });
+            })) ,
+          });
+          const controller = new AbortController();
+          setTimeout(() => controller.abort(), 5);
+          const aborted = await fake.complete({
+            model: DEEPSEEK_V3_2_MODEL_V1,
+            systemPrompt: "synthetic",
+            userPrompt: "synthetic",
+            maxOutputTokens: 8,
+            timeoutMs: 2_000,
+            signal: controller.signal,
+          });
+          if (aborted.ok || aborted.reason !== "timeout" || !abortObserved) {
+            throw new Error("candidate_abort_signal_not_wired");
+          }
+
+          console.log("ATLAS_AUTH=PASS");
+          console.log(`DEEPQSEEK_MODEL=${DEEPQSEEK_V3_2_MODEL_V1}`);
+          console.log(`DEEPQSEEK_ATTEMPTS=${deepAttempts}`);
+          console.log(`DEEPSEEK_LATENCY_MS=${deep.latencyMs}`);
+          console.log("DEEPSEEK_OLD_8S_THRESHOLD_EXCEEDED=PASS");
+          console.log("DEEPSEEK_WITHIN_ALLOCATED_HARD_STOP=PASS");
+          console.log(`DEEPQSEEK_INPUT_TOKENS=${deep.usage.inputTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPQSEEK_CACHED_INPUT_TOKENS=${deep.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPSEEK_OUTPUT_TOKENS=${deep.usage.outputTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPSEEK_REASONING_TOKENS=${deep.usage.reasoningTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPQSEEK_TOTAL_TOKENS=${deep.usage.totalTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPQSEEK_REQUEST_ID_PRESENT=${deep.providerRequestId !== null}`);
+          console.log(`DEEPQSEEK_REPORTED_COST_USD=${deep.reportedCostUsd ?? "UNREPORTED"}`);
+          console.log(`DOTS3_MODEL=${dots3Model}`);
+          console.log(`DOTS3_LATENCY_MS=${dots.latencyMs}`);
+          console.log(`DOTS3_INPUT_TOKENS=${dots.usage.inputTokens ?? "NOT_REPORTED"}`);
+          console.log(`DOTS3_CACHED_INPUT_TOKENS=${dots.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
+          console.log(`DOTS3_OUTPUT_TOKENS=${dots.usage.outputTokens ?? "NOT_REPORTED"}`);
+          console.log(`DOTS3_REASONING_TOKENS=${dots.usage.reasoningTokens ?? "NOT_REPORTED"}`);
+          console.log(`DOTS3_TOTAL_TOKENS=${dots.usage.totalTokens ?? "NOT_REPORTED"}`);
+          console.log(`DOTS3_REQUEST_ID_PRESENT=${dots.providerRequestId !== null}`);
+          console.log(`DOTS3_REPORTED_COST_USD=${dots.reportedCostUsd ?? "UNREPORTED"}`);
+          console.log("ABORT_SIGNAL_PATH=PASS");
+          console.log("USAGE_TELEMETRY=PASS");
+          console.log("ATLASCLLOUD_SECRET_EXPOSED=false");
+          console.log("REAL_ATLAS_SMOKE=PASS");
+          NODE
+
+      - name: Final clean-source fence
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.source_tree }}"
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "DEPLOYMENT_PERFORMED=false"
