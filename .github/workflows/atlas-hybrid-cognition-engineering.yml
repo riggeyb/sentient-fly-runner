@@ -1,0 +1,59 @@
+name: Atlas Hybrid Cognition Engineering Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact riggeyb/sentient commit SHA
+        required: true
+        type: string
+      source_tree:
+        description: Exact riggeyb/sentient tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  exact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate immutable identity inputs
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Exact source, build, and test
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
+          echo "SOURCE_CHECKOUT=PASS"
+          npm ci --no-audit --no-fund
+          npm run build
+          echo "BUILD=PASS"
+          npm test
+          echo "NPM_TEST=PASS"
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TRACKED_SOURCE_MUTATION=false"
