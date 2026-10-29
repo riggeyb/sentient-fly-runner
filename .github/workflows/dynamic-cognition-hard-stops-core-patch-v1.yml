@@ -58,4 +58,4 @@ jobs:
           git config user.email "sentient-dynamic-cognition-engineering@users.noreply.github.com"
           git add src/application/contracts.ts src/application/objective-budget.ts src/phase1/core-runtime.ts src/model/providers/huggingface.ts src/model/providers/atlas-cloud-client.ts src/model/providers/atlas-hybrid-router.ts src/model/providers/atlas-hybrid-adapters.ts src/spawn/orchestrator.ts test/dynamic-hard-stops-core.test.ts test/atlas-hybrid-router.test.ts
           git commit -m "cognition: reuse existing budgets and signals for hard model stops"
-          git push origin HEAD:refs/heads/dynamic-cognition-hard-stops-v1
+          git push origin HEAD:refs/heads/dynamic-cognition-hard-stops-v1-final
