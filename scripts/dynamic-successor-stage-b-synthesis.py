@@ -38,7 +38,7 @@ one(
       Date.now(),
       resultRef,
     );''',
-'''    const synthesisBudgetMs = remainingObjectiveMsV1(objectiveEnvelope);'',
+'''    const synthesisBudgetMs = remainingObjectiveMsV1(objectiveEnvelope);''',
 "remaining budget")
 
 start=s.index("    const turn = await bounded(")
