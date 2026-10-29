@@ -46,7 +46,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - uses: actions/setup-node@„
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
@@ -104,7 +104,7 @@ jobs:
             echo "MISSION_CONTROL_SPAWN_COMPILED=FAIL"
             failed=1
           fi
-          if [ -f tests/spawn-mission-control-control-context.test.ts ]; then
+          if [ -f tests/spawn-mission-control-context.test.ts ]; then
             runx MISSION_CONTROL_SPAWN_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
           else
             echo "MISSION_CONTROL_SPAWN_DIRECT=FAIL"
