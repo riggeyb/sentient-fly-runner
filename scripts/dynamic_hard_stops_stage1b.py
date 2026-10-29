@@ -137,7 +137,7 @@ replace_once(
       : await this.#router.cognition({
           systemPrompt: "Analyze intent, decompose tasks, plan, and propose a bounded candidate answer.",
           userPrompt: requirements.normalizedUserRequest,
-          maxInputTokens: Math.min(invocation/.maxInputTokens ?? 4_096, 4_096),
+          maxInputTokens: Math.min(invocation?.maxInputTokens ?? 4_096, 4_096),
           maxOutputTokens: Math.min(invocation?.maxOutputTokens ?? 384, 384),
           ...common,
         });''',
