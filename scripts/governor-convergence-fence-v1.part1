@@ -1,0 +1,81 @@
+): FlyMachineConvergenceEvidence {
+  const root = record(value);
+  const nested = record(root.machine);
+  const machine = Object.keys(nested).length > 0 ? nested : root;
+  const config = record(machine.config);
+  const state = text(machine.state ?? machine.State);
+  const rawVersion = machine.version ?? machine.Version ?? machine.current_version ?? machine.currentVersion;
+  const version = typeof rawVersion === "number" || typeof rawVersion === "string" ? String(rawVersion).trim() || null : null;
+  const imageRef = imageReference(machine.image_ref ?? machine.imageRef ?? config.image ?? machine.image);
+  const expected = `registry.fly.io/${SENTIENT_DEPLOYMENT_APP}:phase0-${candidate.sha}`;
+  const imageMatches = imageRef === expected || imageRef?.startsWith(`${expected}@sha256:`) === true;
+  const running = state === "started" || state === "running";
+  return {
+    ok: running && version !== null && imageMatches,
+    reason: !running ? `candidate_machine_not_running:${state ?? "unknown"}`
+      : version === null ? "candidate_machine_version_unavailable"
+      : !imageMatches ? `candidate_machine_image_mismatch:${imageRef ?? "unknown"}` : null,
+    machineId: text(machine.id ?? machine.ID),
+    state,
+    version,
+    imageRef,
+  };
+}
+
+export function probeMatches(''')
+
+rpl(p,
+'''function runFlyctl(args: readonly string[], cwd: string, timeout: number, token: string, secrets: readonly string[]): Promise<Result> {''',
+'''function imageReference(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  const row = record(value);
+  const direct = text(row.ref ?? row.reference ?? row.image);
+  if (direct) return direct;
+  const repository = text(row.repository ?? row.repo);
+  const registry = text(row.registry);
+  const tag = text(row.tag);
+  const digest = text(row.digest);
+  if (!repository) return null;
+  const base = registry && !repository.startsWith(`${registry}/`) ? `${registry}/${repository}` : repository;
+  const tagged = tag ? `${base}:${tag}` : base;
+  return digest ? `${tagged}@${digest.startsWith("sha256:") ? digest : `sha256:${digest}`}` : tagged;
+}
+
+function runFlyctl(args: readonly string[], cwd: string, timeout: number, token: string, secrets: readonly string[]): Promise<Result> {''')
+
+p="src/deployment-governor/deployment.ts"
+rpl(p,
+'''        const post = await resources.inspect();
+        const observed = withResourceEnvelope(
+          await fly.observe(candidate, await fly.waitReady(candidate)),
+          post,
+        );''',
+'''        const converged = await fly.waitCandidateMachineConvergence(candidate);
+        if (!converged.ok) {
+          const post = await resources.inspect();
+          const observed = withResourceEnvelope(
+            await fly.observe(candidate, {
+              statusCode: null,
+              body: null,
+              error: `machine_convergence_failed:${converged.reason ?? "unknown"}`,
+            }),
+            post,
+          );
+          await lease.complete(post.ok ? "MACHINE_CONVERGENCE_FAILED" : "RESOURCE_ENVELOPE_VIOLATION");
+          return evidence(
+            candidate,
+            observed,
+            "FAILED",
+            `machine_convergence_failed:${converged.reason ?? "unknown"}`,
+            deployed.log,
+            lease.attemptNumber,
+            lease,
+            post,
+          );
+        }
+
+        const post = await resources.inspect();
+        const observed = withResourceEnvelope(
+          await fly.observe(candidate, await fly.waitReady(candidate)),
+          post,
+        );''')
