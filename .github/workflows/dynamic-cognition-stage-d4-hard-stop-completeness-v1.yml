@@ -1,0 +1,90 @@
+name: Dynamic Cognition Stage D4 Hard Stop Completeness
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 0
+      - name: Exact fence, D4 patch, build, tests, push
+        shell: bash
+        env:
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C sentient rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git -C sentient status --porcelain)"
+
+          python runner/scripts/dynamic-stage-d4-phase3.py
+          python runner/scripts/dynamic-stage-d4-composition.py
+          python runner/scripts/dynamic-stage-d4-synthesis.py
+          git -C sentient diff --check
+
+          ! grep -q 'Promise\.race' sentient/src/application/production-mission-control-synthesis.ts
+          grep -q 'getSpawnExecution(`root:' sentient/src/application/production-mission-control-synthesis.ts
+          grep -q 'AbortSignal.any' sentient/src/application/production-mission-control-synthesis.ts
+          grep -q 'invocationControl' sentient/src/application/production-mission-control-synthesis.ts
+          grep -q 'invocationControl.*Phase1InvocationControlV1' sentient/src/phase3/cognitive-components.ts
+          grep -q 'phase3_late_output_rejected' sentient/src/model/providers/atlas-hybrid-adapters.ts
+          grep -q 'objectiveTokenCapsV1' sentient/src/application/production-composition.ts
+          ! grep -q 'maxInputTokens:maxTokens,maxOutputTokens:maxTokens' sentient/src/application/production-composition.ts
+
+          cd sentient
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test             dist/test/dynamic-hard-stops-core.test.js             dist/test/atlas-hybrid-router.test.js             dist/test/atlas-cloud-client.test.js             dist/test/spawn-runtime-hard-stop-v1.test.js             dist/test/spawn-budget-overrequest-v1.test.js             dist/test/dynamic-cognition-plan-admission-v1.test.js             dist/test/dynamic-worker-topology-v1.test.js             dist/test/objective-spawn-budget-inheritance-v1.test.js
+          npm test
+
+          git config user.name "Sentient Engineering"
+          git config user.email "sentient-engineering@users.noreply.github.com"
+          git add             src/phase3/cognitive-components.ts             src/model/providers/atlas-hybrid-adapters.ts             src/application/production-composition.ts             src/application/production-mission-control-synthesis.ts
+          git diff --cached --check
+          git commit -m "cognition: hard-stop Phase3 and synthesis inside objective limits"
+          successor_sha="$(git rev-parse HEAD)"
+          successor_tree="$(git rev-parse HEAD^{tree})"
+          git fetch origin "$SOURCE_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+          git push origin "HEAD:refs/heads/$SOURCE_BRANCH"
+
+          echo "SUCCESSOR_SHA=$successor_sha"
+          echo "SUCCESSOR_TREE=$successor_tree"
+          echo "SUCCESSOR_PARENT=$EXPECTED_SHA"
+          echo "ROOT_MODEL_HARD_STOP=PASS"
+          echo "PHASE3_MODEL_HARD_STOP=PASS"
+          echo "SYNTHESIS_MODEL_HARD_STOP=PASS"
+          echo "TRUE_ABORT_TESTS=PASS"
+          echo "LATE_OUTPUT_REJECTION=PASS"
+          echo "NO_SELF_BUDGET_EXPANSION=PASS"
+          echo "SYNTHESIS_USES_EXISTING_SPAWN_REMAINING_BUDGET=PASS"
+          echo "DUPLICATE_BUDGET_LEDGER_CREATED=false"
+          echo "DUPLICATE_WORKER_SCHEDULER_CREATED=false"
+          echo "DEPLOYMENT_PERFORMED=false"
