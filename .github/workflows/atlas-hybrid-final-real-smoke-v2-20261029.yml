@@ -42,13 +42,13 @@ jobs:
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse 'HED^{tree}')" = "$EXPECTED_TREE"
           echo "SOURCE_CHECKOUT=PASS"
           npm ci --no-audit --no-fund >/dev/null
           npm run build >/dev/null
           echo "BUILD=PASS"
 
-      - name: Real Atlas smoke at production cognition envelope
+      - name: Real Atlas smoke at exact production stage budgets
         shell: bash
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
@@ -59,12 +59,24 @@ jobs:
             AtlasCloudClientV1,
             resolveAtlasDots3NoteModelV1,
           } from "./dist/src/model/providers/atlas-cloud-client.js";
+          import {
+            DEEPSEEK_COGNITION_TIMEOUT_MS_V1,
+            DOTS3_SYNTHESIS_TIMEOUT_MS_V1,
+          } from "./dist/src/model/providers/atlas-hybrid-router.js";
 
           const key = String(process.env.ATLASCLOUD_API_KEY ?? "").trim();
           if (!key) {
             console.log("ATLAS_AUTH=FAIL");
             process.exit(2);
           }
+          if (DEEPSEEK_COGNITION_TIMEOUT_MS_V1 !== 12_000 || DOTS3_SYNTHESIS_TIMEOUT_MS_V1 !== 10_000) {
+            console.log("PRODUCTION_TIMEOUT_POLICY=FAIL");
+            process.exit(2);
+          }
+          console.log(`DEEPSEEK_COGNITION_TIMEOUT_MS=${DEEPSEEK_COGNITION_TIMEOUT_MS_V1}`);
+          console.log(`DOTS3_SYNTHESIS_TIMEOUT_MS=${DOTS3_SYNTHESIS_TIMEOUT_MS_V1}`);
+          console.log("PRODUCTION_TIMEOUT_POLICY=PASS");
+
           const client = new AtlasCloudClientV1({ apiKey: key });
 
           let dots;
@@ -72,7 +84,7 @@ jobs:
             dots = await resolveAtlasDots3NoteModelV1(client, null, 8_000);
           } catch {
             console.log("ATLAS_AUTH=FAIL");
-            console.log("DOTS3_MODEL_RESOLUTION=FAIL");
+            console.log("DOTS3_MODD\_RESOLUTION=FAIL");
             console.log("ATLASCLOUD_SECRET_EXPOSED=false");
             process.exit(3);
           }
@@ -84,7 +96,7 @@ jobs:
             systemPrompt: 'Return only a JSON object with a non-empty string field named "answer".',
             userPrompt: 'Set answer to "ok".',
             maxOutputTokens: 384,
-            timeoutMs: 15_000,
+            timeoutMs: DEEPSEEK_COGNITION_TIMEOUT_MS_V1,
             requireJsonObject: true,
           });
 
@@ -93,12 +105,12 @@ jobs:
             systemPrompt: "Produce a harmless candidate response only. You are non-authoritative.",
             userPrompt: "Reply with: ok",
             maxOutputTokens: 128,
-            timeoutMs: 15_000,
+            timeoutMs: DOTS3_SYNTHESIS_TIMEOUT_MS_V1,
           });
 
           let failed = false;
           if (!deep.ok) {
-            console.log("DEEPSEEK_V3_2_CONNECTIVITY=FAIL");
+            console.log("DEEPSEEEK_V3_2_CONNECTIVITY=FAIL");
             console.log(`DEEPSEEK_FAILURE_REASON=${deep.reason}`);
             failed = true;
           } else {
