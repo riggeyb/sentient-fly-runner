@@ -27,8 +27,14 @@ jobs:
             --data-urlencode "scope=self"
             --data-urlencode "group_by[]=model"
           )
-          curl "${common[@]}"             --data-urlencode "model_ids[]=deepseek-ai/deepseek-v3.2"             --data-urlencode "model_ids[]=dots-studio/dots-3-note-prev-free"             "${base}/model-costs" > model-costs.json
-          curl "${common[@]}"             --data-urlencode "model_ids[]=deepseek-ai/deepseek-v3.2"             --data-urlencode "model_ids[]=dots-studio/dots-3-note-prev-free"             "${base}/model-usage" > model-usage.json
+          model_filters=(
+            --data-urlencode "model_ids[]=deepseek-ai/deepseek-v3.2"
+            --data-urlencode "model_ids[]=deepseek/deepseek-v3.2"
+            --data-urlencode "model_ids[]=dots-studio/dots-3-note-prev-free"
+            --data-urlencode "model_ids[]=dots-studio/dots-3-note-preview-20260813:free"
+          )
+          curl "${common[@]}" "${model_filters[@]}" "${base}/model-costs" > model-costs.json
+          curl "${common[@]}" "${model_filters[@]}" "${base}/model-usage" > model-usage.json
           jq -e '.object == "list" and (.data | type == "array")' model-costs.json >/dev/null
           jq -e '.object == "list" and (.data | type == "array")' model-usage.json >/dev/null
           echo "ATLAS_BILLING_API=PASS"
