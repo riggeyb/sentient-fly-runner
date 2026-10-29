@@ -1,0 +1,80 @@
+name: Atlas Hybrid Smoke V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact riggeyb/sentient commit SHA
+        required: true
+        type: string
+      tree:
+        description: Exact expected riggeyb/sentient tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  atlas-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate immutable identity inputs
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+          SOURCE_TREE: ${{ inputs.tree }}
+        run: |
+          node - <<'NODE'
+          const sha = process.env.SOURCE_SHA ?? "";
+          const tree = process.env.SOURCE_TREE ?? "";
+          if (!/^[0-9a-f]{40}$/.test(sha) || !/^[0-9a-f]{40}$/.test(tree)) {
+            throw new Error("exact_sha_or_tree_invalid");
+          }
+          NODE
+
+      - name: Checkout exact Sentient source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact source identity
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          node - <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+          const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
+          if (head !== process.env.EXPECTED_SHA || tree !== process.env.EXPECTED_TREE) {
+            throw new Error("exact_source_identity_mismatch");
+          }
+          console.log(`SOURCE_SHA=${head}`);
+          console.log(`SOURCE_TREE=${tree}`);
+          NODE
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build exact source
+        run: |
+          npm ci
+          npm run build
+
+      - name: Real Atlas smoke
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: node dist/src/model/atlas-smoke.js
+
+      - name: Confirm tracked source unchanged
+        run: |
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "DEPLOYMENT_PERFORMED=false"
