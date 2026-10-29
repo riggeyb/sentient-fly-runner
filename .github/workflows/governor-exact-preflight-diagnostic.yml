@@ -1,10 +1,21 @@
 name: Governor Exact Preflight Diagnostic
-"on":
+on:
   workflow_dispatch:
     inputs:
       sha:
         required: true
         type: string
+      tree:
+        required: false
+        type: string
+        default: ""
+      branch:
+        required: true
+        type: choice
+        default: sentient-production-composition-20261017
+        options:
+          - sentient-production-composition-20261017
+          - atlas-hybrid-cognition-mvp-v1
 
 permissions:
   contents: read
@@ -16,8 +27,9 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       S: ${{ inputs.sha }}
+      T: ${{ inputs.tree }}
       APP: sentient-deployment-governor
-      BRANCH: sentient-production-composition-20261017
+      BRANCH: ${{ inputs.branch }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Reproduce Governor source preflight read-only
@@ -25,15 +37,18 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$S" =~ ^[0-9a-f]{40}$ ]]
+          if [ -n "$T" ]; then [[ "$T" =~ ^[0-9a-f]{40}$ ]]; fi
+          case "$BRANCH" in
+            sentient-production-composition-20261017|atlas-hybrid-cognition-mvp-v1) ;;
+            *) echo "GOVERNOR_PREFLIGHT_BRANCH=REJECTED"; exit 2 ;;
+          esac
           cat >/tmp/preflight.sh <<'SH'
           set -eu
           s="$S"
+          t="${T:-}"
           branch="$BRANCH"
           echo "GOVERNOR_PREFLIGHT_SHA=$s"
-          echo "GOVERNOR_PREFLIGHT_DISK_BEGIN"
-          df -h / /tmp 2>/dev/null || true
-          df -i / /tmp 2>/dev/null || true
-          echo "GOVERNOR_PREFLIGHT_TMP_COUNT=$(find /tmp -maxdepth 1 -type d -name 'sentient-governor-source-*' 2>/dev/null | wc -l | tr -d ' ')"
+          echo "GOVERNOR_PREFLIGHT_BRANCH=$branch"
           root="$(mktemp -d /tmp/sentient-governor-preflight-XXXXXX)"
           repo="$root/sentient"
           trap 'rm -rf "$root"' EXIT
@@ -65,7 +80,8 @@ jobs:
           fi
           echo "GOVERNOR_PREFLIGHT_ANCESTOR=PASS"
           stage=object
-          git -C "$repo" cat-file -t "$s" | sed 's/^/GOVERNOR_PREFLIGHT_OBJECT_TYPE=/'
+          test "$(git -C "$repo" cat-file -t "$s")" = "commit"
+          echo "GOVERNOR_PREFLIGHT_OBJECT_TYPE=commit"
           stage=checkout
           set +e
           out="$(git -C "$repo" checkout --detach "$s" 2>&1)"
@@ -77,11 +93,16 @@ jobs:
             echo
             exit 23
           fi
+          actual_head="$(git -C "$repo" rev-parse HEAD)"
+          actual_tree="$(git -C "$repo" rev-parse 'HEAD^{tree}')"
+          test "$actual_head" = "$s"
+          if [ -n "$t" ]; then test "$actual_tree" = "$t"; fi
           echo "GOVERNOR_PREFLIGHT_CHECKOUT=PASS"
-          git -C "$repo" rev-parse HEAD | sed 's/^/GOVERNOR_PREFLIGHT_HEAD=/'
-          git -C "$repo" rev-parse 'HEAD^{tree}' | sed 's/^/GOVERNOR_PREFLIGHT_TREE=/'
+          echo "GOVERNOR_PREFLIGHT_HEAD=$actual_head"
+          echo "GOVERNOR_PREFLIGHT_TREE=$actual_tree"
           echo "GOVERNOR_PREFLIGHT_DIAGNOSTIC=PASS"
+          echo "DEPLOYMENT_PERFORMED=false"
           echo "SECRET_VALUES_EXPOSED=false"
           SH
           b64="$(base64 -w0 /tmp/preflight.sh)"
-          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/preflight.sh && S=$S BRANCH=$BRANCH sh /tmp/preflight.sh; rc=\$?; rm -f /tmp/preflight.sh; exit \$rc'"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/preflight.sh && S=$S T=$T BRANCH=$BRANCH sh /tmp/preflight.sh; rc=\$?; rm -f /tmp/preflight.sh; exit \$rc'"
