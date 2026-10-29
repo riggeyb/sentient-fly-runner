@@ -1,0 +1,95 @@
+name: Dynamic Hard Stops Raw Verify V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-fly-runner
+          path: operator
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Assemble raw patch and verify exact precursor
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C sentient rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$SOURCE_TREE"
+
+          cat \
+            operator/scripts/dynamic-core-patch.part0 \
+            operator/scripts/dynamic-core-patch.part1 \
+            operator/scripts/dynamic-core-patch.part2 \
+            operator/scripts/dynamic-core-patch.part3 \
+            operator/scripts/dynamic-core-patch.part4 \
+            operator/scripts/dynamic-core-patch.part5a \
+            operator/scripts/dynamic-core-patch.part5b0 \
+            operator/scripts/dynamic-core-patch.part5b1 \
+            > /tmp/dynamic-core-patch.py
+
+          echo "RAW_PATCH_SHA256=$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')"
+          echo "RAW_PATCH_BYTES=$(wc -c </tmp/dynamic-core-patch.py)"
+          python -m py_compile /tmp/dynamic-core-patch.py
+          echo "RAW_PATCH_PYCOMPILE=PASS"
+
+          cd sentient
+          python /tmp/dynamic-core-patch.py
+          git diff --check
+          echo "CHANGED_FILES_BEGIN"
+          git diff --name-only
+          echo "CHANGED_FILES_END"
+          if git diff --name-only | grep -Ev '^(src|test)/' >/tmp/unexpected; then
+            echo "UNEXPECTED_FILES_BEGIN"
+            cat /tmp/unexpected
+            echo "UNEXPECTED_FILES_END"
+            exit 1
+          fi
+
+      - name: Build and targeted verification
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          tests=()
+          for f in \
+            dist/test/dynamic-hard-stops-core.test.js \
+            dist/test/atlas-cloud-client.test.js \
+            dist/test/atlas-hybrid-router.test.js \
+            dist/test/local-hf-worker-isolation.test.js \
+            dist/test/spawn-orchestrator.test.js; do
+            if [[ -f "$f" ]]; then tests+=("$f"); fi
+          done
+          test "${#tests[@]}" -gt 0
+          node --test "${tests[@]}"
+          echo "RAW_PATCH_BUILD=PASS"
+          echo "RAW_PATCH_TARGETED_TESTS=PASS"
