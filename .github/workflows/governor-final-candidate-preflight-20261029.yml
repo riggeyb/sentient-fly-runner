@@ -1,0 +1,75 @@
+name: Governor Final Candidate Preflight 20261029
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      S: ${{ inputs.sha }}
+      T: ${{ inputs.tree }}
+      APP: sentient-deployment-governor
+      BRANCH: atlas-hybrid-cognition-mvp-v1-final-20261029
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Governor source preflight read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$S" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$T" =~ ^[0-9a-f]{40}$ ]]
+          cat >/tmp/preflight.sh <<'SH'
+          set -eu
+          s="$S"
+          t="$T"
+          branch="$BRANCH"
+          echo "GOVERNOR_PREFLIGHT_SHA=$s"
+          echo "GOVERNOR_PREFLIGHT_BRANCH=$branch"
+          root="$(mktemp -d /tmp/sentient-governor-preflight-XXXXXX)"
+          repo="$root/sentient"
+          trap 'rm -rf "$root"' EXIT
+          token="${SENTIENT_SOURCE_GITHUB_TOKEN:-}"
+          if [ -z "$token" ]; then
+            echo "GOVERNOR_PREFLIGHT_SOURCE_CREDENTIAL=PRESENT_FALSE"
+            exit 20
+          fi
+          echo "GOVERNOR_PREFLIGHT_SOURCE_CREDENTIAL=PRESENT_TRUE"
+          basic="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic"
+          export GIT_TERMINAL_PROMPT=0
+          git init --quiet "$repo"
+          git -C "$repo" remote add origin https://github.com/riggeyb/sentient.git
+          git -C "$repo" fetch --quiet --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+          echo "GOVERNOR_PREFLIGHT_FETCH=PASS"
+          git -C "$repo" merge-base --is-ancestor "$s" "refs/remotes/origin/$branch"
+          echo "GOVERNOR_PREFLIGHT_ANCESTOR=PASS"
+          test "$(git -C "$repo" cat-file -t "$s")" = "commit"
+          echo "GOVERNOR_PREFLIGHT_OBJECT_TYPE=commit"
+          git -C "$repo" checkout --detach "$s" >/dev/null 2>&1
+          actual_head="$(git -C "$repo" rev-parse HEAD)"
+          actual_tree="$(git -C "$repo" rev-parse 'HEAD^{tree}')"
+          test "$actual_head" = "$s"
+          test "$actual_tree" = "$t"
+          echo "GOVERNOR_PREFLIGHT_CHECKOUT=PASS"
+          echo "GOVERNOR_PREFLIGHT_HEAD=$actual_head"
+          echo "GOVERNOR_PREFLIGHT_TREE=$actual_tree"
+          echo "GOVERNOR_PREFLIGHT_DIAGNOSTIC=PASS"
+          echo "DEPLOYMENT_PERFORMED=false"
+          echo "SECRET_VALUES_EXPOSED=false"
+          SH
+          b64="$(base64 -w0 /tmp/preflight.sh)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/preflight.sh && S=$S T=$T BRANCH=$BRANCH sh /tmp/preflight.sh; rc=\$?; rm -f /tmp/preflight.sh; exit \$rc'"
