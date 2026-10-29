@@ -1,0 +1,56 @@
+name: Atlas Hybrid Billed Smoke V1
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  billed-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify and build exact source
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
+          npm run build >/tmp/build.log 2>&1
+          echo "SOURCE_CHECKOUT=PASS"
+          echo "BUILD=PASS"
+      - name: Run isolated billed Atlas smoke
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${ATLASCLOUD_API_KEY:-}"
+          bash runner/scripts/atlas-billed-smoke.sh "$PWD/sentient" "$PWD/runner"
