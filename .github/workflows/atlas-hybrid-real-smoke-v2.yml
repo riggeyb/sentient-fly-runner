@@ -1,0 +1,105 @@
+name: Atlas Hybrid Real Provider Smoke V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact riggeyb/sentient source SHA
+        required: true
+        type: string
+      tree:
+        description: Exact expected source tree
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify exact source and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+      - name: Real Atlas smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { AtlasCloudClientV1 } from "./dist/src/model/providers/atlas-cloud-client.js";
+
+          const key = process.env.ATLASCLOUD_API_KEY?.trim();
+          if (!key) throw new Error("atlas_key_missing");
+
+          const modelResponse = await fetch("https://api.atlascloud.ai/v1/models", {
+            headers: { Authorization: `Bearer ${key}` },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!modelResponse.ok) throw new Error(`model_catalog_http_${modelResponse.status}`);
+          console.log("ATLAS_AUTH=PASS");
+          const modelBody = await modelResponse.json();
+          const ids = Array.isArray(modelBody?.data)
+            ? modelBody.data.map((x) => typeof x?.id === "string" ? x.id : "").filter(Boolean)
+            : [];
+          const dotsMatches = ids.filter((id) => /dots/i.test(id) && /3/.test(id) && /note/i.test(id));
+          if (dotsMatches.length !== 1) throw new Error(`dots3_model_resolution_count_${dotsMatches.length}`);
+          const dotsModel = dotsMatches[0];
+          console.log("DOTS3_MODEL_RESOLUTION=PASS");
+          console.log(`DOTS3_MODEL=${dotsModel}`);
+
+          const client = new AtlasCloudClientV1({ apiKey: key });
+          const run = async (label, model, maxOutputTokens) => {
+            const result = await client.complete({
+              model,
+              systemPrompt: "Return a harmless short response. You are non-authoritative.",
+              userPrompt: "Reply exactly with the word OK.",
+              maxOutputTokens,
+              timeoutMs: 20000,
+              requiredTextValidator: (text) => text.trim().length > 0,
+            });
+            if (!result.ok) throw new Error(`${label}_${result.reason}`);
+            console.log(`${label}_CONNECTIVITY=PASS`);
+            console.log(`${label}_RESPONSE_VALID=PASS`);
+            const usageCaptured = result.usage.inputTokens !== null
+              || result.usage.outputTokens !== null
+              || result.usage.totalTokens !== null
+              || result.usage.reasoningTokens !== null;
+            console.log(`${label}_USAGE_CAPTURED=${usageCaptured ? "PASS" : "FAIL"}`);
+            console.log(`${label}_INPUT_TOKENS=${result.usage.inputTokens ?? "UNREPORTED"}`);
+            console.log(`${label}_CACHED_INPUT_TOKENS=${result.usage.cachedInputTokens ?? "UNREPORTED"}`);
+            console.log(`${label}_OUTPUT_TOKENS=${result.usage.outputTokens ?? "UNREPORTED"}`);
+            console.log(`${label}_REASONING_TOKENS=${result.usage.reasoningTokens ?? "UNREPORTED"}`);
+            console.log(`${label}_TOTAL_TOKENS=${result.usage.totalTokens ?? "UNREPORTED"}`);
+            console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
+            console.log(`${label}_FINISH_REASON=${result.finishReason ?? "UNREPORTED"}`);
+            console.log(`${label}_PROVIDER_REQUEST_ID=${result.providerRequestId ?? "UNREPORTED"}`);
+            console.log(`${label}_REPORTED_COST_USD=${result.reportedCostUsd ?? "UNREPORTED"}`);
+            if (!usageCaptured) throw new Error(`${label}_usage_missing`);
+          };
+
+          await run("DEEPSEEK_V3_2", "deepseek-ai/deepseek-v3.2", 1024);
+          await run("DOTS3", dotsModel, 2048);
+          console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+          console.log("REAL_ATLAS_SMOKE=PASS");
+          NODE
