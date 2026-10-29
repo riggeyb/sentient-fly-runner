@@ -1,0 +1,98 @@
+
+from pathlib import Path
+
+def replace_once(path, old, new):
+    p=Path(path); s=p.read_text()
+    n=s.count(old)
+    if n!=1: raise SystemExit(f"{path}: expected 1 match, got {n}: {old[:120]!r}")
+    p.write_text(s.replace(old,new,1))
+
+replace_once("src/model/invocation-envelope.ts",
+'''  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  maxCostMicros: number | null;''',
+'''  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  maxTotalTokens: number | null;
+  maxCostMicros: number | null;''')
+replace_once("src/model/invocation-envelope.ts",
+'''  maxInputTokens?: number | null;
+  maxOutputTokens?: number | null;
+  maxCostMicros?: number | null;''',
+'''  maxInputTokens?: number | null;
+  maxOutputTokens?: number | null;
+  maxTotalTokens?: number | null;
+  maxCostMicros?: number | null;''')
+replace_once("src/model/invocation-envelope.ts",
+'''    ["maxInputTokens", input.maxInputTokens],
+    ["maxOutputTokens", input.maxOutputTokens],
+    ["maxCostMicros", input.maxCostMicros],''',
+'''    ["maxInputTokens", input.maxInputTokens],
+    ["maxOutputTokens", input.maxOutputTokens],
+    ["maxTotalTokens", input.maxTotalTokens],
+    ["maxCostMicros", input.maxCostMicros],''')
+replace_once("src/model/invocation-envelope.ts",
+'''    maxInputTokens: input.maxInputTokens ?? null,
+    maxOutputTokens: input.maxOutputTokens ?? null,
+    maxCostMicros: input.maxCostMicros ?? null,''',
+'''    maxInputTokens: input.maxInputTokens ?? null,
+    maxOutputTokens: input.maxOutputTokens ?? null,
+    maxTotalTokens: input.maxTotalTokens ?? null,
+    maxCostMicros: input.maxCostMicros ?? null,''')
+replace_once("src/model/invocation-envelope.ts",
+'''    ...(envelope.maxInputTokens === null ? {} : { sentientMaxInputTokens: envelope.maxInputTokens }),
+    ...(envelope.maxOutputTokens === null ? {} : { sentientMaxOutputTokens: envelope.maxOutputTokens }),
+    ...(envelope.maxCostMicros === null ? {} : { sentientMaxCostMicros: envelope.maxCostMicros }),''',
+'''    ...(envelope.maxInputTokens === null ? {} : { sentientMaxInputTokens: envelope.maxInputTokens }),
+    ...(envelope.maxOutputTokens === null ? {} : { sentientMaxOutputTokens: envelope.maxOutputTokens }),
+    ...(envelope.maxTotalTokens === null ? {} : { sentientMaxTotalTokens: envelope.maxTotalTokens }),
+    ...(envelope.maxCostMicros === null ? {} : { sentientMaxCostMicros: envelope.maxCostMicros }),''')
+
+replace_once("src/phase3/cognitive-components.ts",
+'''import type { PinnedSkillRegistry } from "../retrieval/contracts.js";''',
+'''import type { PinnedSkillRegistry } from "../retrieval/contracts.js";
+import type { ModelInvocationEnvelopeV1 } from "../model/invocation-envelope.js";''')
+replace_once("src/phase3/cognitive-components.ts",
+'''export interface HfPortV1{classify<L extends string>(input:{component:CognitiveComponentV1;text:string;allowedLabels:readonly L[]}):Promise<HfPredictionV1<L>>}''',
+'''export interface HfPortV1{classify<L extends string>(input:{component:CognitiveComponentV1;text:string;allowedLabels:readonly L[];invocation?:ModelInvocationEnvelopeV1}):Promise<HfPredictionV1<L>>}''')
+
+replace_once("src/model/providers/atlas-cloud-client.ts",
+'''  systemPrompt: string;
+  userPrompt: string;
+  maxOutputTokens: number;''',
+'''  systemPrompt: string;
+  userPrompt: string;
+  maxInputTokens?: number;
+  maxOutputTokens: number;
+  maxTotalTokens?: number;''')
+replace_once("src/model/providers/atlas-cloud-client.ts",
+'''    if (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0) {
+      throw new Error("atlascloud_max_output_tokens_invalid");
+    }
+    if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {''',
+'''    if (
+      input.maxInputTokens !== undefined
+      && (!Number.isSafeInteger(input.maxInputTokens) || input.maxInputTokens <= 0)
+    ) throw new Error("atlascloud_max_input_tokens_invalid");
+    if (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0) {
+      throw new Error("atlascloud_max_output_tokens_invalid");
+    }
+    if (
+      input.maxTotalTokens !== undefined
+      && (!Number.isSafeInteger(input.maxTotalTokens) || input.maxTotalTokens <= 0)
+    ) throw new Error("atlascloud_max_total_tokens_invalid");
+    if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {''')
+replace_once("src/model/providers/atlas-cloud-client.ts",
+'''    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);''',
+'''    // Tokenizers differ by provider. UTF-8 bytes plus a fixed chat-envelope allowance
+    // is a conservative upper bound used only to reject before network dispatch.
+    const conservativeInputUpperBound =
+      Buffer.byteLength(input.systemPrompt, "utf8")
+      + Buffer.byteLength(input.userPrompt, "utf8")
+      + 64;
+    if (
+      input.maxInputTokens !== undefined
+      && conservativeInputUpperBound > input.maxInputTokens
+    ) {
+      return this.#failure(model, "context_limit", "atlascloud_input_token_ceiling_exceeded_before_dispatch", started, null);
+    
