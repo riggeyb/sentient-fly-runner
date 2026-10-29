@@ -1,0 +1,59 @@
+name: Dynamic Cognition Payload Inspect V2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-fly-runner
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Inspect cognition payload p fragments and hard-stop raw fragments
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "COGNITION_P_BEGIN"
+          cat \
+            scripts/dynamic-integration-patch.gz.p00 \
+            scripts/dynamic-integration-patch.gz.p01 \
+            scripts/dynamic-integration-patch.gz.p02 \
+            > /tmp/dynamic-integration-p.patch.gz
+          echo "COGNITION_P_GZIP_SHA256=$(sha256sum /tmp/dynamic-integration-p.patch.gz | awk '{print $1}')"
+          gzip -t /tmp/dynamic-integration-p.patch.gz
+          gzip -dc /tmp/dynamic-integration-p.patch.gz > /tmp/dynamic-integration-p.patch
+          echo "COGNITION_P_PATCH_SHA256=$(sha256sum /tmp/dynamic-integration-p.patch | awk '{print $1}')"
+          echo "COGNITION_P_PATCH_BYTES=$(wc -c </tmp/dynamic-integration-p.patch)"
+          echo "COGNITION_P_FILES_BEGIN" 
+          grep '^diff --git ' /tmp/dynamic-integration-p.patch || true
+          echo "COGNITION_P_FILES_END" 
+          echo "COGNITION_P_CONTENT_BEGIN"
+          cat /tmp/dynamic-integration-p.patch
+          echo "COGNITION_P_CONTENT_END"
+
+          echo "HARD_STOP_RAW_BEGIN"
+          cat \
+            scripts/dynamic-core-patch.part0 \
+            scripts/dynamic-core-patch.part1 \
+            scripts/dynamic-core-patch.part2 \
+            scripts/dynamic-core-patch.part3 \
+            scripts/dynamic-core-patch.part4 \
+            scripts/dynamic-core-patch.part5a \
+            scripts/dynamic-core-patch.part5b0 \
+            scripts/dynamic-core-patch.part5b1 \
+            > /tmp/dynamic-core-patch.py
+          echo "HARD_STOP_RAW_SHA256=$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')"
+          echo "HARD_STOP_RAW_BYTES=$(wc -c </tmp/dynamic-core-patch.py)"
+          python -m py_compile /tmp/dynamic-core-patch.py
+          echo "HARD_STOP_RAW_PYCOMPILE=PASS"
+          echo "HARD_STOP_RAW_TOUCHES_BEGIN"
+          grep -E 'replace_once\(|write\(|Path\(' /tmp/dynamic-core-patch.py | head -n 120 || true
+          echo "HARD_STOP_RAW_TOUCHES_END"
