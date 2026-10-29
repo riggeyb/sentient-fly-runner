@@ -27,7 +27,7 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 1
-      - name: Verify exact source, patch, test, and push successor
+      - name: Repair exact Atlas test fetch typing and verify
         shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -40,51 +40,21 @@ jobs:
           test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
           python - <<'PY'
           from pathlib import Path
-
-          def replace_exact(path: str, old: str, new: str, expected: int = 1):
-              p = Path(path)
-              text = p.read_text()
-              count = text.count(old)
-              if count != expected:
-                  raise SystemExit(f"{path}: expected {expected} occurrences, saw {count}: {old!r}")
-              p.write_text(text.replace(old, new))
-
-          replace_exact("src/model/providers/atlas-hybrid-adapters.ts",
-                        "ATLAS_HYBRID_ROUTE_MODD_ID_V1",
-                        "ATLAS_HYBRID_ROUTE_MODEL_ID_V1")
-          replace_exact("test/atlas-hybrid-router.test.ts",
-                        "DEEPSEEK_V3_2_MODD_V1",
-                        "DEEPSEEK_V3_2_MODEL_V1")
-          replace_exact("src/application/production-composition.ts",
-                        'dots3Role:"presentation_only"',
-                        'dots3Role:"co_cognition_and_synthesis"')
-          replace_exact("src/application/production-composition.ts",
-                        'transport:"LOCAL"|null',
-                        'transport:"LOCAL"|"ATLAS_CLOUD"|null')
-          replace_exact("test/phase0-engineering-readiness.test.ts",
-                        'dots3Role: "presentation_only"',
-                        'dots3Role: "co_cognition_and_synthesis"')
-          replace_exact("test/phase0-engineering-readiness.test.ts",
-                        'test("Phase0 readiness is independent of later cognition readiness and keeps Dots3 presentation-only", () => {',
-                        'test("Phase0 readiness is independent of later cognition readiness and preserves the explicit non-authoritative Dots3 hybrid role", () => {')
-          replace_exact("test/phase0-engineering-readiness.test.ts",
-                        'assert.equal(readiness.dots3Role, "presentation_only");',
-                        'assert.equal(readiness.dots3Role, "co_cognition_and_synthesis");')
-          for path in [
-              "src/model/providers/atlas-hybrid-adapters.ts",
-              "test/atlas-hybrid-router.test.ts",
-              "src/application/production-composition.ts",
-              "test/phase0-engineering-readiness.test.ts",
-          ]:
-              p = Path(path)
-              p.write_text("\n".join(line.rstrip() for line in p.read_text().splitlines()) + "\n")
+          p = Path("test/atlas-hybrid-router.test.ts")
+          text = p.read_text()
+          old = "RequestInfo"
+          expected = 3
+          count = text.count(old)
+          if count != expected:
+              raise SystemExit(f"expected {expected} RequestInfo occurrences, saw {count}")
+          p.write_text(text.replace(old, "Parameters<typeof fetch>[0]"))
           PY
           git diff --check
           npm ci --no-audit --no-fund
           npm run build
-          node --test dist/test/atlas-hybrid-router.test.js dist/test/atlas-dots3-cost-policy.test.js
+          node --test dist/test/atlas-hybrid-router.test.js dist/test/atlas-dots3-cost-policy.test.js dist/test/phase0-engineering-readiness.test.js
           git config user.name "sentient-atlas-engineering"
           git config user.email "sentient-atlas-engineering@users.noreply.github.com"
-          git add src/model/providers/atlas-hybrid-adapters.ts test/atlas-hybrid-router.test.ts src/application/production-composition.ts test/phase0-engineering-readiness.test.ts
-          git commit -m "fix: align Atlas hybrid contracts before runtime wiring"
+          git add test/atlas-hybrid-router.test.ts
+          git commit -m "test: align Atlas mocked fetch typing with Node"
           git push origin HEAD:refs/heads/atlas-hybrid-cognition-mvp-v1-20261029
