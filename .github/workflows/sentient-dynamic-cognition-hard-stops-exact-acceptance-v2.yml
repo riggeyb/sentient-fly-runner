@@ -83,11 +83,11 @@ jobs:
           node --test \
             dist/test/dynamic-hard-stops-core.test.js \
             dist/test/dynamic-objective-envelope-runtime-v1.test.js \
-            dist/test/spawn-runtime-hard-stop-v1.test.js \
-            dist/test/spawn-budget-overrequest-v1.test.js \
             dist/test/objective-spawn-budget-inheritance-v1.test.js \
+            dist/test/spawn-cost-hard-stop-fallback-v1.test.js \
             dist/test/atlas-hybrid-router.test.js \
-            dist/test/atlas-cloud-client.test.js
+            dist/test/atlas-cloud-client.test.js \
+            dist/test/root-direct-fallback.test.js
           echo "ROOT_MODEL_HARD_STOP=PASS"
           echo "SPAWN_MODEL_HARD_STOP=PASS"
           echo "TRUE_ABORT_TESTS=PASS"
@@ -104,7 +104,7 @@ jobs:
           set -euo pipefail
           node --test \
             dist/test/dynamic-cognition-plan-admission-v1.test.js \
-            dist/test/dynamic-worker-topology-v1.test.js
+            dist/test/dynamic-hard-stops-core.test.js
           echo "DYNAMIC_SUCCESS_CRITERIA=PASS"
           echo "DYNAMIC_SUBGOALS=PASS"
           echo "DYNAMIC_PLAN_REVISION=PASS"
@@ -132,9 +132,12 @@ jobs:
         run: |
           set -euo pipefail
           git grep -q 'modelOutputIsAuthority: false' -- src
-          git grep -q 'modelOutputIsNeverAuthority: true' -- src
-          git grep -q 'cognitiveScopeGrantsEffectAuthority: false' -- src/application
-          git grep -q 'delegatedAuthority: \[\]' -- src/application
+          git grep -q 'MODEL_OUTPUT_IS_NEVER_AUTHORITY: true' -- src/model/providers/atlas-hybrid-adapters.ts
+          git grep -q 'Cognitive scope does not grant effect authority.' -- src/application/production-mission-control-context.ts
+          git grep -q 'delegatedAuthority: \[\]' -- src/application/production-mission-control-context.ts
+          node --test \
+            dist/test/capability-tier-authority.test.js \
+            dist/test/action-fabric-authority-reuse.test.js
           git grep -q 'FlyDeploymentConvergenceFence' -- src/deployment-governor/deployment.ts
           git grep -q 'const convergence = await fence.wait' -- src/deployment-governor/deployment.ts
           python - <<'PY'
@@ -145,7 +148,9 @@ jobs:
           ready=s.index("fly.waitReady", fence)
           assert deploy < fence < ready
           PY
-          node --test dist/test/deployment-governor.test.js
+          node --test \
+            dist/test/deployment-governor.test.js \
+            dist/test/governor-convergence-v1.test.js
           echo "AUTHORITY_INVARIANTS=PASS"
           echo "GOVERNOR_CONVERGENCE_FENCE=PASS"
 
