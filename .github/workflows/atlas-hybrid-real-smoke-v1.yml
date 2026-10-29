@@ -11,6 +11,11 @@ on:
         description: Exact expected source tree SHA
         required: true
         type: string
+      billing_only:
+        description: Read settled Atlas billing/usage without model inference
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -22,6 +27,7 @@ jobs:
     env:
       EXPECTED_SHA: ${{ inputs.sha }}
       EXPECTED_TREE: ${{ inputs.tree }}
+      BILLING_ONLY: ${{ inputs.billing_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,11 +59,15 @@ jobs:
           npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
           npm run build >/tmp/build.log 2>&1
           echo "BUILD=PASS"
-      - name: Run minimal Atlas smoke with billed deltas
+      - name: Atlas evidence
         shell: bash
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
         run: |
           set -euo pipefail
           test -n "${ATLASCLOUD_API_KEY:-}"
-          bash .runner/scripts/atlas-billed-smoke.sh "$PWD" "$PWD/.runner"
+          if [ "$BILLING_ONLY" = "true" ]; then
+            bash .runner/scripts/atlas-billing-snapshot.sh "$PWD/.runner"
+          else
+            bash .runner/scripts/atlas-billed-smoke.sh "$PWD" "$PWD/.runner"
+          fi
