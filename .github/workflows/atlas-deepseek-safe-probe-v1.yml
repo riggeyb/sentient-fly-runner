@@ -1,0 +1,67 @@
+name: Atlas DeepSeek Safe Probe V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact riggeyb/sentient commit SHA
+        required: true
+        type: string
+      tree:
+        description: Exact expected riggeyb/sentient tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate immutable inputs
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+          SOURCE_TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact Sentient source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Guard exact source identity
+        working-directory: sentient
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_TREE"
+          echo "SOURCE_CHECKOUT=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Safe DeepSeek provider probe
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: node scripts/atlas-deepseek-safe-probe.mjs
+
+      - name: Deployment guard
+        run: echo "DEPLOYMENT_PERFORMED=false"
