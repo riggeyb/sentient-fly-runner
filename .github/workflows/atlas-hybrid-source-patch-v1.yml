@@ -47,6 +47,7 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
           mkdir -p runner-fixtures
           cp runner/runner-fixtures/atlas-hybrid-timeout-policy.test.ts runner-fixtures/
+          sed -i 's/DEEPSEEEK/DEEPSEEK/g' runner-fixtures/atlas-hybrid-timeout-policy.test.ts
           python runner/scripts/atlas_timing_patch.py
           git diff --check
           npm ci --no-audit --no-fund
