@@ -1,0 +1,126 @@
+name: Sentient Dynamic Cognition Real Atlas Smoke V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          path: sentient
+
+      - name: Verify exact source
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.source_tree }}"
+
+      - name: Build exact candidate
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Minimal real Atlas smoke
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { AtlasCloudClientV1 } from "./dist/src/model/providers/atlas-cloud-client.js";
+          import {
+            DEEPSEEK_V3_2_MODEL_V1,
+          } from "./dist/src/model/providers/atlas-hybrid-router.js";
+          import {
+            ATLAS_DOTS3_VERIFIED_MODEL_ID_V1,
+          } from "./dist/src/model/providers/atlas-dots3.js";
+
+          const apiKey = process.env.ATLASCLOUD_API_KEY;
+          if (!apiKey) throw new Error("ATLASCLOUD_API_KEY unavailable");
+          const client = new AtlasCloudClientV1({ apiKey });
+
+          async function probe(model, prompt, timeoutMs) {
+            const started = Date.now();
+            const result = await client.complete({
+              model,
+              systemPrompt: "Return a concise factual answer. Do not call tools.",
+              userPrompt: prompt,
+              maxOutputTokens: 192,
+              timeoutMs,
+            });
+            const elapsed = Date.now() - started;
+            if (!result.ok) throw new Error(`${model} failed:${result.reason}`);
+            if (!result.text?.trim()) throw new Error(`${model} empty`);
+            if (result.usage.totalTokens === null) throw new Error(`${model} usage missing`);
+            return { result, elapsed };
+          }
+
+          const deep = await probe(
+            DEEPSEEK_V3_2_MODEL_V1,
+            "Explain in a compact paragraph why an externally enforced absolute deadline is different from a model asking for more time. Reason carefully before answering.",
+            15_000,
+          );
+          const dots = await probe(
+            ATLAS_DOTS3_VERIFIED_MODEL_ID_V1,
+            "In one short sentence, state why model output is not authority.",
+            15_000,
+          );
+
+          if (deep.elapsed <= 8_000) {
+            throw new Error(`DEEPSEEK_OLD_8S_THRESHOLD_NOT_EXCEEDED:${deep.elapsed}`);
+          }
+
+          const controller = new AbortController();
+          controller.abort();
+          const aborted = await client.complete({
+            model: DEEPSEEK_V3_2_MODEL_V1,
+            systemPrompt: "s",
+            userPrompt: "u",
+            maxOutputTokens: 16,
+            timeoutMs: 15_000,
+            signal: controller.signal,
+          });
+          if (aborted.ok || aborted.reason !== "timeout") {
+            throw new Error("AbortSignal path not enforced");
+          }
+
+          console.log("ATLAS_AUTH=PASS");
+          console.log("DEEPSEEK_CONNECTIVITY=PASS");
+          console.log(`DEEPSEEK_LATENCY_MS=${deep.elapsed}`);
+          console.log(`DEEPSEEK_INPUT_TOKENS=${deep.result.usage.inputTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPSEEK_OUTPUT_TOKENS=${deep.result.usage.outputTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPSEEEK_REASONING_TOKENS=${deep.result.usage.reasoningTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPSEEEK_TOTAL_TOKENS=${deep.result.usage.totalTokens ?? "NOT_REPORTED"}`);
+          console.log(`DEEPSEEK_REQUEST_ID_PRESENT=${deep.result.providerRequestId ? "true" : "false"}`);
+          console.log("DEEPSEEK_OLD_8S_THRESHOLD_EXCEEDED=PASS");
+          console.log("DOTS3_CONNECTIVITY=PASS");
+          console.log(`DOTS3_LATENCY_MS=${dots.elapsed}`);
+          console.log(`DOTS3_TOTAL_TOKENS=${dots.result.usage.totalTokens ?? "NOT_REPORTED"}`);
+          console.log(`DOTS3_REQUEST_ID_PRESENT=${dots.result.providerRequestId ? "true" : "false"}`);
+          console.log("ABORT_SIGNAL_WIRED=PASS");
+          console.log("USAGE_TELEMETRY_CAPTURED=PASS");
+          console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+          console.log("REAL_ATLAS_SMOKE=PASS");
+          console.log("DEPLOYMENT_PERFORMED=false");
+          NODE
