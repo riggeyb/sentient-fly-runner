@@ -1,0 +1,68 @@
+name: Governor Convergence Fence Exact V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-fly-runner
+          ref: main
+          path: operator
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-dynamic-cognition-hard-stops-v1-final-20261029
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 1
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Exact patch and proof
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
+          cat ../operator/scripts/governor-convergence-fence-v1.part{0,1,2} >/tmp/governor_patch.py
+          python -m py_compile /tmp/governor_patch.py
+          python /tmp/governor_patch.py
+          git diff --check
+          expected=$(printf '%s\n'             src/deployment-governor/deployment.ts             src/deployment-governor/fly-exec.ts             test/governor-convergence-fence.test.ts | sort)
+          actual=$(git status --short | sed -E 's/^.. //' | sort)
+          test "$actual" = "$expected"
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build
+          node --test dist/test/governor-convergence-fence.test.js dist/test/deployment-governor.test.js
+          git config user.name "sentient-dynamic-cognition-engineering"
+          git config user.email "sentient-dynamic-cognition-engineering@users.noreply.github.com"
+          git add src/deployment-governor/deployment.ts src/deployment-governor/fly-exec.ts test/governor-convergence-fence.test.ts
+          git commit -m "governor: fence machine convergence before readiness"
+          git push origin HEAD:refs/heads/sentient-dynamic-cognition-hard-stops-v1-final-20261029
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git show -s --format=%T HEAD)"
+          echo "GOVERNOR_CONVERGENCE_FENCE=PASS"
+          echo "DEPLOYMENT_PERFORMED=false"
