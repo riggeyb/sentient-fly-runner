@@ -1,0 +1,37 @@
+name: Dynamic Cognition Integration Payload Inspect V1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-fly-runner
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Assemble and inspect staged integration payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/dynamic-integration-patch.gz.q00 \
+              scripts/dynamic-integration-patch.gz.q01 \
+              scripts/dynamic-integration-patch.gz.q02 \
+            | base64 -d > /tmp/dynamic-integration-patch.gz
+          gzip -t /tmp/dynamic-integration-patch.gz
+          gzip -dc /tmp/dynamic-integration-patch.gz > /tmp/dynamic-integration.patch
+          echo "PAYLOAD_GZIP_SHA256=$(sha256sum /tmp/dynamic-integration-patch.gz | awk '{print $1}')"
+          echo "PATCH_SHA256=$(sha256sum /tmp/dynamic-integration.patch | awk '{print $1}')"
+          echo "PATCH_BYTES=$(wc -c </tmp/dynamic-integration.patch)"
+          echo "PATCH_FILES_BEGIN"
+          grep '^diff --git ' /tmp/dynamic-integration.patch || true
+          echo "PATCH_FILES_END"
+          echo "PATCH_CONTENT_BEGIN"
+          cat /tmp/dynamic-integration.patch
+          echo "PATCH_CONTENT_END"
