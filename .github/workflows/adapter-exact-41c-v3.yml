@@ -1,0 +1,52 @@
+name: Adapter Exact 41c V3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-fly-runner
+          ref: main
+          path: operator
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: sentient-dynamic-cognition-hard-stops-v1-final-20261029
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 1
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Exact patch and proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sentient
+          test "$(git rev-parse HEAD)" = "41c18a7725b5b2e3621ad342036c3c0dce804c6e"
+          test "$(git show -s --format=%T HEAD)" = "98015386e575a9d49453846dd211dc01d4d0fe57"
+          python -m py_compile ../operator/scripts/dynamic-adapter-final-v3.py
+          python ../operator/scripts/dynamic-adapter-final-v3.py
+          git diff --check
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build
+          node --test dist/test/atlas-hybrid-router.test.js dist/test/atlas-hybrid-adapters.test.js
+          test "$(git diff --name-only)" = "src/model/providers/atlas-hybrid-adapters.ts"
+          git config user.name sentient-dynamic-cognition-engineering
+          git config user.email sentient-dynamic-cognition-engineering@users.noreply.github.com
+          git add src/model/providers/atlas-hybrid-adapters.ts
+          git commit -m "cognition: propagate hard-stop envelopes through hybrid adapters"
+          git push origin HEAD:sentient-dynamic-cognition-hard-stops-v1-final-20261029
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git show -s --format=%T HEAD)"
+          echo "DEPLOYMENT_PERFORMED=false"
