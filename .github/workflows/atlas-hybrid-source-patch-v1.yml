@@ -48,6 +48,7 @@ jobs:
           python runner/scripts/dynamic_hard_stops_stage3.py
           python runner/scripts/dynamic_hard_stops_stage4.py
           git -C sentient diff --check
+          nl -ba sentient/src/model/providers/atlas-hybrid-adapters.ts | sed -n '45,150p'
       - name: Build and focused hard-stop verification
         working-directory: sentient
         shell: bash
