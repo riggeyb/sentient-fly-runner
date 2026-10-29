@@ -1,0 +1,74 @@
+name: Atlas Hybrid Real Provider Smoke V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact riggeyb/sentient candidate SHA
+        required: true
+        type: string
+      source_tree:
+        description: Exact riggeyb/sentient candidate tree
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: ${{ inputs.source_sha }}
+      EXPECTED_TREE: ${{ inputs.source_tree }}
+    steps:
+      - name: Validate source inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Guard source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          echo "SOURCE_CHECKOUT=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+          echo "BUILD=PASS"
+
+      - name: Real Atlas smoke
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: node dist/src/model/atlas-smoke.js
+
+      - name: Guard clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TRACKED_SOURCE_MUTATION=false"
