@@ -87,14 +87,16 @@ jobs:
           runx NPM_TEST npm test
           runx PRODUCTION_CONVERGENCE node --test dist/test/production-collaboration-verdict.test.js dist/test/mvp-root-fallback-evidence.test.js
 
-          runx ATLAS_CLIENT_TESTS node --test dist/test/atlascloud-client.test.js
-          runx DEEPSEEK_PROVIDER_TESTS node --test dist/test/atlas-cloud-client.test.js dist/test/atlas-cognition-failover.test.js
-          runx DOTS3_PROVIDER_TESTS node --test dist/test/atlas-authority-invariants.test.js dist/test/atlas-synthesis-failover.test.js
-          runx COGNITION_FAILOVER_TESTS node --test dist/test/atlas-cognition-failover.test.js
-          runx SYNTHESIS_FAILOVER_TESTS node --test dist/test/atlas-synthesis-failover.test.js
-          runx LOCAL_HF_FALLBACK_TESTS node --test dist/test/atlas-cognition-failover.test.js dist/test/atlas-synthesis-failover.test.js
-          runx AUTHORITY_INVARIANT_TESTS node --test dist/test/atlas-authority-invariants.test.js
-          runx ROOT_TIMEOUT_TESTS node --test dist/test/atlas-cognition-failover.test.js dist/test/root-direct-fallback.test.js
+          # Final candidate concentrates the Atlas mocked matrix in the hybrid router test,
+          # with policy/presentation/production wiring in the adjacent Atlas suites.
+          runx ATLAS_CLIENT_TESTS node --test dist/test/atlas-hybrid-router.test.js
+          runx DEEPSEEK_PROVIDER_TESTS node --test dist/test/atlas-hybrid-router.test.js
+          runx DOTS3_PROVIDER_TESTS node --test dist/test/atlas-hybrid-router.test.js dist/test/dots3-presentation-only-local-hf.test.js dist/test/atlas-dots3-cost-policy.test.js
+          runx COGNITION_FAILOVER_TESTS node --test dist/test/atlas-hybrid-router.test.js
+          runx SYNTHESIS_FAILOVER_TESTS node --test dist/test/atlas-hybrid-router.test.js
+          runx LOCAL_HF_FALLBACK_TESTS node --test dist/test/atlas-hybrid-router.test.js dist/test/atlas-hybrid-production-wiring.test.js
+          runx AUTHORITY_INVARIANT_TESTS node --test dist/test/atlas-hybrid-router.test.js dist/test/dots3-presentation-only-local-hf.test.js dist/test/atlas-hybrid-production-wiring.test.js
+          runx ROOT_TIMEOUT_TESTS node --test dist/test/atlas-hybrid-router.test.js dist/test/root-direct-fallback.test.js
 
           if [ -f dist/test/spawn-mission-control-context.test.js ]; then
             runx MISSION_CONTROL_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
