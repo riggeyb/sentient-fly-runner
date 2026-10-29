@@ -1,0 +1,59 @@
+name: Dynamic Cognition Reuse Core Refinement V3
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  refine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-fly-runner
+          persist-credentials: false
+          path: operator
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 1
+          path: sentient
+      - name: Apply reuse core refinement and verify
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
+          python -m py_compile ../operator/scripts/dynamic-reuse-core-refine-v3.py
+          python ../operator/scripts/dynamic-reuse-core-refine-v3.py
+          git diff --check
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build
+          npm test
+          git config user.name "sentient-dynamic-cognition-engineering"
+          git config user.email "sentient-dynamic-cognition-engineering@users.noreply.github.com"
+          git add src/phase1/core-runtime.ts src/spawn/policy.ts
+          git commit -m "cognition: reject late acceptance and over-budget children"
+          git push origin HEAD:refs/heads/dynamic-cognition-hard-stops-v1-final
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git show -s --format=%T HEAD)"
+          echo "DEPLOYMENT_PERFORMED=false"
