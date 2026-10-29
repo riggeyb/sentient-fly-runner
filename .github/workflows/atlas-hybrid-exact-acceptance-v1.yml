@@ -46,7 +46,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@„
         with:
           node-version: "22"
 
@@ -85,7 +85,7 @@ jobs:
           runx NPM_CI npm ci --no-audit --no-fund
           runx BUILD npm run build
           runx NPM_TEST npm test
-          runx PRODUCTION_CONVERGENCE node --test dist/test/production-collaboration-verdict.test.js dist/test/mvp-root-fallback-evidence.test.js
+          runx PRODUCTION_CONVERGENCE node --test dist/test/job2-production-convergence.test.js dist/test/production-collaboration-verdict.test.js dist/test/mvp-root-fallback-evidence.test.js
 
           # Final candidate concentrates the Atlas mocked matrix in the hybrid router test,
           # with policy/presentation/production wiring in the adjacent Atlas suites.
@@ -104,7 +104,7 @@ jobs:
             echo "MISSION_CONTROL_SPAWN_COMPILED=FAIL"
             failed=1
           fi
-          if [ -f tests/spawn-mission-control-context.test.ts ]; then
+          if [ -f tests/spawn-mission-control-control-context.test.ts ]; then
             runx MISSION_CONTROL_SPAWN_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
           else
             echo "MISSION_CONTROL_SPAWN_DIRECT=FAIL"
