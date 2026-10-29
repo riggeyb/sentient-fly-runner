@@ -58,7 +58,7 @@ jobs:
       - name: Commit
         working-directory: sentient
         env:
-          SOURCE_BRANCH: ${{ input.source_branch }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
         shell: bash
         run: |
           set -euo pipefail
