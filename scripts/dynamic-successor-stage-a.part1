@@ -1,0 +1,101 @@
+as const, model: LOCAL_HF_MODEL_V1, maxOutput: input.maxOutputTokens ?? 1_024, timeoutMs: LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1 },''',
+    "synthesis plan",
+)
+s = one(
+    s,
+    '''      model: string | null;
+      maxOutput: number;
+      telemetryStage?: HybridModelStageV1;''',
+    '''      model: string | null;
+      maxOutput: number;
+      timeoutMs: number;
+      telemetryStage?: HybridModelStageV1;''',
+    "plan type",
+)
+s = one(
+    s,
+    '''          Math.min(ATLAS_CLOUD_ATTEMPT_TIMEOUT_MS_V1, remaining - HYBRID_ATTEMPT_SAFETY_MARGIN_MS_V1),''',
+    '''          Math.min(step.timeoutMs, remaining - HYBRID_ATTEMPT_SAFETY_MARGIN_MS_V1),''',
+    "atlas timeout allocation",
+)
+s = one(
+    s,
+    '''        Math.min(LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1, remaining - HYBRID_ATTEMPT_SAFETY_MARGIN_MS_V1),''',
+    '''        Math.min(step.timeoutMs, remaining - HYBRID_ATTEMPT_SAFETY_MARGIN_MS_V1),''',
+    "local timeout allocation",
+)
+write(p, s)
+
+write("test/dynamic-provider-timeout-v1.test.ts", r'''import assert from "node:assert/strict";
+import test from "node:test";
+import type {
+  AtlasCloudClientV1,
+  AtlasCloudCompleteInputV1,
+  AtlasCloudResultV1,
+} from "../src/model/providers/atlas-cloud-client.js";
+import {
+  AtlasHybridModelRouterV1,
+  DEEPSEEK_COGNITION_TIMEOUT_MS_V1,
+  DEEPSEEK_SYNTHESIS_FALLBACK_TIMEOUT_MS_V1,
+  DEEPSEEK_V3_2_MODEL_V1,
+  DOTS3_COGNITION_TIMEOUT_MS_V1,
+  DOTS3_SYNTHESIS_TIMEOUT_MS_V1,
+  LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1,
+} from "../src/model/providers/atlas-hybrid-router.js";
+import {
+  LocalHuggingFaceRuntimeV1,
+  type LocalHfGenerateInputV1,
+  type LocalHfGenerationV1,
+  type LocalHfRunnerV1,
+} from "../src/model/providers/huggingface.js";
+
+const DOTS = "test/dots3";
+
+type AtlasStep = { latencyMs: number; text: string };
+
+class VirtualAtlas {
+  calls: AtlasCloudCompleteInputV1[] = [];
+  constructor(
+    private readonly advance: (ms: number) => void,
+    private readonly steps: AtlasStep[],
+  ) {}
+  async complete(input: AtlasCloudCompleteInputV1): Promise<AtlasCloudResultV1> {
+    this.calls.push(input);
+    const step = this.steps.shift();
+    if (!step) throw new Error("unexpected_atlas_call");
+    this.advance(step.latencyMs);
+    return {
+      ok: true,
+      provider: "atlascloud",
+      model: input.model,
+      text: step.text,
+      structuredOutput: input.requireJsonObject ? JSON.parse(step.text) : null,
+      structuredOutputValid: true,
+      usage: {
+        inputTokens: 2,
+        cachedInputTokens: 0,
+        outputTokens: 2,
+        reasoningTokens: 0,
+        totalTokens: 4,
+      },
+      latencyMs: step.latencyMs,
+      finishReason: "stop",
+      providerRequestId: `req-${this.calls.length}`,
+      reportedCostUsd: null,
+    };
+  }
+}
+
+class VirtualLocal implements LocalHfRunnerV1 {
+  calls = 0;
+  constructor(
+    private readonly advance: (ms: number) => void,
+    private readonly latencyMs: number,
+    private readonly fail = false,
+  ) {}
+  async initialize(): Promise<void> {}
+  async generate(_input: LocalHfGenerateInputV1): Promise<LocalHfGenerationV1> {
+    this.calls += 1;
+    this.advance(this.latencyMs);
+    if (this.fail) throw new Error("local_unavailable");
+    return { text
