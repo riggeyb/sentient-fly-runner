@@ -1,0 +1,45 @@
+name: Repair FC67 Atlas Smoke Harness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+      - name: Repair reviewed identifier typos
+        shell: bash
+        run: |
+          set -euo pipefail
+          p=.github/workflows/atlas-hybrid-real-provider-smoke-fc67.yml
+          python - <<'PY'
+          from pathlib import Path
+          p = Path(".github/workflows/atlas-hybrid-real-provider-smoke-fc67.yml")
+          s = p.read_text()
+          fixes = {
+            "DOTS3_MODD": "DOTS3_MODEL",
+            '"DEEPSeek"': '"DEEPSEEK"',
+            "DEEPSEEEK_OLD_8S_THRESHOLD_EXCEEDED": "DEEPSEEK_OLD_8S_THRESHOLD_EXCEEDED",
+            "DEEPSEEEK_V3_2_MODD_V1": "DEEPSEEK_V3_2_MODEL_V1",
+          }
+          for old, new in fixes.items():
+            if old not in s:
+              raise SystemExit(f"missing expected typo: {old}")
+            s = s.replace(old, new)
+          p.write_text(s)
+          PY
+          ! grep -Eq 'DOTS3_MODD|DEEPSeek|DEEPSEEEK' "$p"
+          grep -q 'const DOTS3_MODEL = "dots-studio/dots-3-note-prev-free"' "$p"
+          grep -q 'DEEPSEEK_OLD_8S_THRESHOLD_EXCEEDED' "$p"
+          grep -q 'DEEPSEEK_V3_2_MODEL_V1' "$p"
+          git diff --check
+          git add "$p"
+          git commit -m "certification: fix FC67 smoke harness identifiers"
+          git push origin HEAD:main
