@@ -1,0 +1,108 @@
+name: Atlas Hybrid Exact Acceptance V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact riggeyb/sentient source SHA
+        required: true
+        type: string
+      tree:
+        description: Exact expected source tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  exact-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sentient
+          POSTGRES_PASSWORD: sentient
+          POSTGRES_DB: sentient
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentient -d sentient"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Exact acceptance
+        run: |
+          set +e
+          failed=0
+          runx() {
+            label="$1"; shift
+            "$@" >"/tmp/${label}.log" 2>&1
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "${label}=PASS"
+            else
+              echo "${label}=FAIL"
+              failed=1
+              tail -n 80 "/tmp/${label}.log" | sed -E 's/(authorization|token|secret|password|credential|api[_-]?key)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig'
+            fi
+          }
+          if [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] \
+            && [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] \
+            && [ "$(git rev-parse HEAD)" = "$EXPECTED_SHA" ] \
+            && [ "$(git rev-pars`'HEAD/{tree}')" = "$EXPECTED_TREE" ]; then
+            echo "SOURCE_CHECKOUT=PASS"
+          else
+            echo "SOURCE_CHECKOUT=FAIL"; exit 2
+          fi
+
+          runx NPM_CI npm ci --no-audit --no-fund
+          runx BUILD npm run build
+          runx NPM_TEST npm test
+          if [ "$failed" -eq 0 ]; then echo "PRODUCTION_CONVERGENCE=PASS"; else echo "PRODUCTION_CONVERGENCE=FAIL"; fi
+
+          runx ATLAS_CLIENT_TESTS node --test dist/test/atlascloud-client.test.js
+          runx DEEPSEEK_PROVIDER_TESTS node --test dist/test/atlascloud-client.test.js
+          runx DOTS3_PROVIDER_TESTS node --test dist/test/atlascloud-client.test.js dist/test/atlas-authority-invariants.test.js
+          runx COGNITION_FAILOVER_TESTS node --test dist/test/atlas-cognition-failover.test.js
+          runx SYNTHESIS_FAILOVER_TESTS node --test dist/test/atlas-synthesis-failover.test.js
+          runx LOCAL_HF_FALLBACK_TESTS node --test dist/test/atlas-cognition-failover.test.js dist/test/atlas-synthesis-failover.test.js
+          runx AUTHORITY_INVARIANT_TESTS node --test dist/test/atlas-authority-invariants.test.js
+          runx ROOT_TIMEOUT_TESTS node --test dist/test/atlas-cognition-failover.test.js
+
+          if [ -f dist/test/spawn-mission-control-context.test.js ]; then
+            runx MISSION_CONTROL_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
+          else
+            echo "MISSION_CONTROL_SPAWN_COMPILED=FAIL"; failed=1
+          fi
+          if [ -f tests/spawn-mission-control-context.test.ts ]; then
+            runx MISSION_CONTROL_SPAWN_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
+          else
+            echo "MISSION_CONTROL_SPAWN_DIRECT=FAIL"; failed=1
+          fi
+
+          git diff --quiet && git diff --cached --quiet
+          if [ "$?" -eq 0 ]; then
+            echo "TRACKED_SOURCE_MUTATION=false"
+          else
+            echo "TRACKED_SOURCE_MUTATION=true"; failed=1
+          fi
+          echo "OVERALL_EXIT=${failed}"
+          exit "$failed"
