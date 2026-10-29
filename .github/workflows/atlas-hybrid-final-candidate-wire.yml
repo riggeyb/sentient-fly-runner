@@ -1,0 +1,70 @@
+name: Atlas Hybrid Final Candidate Wire
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/atlas-hybrid-final-candidate-wire.yml
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  wire:
+    if: github.event.head_commit.message == 'operator: wire isolated Atlas final candidate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 7a8fb250f9612578417b87ed0a5e8c20d60dabc9
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Guard exact frozen source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEADD)" = "7a8fb250f9612578417b87ed0a5e8c20d60dabc9"
+          test "$(git show -s --format=%T HEAD)" = "db2f95c5119f88a37a580115757bad96468760e8"
+      - name: Fetch fixed owner-authored patch bodies
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for n in 10 11 12 13 14 15; do
+            gh api "repos/riggeyb/sentient-fly-runner/issues/$n" --jq '.body' > "/tmp/atlas-patch-$n.py"
+          done
+      - name: Apply bounded patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in 10 11 12 13 14 15; do
+            python "/tmp/atlas-patch-$n.py"
+          done
+          git diff --check
+      - name: Build and mocked acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          npm run test:atlas
+          npm test
+          node --test dist/test/phase0-engineering-readiness.test.js
+      - name: Commit exact tested successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name "sentient-atlas-engineering"
+          git config user.email "sentient-atlas-engineering@users.noreply.github.com"
+          git add src test package.json
+          test -n "$(git status --porcelain)"
+          git commit -m "atlas: wire hybrid cognition and synthesis into production"
+          git fetch origin refs/heads/atlas-hybrid-cognition-mvp-v1-final-candidate-20261029
+          test "$(git rev-parse FETCH_HEAD)" = "7a8fb250f9612578417b87ed0a5e8c20d60dabc9"
+          git push origin HEAD:refs/heads/atlas-hybrid-cognition-mvp-v1-final-candidate-20261029
