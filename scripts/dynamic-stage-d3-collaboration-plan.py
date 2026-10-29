@@ -82,18 +82,18 @@ function dynamicPlanningObjectiveV1(humanIntent: string): string {
 
 '''+anchor
 one(anchor,helper)
-one('''    maxOutputTokens: role.startsWith("independent-verification:") ? 8 : 32,
-    maxTotalTokens: 5_120,
-    maxCostMicros: 25_000,
-    currency: "USD",
-    maxRuntimeMs: 60_000,''','''    maxOutputTokens: role === "root-planning"
-      ? 512
-      : role.startsWith("independent-verification:")
-        ? 8
-        : 32,
-    maxTotalTokens: role === "root-planning" ? 4_608 : 5_120,
-    maxCostMicros: 25_000,
-    currency: "USD",
-    maxRuntimeMs: role === "root-planning" ? 45_000 : 60_000,''')
+one('''      maxOutputTokens: role.startsWith("independent-verification:") ? 8 : 32,
+      maxTotalTokens: 5_120,
+      maxCostMicros: 25_000,
+      currency: "USD",
+      maxRuntimeMs: 60_000,''','''      maxOutputTokens: role === "root-planning"
+        ? 512
+        : role.startsWith("independent-verification:")
+          ? 8
+          : 32,
+      maxTotalTokens: role === "root-planning" ? 4_608 : 5_120,
+      maxCostMicros: 25_000,
+      currency: "USD",
+      maxRuntimeMs: role === "root-planning" ? 45_000 : 60_000,''')
 p.write_text(s)
 print("collaboration plan helper patch applied")
