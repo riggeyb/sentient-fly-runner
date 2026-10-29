@@ -92,6 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test dist/test/objective-spawn-budget-inheritance-v1.test.js
+          node --test dist/test/spawn-cost-hard-stop-fallback-v1.test.js
           git grep -q 'hard_limit_unenforceable' -- src/spawn
           git grep -q 'runtime_budget_exhausted' -- src/spawn
           git grep -q 'token_budget_exhausted' -- src/spawn
