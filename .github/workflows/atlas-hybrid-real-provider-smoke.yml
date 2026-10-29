@@ -1,0 +1,130 @@
+name: Atlas Hybrid Real Provider Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact Sentient candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 91c0b36526f7bd0fc5d8cae1de9c98677b4998a8
+          fetch-depth: 1
+
+      - name: Guard exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "91c0b36526f7bd0fc5d8cae1de9c98677b4998a8"
+          test "$(git show -s --format=%T HEAD)" = "98b53ac978e5d664ac459933cfcb534bc277ed64"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Build exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Resolve Dots3-Note and smoke Atlas models
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { AtlasCloudClientV1 } from "./dist/src/model/providers/atlas-cloud-client.js";
+
+          const key = String(process.env.ATLASCLOUD_API_KEY ?? "").trim();
+          if (!key) throw new Error("ATLASCLOUD_API_KEY secret is unavailable");
+
+          function collectModelIds(value) {
+            const out = new Set();
+            const seen = new Set();
+            function walk(node, depth = 0) {
+              if (depth > 5 || node === null || typeof node !== "object" || seen.has(node)) return;
+              seen.add(node);
+              if (!Array.isArray(node) && typeof node.id === "string" && node.id.trim()) out.add(node.id.trim());
+              if (Array.isArray(node)) {
+                for (const item of node) walk(item, depth + 1);
+              } else {
+                for (const item of Object.values(node)) walk(item, depth + 1);
+              }
+            }
+            walk(value);
+            return [...out];
+          }
+
+          function scoreDots(id) {
+            const v = id.toLowerCase();
+            let score = 0;
+            if (v.includes("dots3-note") || v.includes("dots3_note") || v.includes("dots3/note")) score += 100;
+            if (v.includes("dots3") && v.includes("note")) score += 80;
+            if (v.includes("dots") && v.includes("3") && v.includes("note")) score += 60;
+            if (v.includes("dots") && v.includes("note")) score += 40;
+            return score;
+          }
+
+          const modelsResponse = await fetch("https://api.atlascloud.ai/v1/models", {
+            headers: { Authorization: `Bearer ${key}` },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!modelsResponse.ok) throw new Error(`atlas model-list request failed with status ${modelsResponse.status}`);
+          const modelsPayload = await modelsResponse.json();
+          const ids = collectModelIds(modelsPayload);
+          const ranked = ids.map(id => ({ id, score: scoreDots(id) })).filter(x => x.score > 0).sort((a,b) => b.score - a.score || a.id.localeCompare(b.id));
+          if (ranked.length === 0) throw new Error("Atlas model list contained no Dots3-Note candidate");
+          const bestScore = ranked[0].score;
+          const best = ranked.filter(x => x.score === bestScore);
+          if (best.length !== 1) throw new Error(`Atlas Dots3-Note resolution ambiguous: ${best.map(x => x.id).join(",")}`);
+          const dotsModel = best[0].id;
+
+          console.log("ATLAS_AUTH=PASS");
+          console.log(`DOTS3_MODEL=${dotsModel}`);
+
+          const client = new AtlasCloudClientV1({ apiKey: key });
+          async function smoke(label, model, maxOutputTokens) {
+            const result = await client.complete({
+              model,
+              systemPrompt: "You are a connectivity test. Return only a JSON object.",
+              userPrompt: 'Return exactly one JSON object with key "status" and string value "ok".',
+              maxOutputTokens,
+              timeoutMs: 15000,
+              requireJsonObject: true,
+            });
+            if (!result.ok) throw new Error(`${label} smoke failed: ${result.reason}`);
+            const structured = result.structuredOutput;
+            if (!structured || typeof structured !== "object" || Array.isArray(structured) || structured.status !== "ok") {
+              throw new Error(`${label} structured response invalid`);
+            }
+            const u = result.usage;
+            const usageCaptured = [u.inputTokens, u.outputTokens, u.totalTokens].some(v => typeof v === "number");
+            if (!usageCaptured) throw new Error(`${label} usage was not reported`);
+            console.log(`${label}_CONNECTIVITY=PASS`);
+            console.log(`${label}_RESPONSE_VALID=PASS`);
+            console.log(`${label}_USAGE_CAPTURED=PASS`);
+            console.log(`${label}_INPUT_TOKENS=${u.inputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_CACHED_INPUT_TOKENS=${u.cachedInputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_OUTPUT_TOKENS=${u.outputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_REASONING_TOKENS=${u.reasoningTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_TOTAL_TOKENS=${u.totalTokens ?? "NOT_REPORTED"}`);
+            console.log `${label}_REPORTED_COST_USD=${result.reportedCostUsd ?? "NOT_REPORTED"}`);
+            console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
+            console.log(`${label}_PROVIDER_REQUEST_ID=${result.providerRequestId ?? "NOT_REPORTED"}`);
+          }
+
+          await smoke("DEEPSEEK_V3_2", "deepseek-ai/deepseek-v3.2", 128);
+          await smoke("DOTS3", dotsModel, 128);
+          console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+          NODE
