@@ -1,0 +1,62 @@
+name: Sentient Dynamic Cognition Real Atlas Smoke V3
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout exact Sentient source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: sentient
+
+      - name: Verify and build exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.source_sha }}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${{ inputs.source_tree }}" =~ ^[0-9a-f]{40}$ ]]
+          cd sentient
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse 'HEAD^{tree}')" = "${{ inputs.source_tree }}"
+          test -z "$(git status --porcelain)"
+          npm ci --no-audit --no-fund
+          npm run build
+          echo "SOURCE_CHECKOUT=PASS"
+          echo "BUILD=PASS"
+
+      - name: Real Atlas threshold, Dots3, and abort smoke
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLLOUD_API_KEY }}
+        run: node scripts/dynamic-real-atlas-smoke-v2.mjs
+
+      - name: Final clean-source fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sentient
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse 'HEAD^{tree}')" = "${{ inputs.source_tree }}"
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "DEPLOYMENT_PERFORMED=false"
