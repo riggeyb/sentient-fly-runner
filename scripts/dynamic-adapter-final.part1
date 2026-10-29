@@ -1,0 +1,17 @@
+vocation?.maxInputTokens),\n          maxOutputTokens: boundedTokens(1_024, invocation?.maxOutputTokens),\n          ...controls,\n        })')
+r('          maxInputTokens: 4_096,\n          maxOutputTokens: 384,\n        });',
+  '          maxInputTokens: boundedTokens(4_096, invocation?.maxInputTokens),\n          maxOutputTokens: boundedTokens(384, invocation?.maxOutputTokens),\n          ...controls,\n        });')
+r('    if (!result.ok) {',
+  '    if (invocation && !modelInvocationLiveV1(invocation)) return unavailable("late_model_output_rejected");\n    if (!result.ok) {')
+r('        telemetry: jsonValue(result.telemetry),\n      },',
+  '        telemetry: jsonValue(result.telemetry),\n        ...(this.#stage === "cognition" && result.structuredOutput !== null\n          ? { dynamicCognition: jsonValue(normalizeDynamicCognitionV1(requirements.normalizedUserRequest, result.structuredOutput)) }\n          : {}),\n      },')
+r('      timeoutMs: Math.min(budget.maxRuntimeMs, 28_000),\n','      timeoutMs: budget.maxRuntimeMs,\n')
+r('    const usage = aggregateUsage(result.telemetry);\n',
+  '    if (input.signal.aborted) return failure("timed_out", "late_model_output_rejected");\n    const usage = aggregateUsage(result.telemetry);\n')
+marker='\nfunction workerPrompt(taskPackage: ChildTaskPackageV1): string {'
+helpers='''\nfunction invocationControls(invocation: ModelInvocationEnvelopeV1 | undefined): { timeoutMs?: number; maxCostMicros?: number; signal?: AbortSignal } {
+  if (!invocation) return {};
+  const remaining=modelInvocationRemainingMsV1(invocation);
+  return { timeoutMs: Math.max(1,Math.min(invocation.maxWallTimeMs,remaining)), ...(invocation.maxCostMicros===null?{}:{maxCostMicros:invocation.maxCostMicros}), signal:invocation.signal };
+}
+function boundedTokens(
