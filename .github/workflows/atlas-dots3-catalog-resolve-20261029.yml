@@ -1,0 +1,109 @@
+name: Atlas Hybrid Source Patch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch-private-successor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 8411570237f220e3fbec017c9932fc8d75dfe476
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Apply exact resolver hunks and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "8411570237f220e3fbec017c9932fc8d75dfe476"
+          test "$(git rev-parse HEAD^)" = "55d5d9145121b87fd580f1afd1312d02cc4d697e"
+          test "$(git rev-parse 'HEAD^{tree}')" = "40f5b584a7eafa97771614cae2ff8538fe640269"
+          test "$(git hash-object .github/atlas-dots3-catalog-resolution.patch)" = "159cd0cb478c55ae13a8654b7de6febbafb684a3"
+          python - <<'PY'
+          from pathlib import Path
+
+          patch_path = Path(".github/atlas-dots3-catalog-resolution.patch")
+          text = patch_path.read_text().replace(
+              "ATLAS_DOTS3_MODD_ID", "ATLAS_DOTS3_MODEL_ID"
+          )
+          allowed = {
+              "src/model/providers/atlas-cloud-client.ts",
+              "src/model/providers/atlas-hybrid-router.ts",
+              "src/fly/production-runtime.ts",
+          }
+          applied = []
+          for section in text.split("diff --git ")[1:]:
+              lines = section.splitlines()
+              header = lines[0].split()
+              target = header[1][2:]
+              if target not in allowed:
+                  continue
+              source = Path(target).read_text()
+              i = 1
+              changed = False
+              while i < len(lines):
+                  if lines[i] != "@@":
+                      i += 1
+                      continue
+                  i += 1
+                  hunk = []
+                  while i < len(lines) and lines[i] != "@@":
+                      hunk.append(lines[i])
+                      i += 1
+                  old_lines, new_lines = [], []
+                  has_change = False
+                  for line in hunk:
+                      if line.startswith("--- ") or line.startswith("+++ "):
+                          continue
+                      if line == "":
+                          old_lines.append("")
+                          new_lines.append("")
+                      elif line[0] == " ":
+                          old_lines.append(line[1:])
+                          new_lines.append(line[1:])
+                      elif line[0] == "-":
+                          old_lines.append(line[1:])
+                          has_change = True
+                      elif line[0] == "+":
+                          new_lines.append(line[1:])
+                          has_change = True
+                  if not has_change:
+                      continue
+                  old = "\n".join(old_lines) + "\n"
+                  new = "\n".join(new_lines) + "\n"
+                  count = source.count(old)
+                  if count != 1:
+                      raise SystemExit(
+                          f"{target}: expected one exact hunk, got {count}: {old[:160]!r}"
+                      )
+                  source = source.replace(old, new, 1)
+                  changed = True
+              if not changed:
+                  raise SystemExit(f"{target}: no source hunk applied")
+              Path(target).write_text(source)
+              applied.append(target)
+
+          if set(applied) != allowed:
+              raise SystemExit(f"unexpected applied set: {applied}")
+          patch_path.unlink()
+          PY
+          git diff --check
+          npm ci --no-audit --no-fund
+          npm run build
+          npm test
+          git config user.name "sentient-atlas-engineering"
+          git config user.email "sentient-atlas-engineering@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "atlas: resolve Dots3 Note from Atlas model catalog"
+          git fetch origin atlas-hybrid-cognition-mvp-v1-final-20261029
+          test "$(git rev-parse FETCH_HEAD)" = "8411570237f220e3fbec017c9932fc8d75dfe476"
+          git push origin HEAD:atlas-hybrid-cognition-mvp-v1-final-20261029
