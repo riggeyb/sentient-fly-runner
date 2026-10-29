@@ -30,7 +30,7 @@ jobs:
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
 
-      - name: Checkout candidate
+      - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
@@ -39,7 +39,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Guard source
+      - name: Guard exact source
         shell: bash
         run: |
           set -euo pipefail
@@ -51,7 +51,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Build candidate
+      - name: Build exact candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -59,16 +59,135 @@ jobs:
           npm run build >/dev/null
           echo "BUILD=PASS"
 
-      - name: Real Atlas smoke
+      - name: Dots3 smoke through candidate AtlasCloudClientV1
+        id: dots
+        continue-on-error: true
         shell: bash
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
-        run: node dist/src/model/atlas-smoke.js
+        run: |
+          node --input-type=module <<'NODE'
+          import { AtlasCloudClientV1, resolveAtlasDots3NoteModelV1 } from "./dist/src/model/providers/atlascloud-client.js";
+          const key = process.env.ATLASCLOUD_API_KEY?.trim();
+          if (!key) {
+            console.log("ATLAS_AUTH=FAIL");
+            console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+            process.exit(2);
+          }
+          try {
+            const client = new AtlasCloudClientV1({ apiKey: key });
+            const model = await resolveAtlasDots3NoteModelV1(client);
+            console.log("ATLAS_AUTH=PASS");
+            console.log(`DOTS3_MODEL=${model}`);
+            const result = await client.complete({
+              model,
+              stage: "synthesis",
+              attemptNumber: 1,
+              systemPrompt: "Connectivity test only. Produce a harmless non-authoritative candidate response.",
+              userPrompt: "Reply with: ok",
+              maxOutputTokens: 128,
+              timeoutMs: 15000,
+            });
+            if (!result.ok) {
+              console.log("DOTS3_CONNECTIVITY=FAIL");
+              console.log(`DOTS3_FAILURE_KIND=${result.failureKind}`);
+              console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+              process.exit(1);
+            }
+            const valid = result.text.trim().length > 0;
+            console.log("DOTS3_CONNECTIVITY=PASS");
+            console.log(`DOTS3_RESPONSE_VALID=${valid ? "PASS" : "FAIL"}`);
+            console.log(`DOTS3_USAGE_CAPTURED=${result.usage.totalTokens > 0 ? "PASS" : "FAIL"}`);
+            console.log(`DOTS3_INPUT_TOKENS=${result.usage.inputTokens}`);
+            console.log(`DOTS3_CACHED_INPUT_TOKENS=${result.usage.cachedInputTokens ?? "UNREPORTED"}`);
+            console.log(`DOTS3_OUTPUT_TOKENS=${result.usage.outputTokens}`);
+            console.log(`DOTS3_REASONING_TOKENS=${result.usage.reasoningTokens ?? "UNREPORTED"}`);
+            console.log(`DOTS3_TOTAL_TOKENS=${result.usage.totalTokens}`);
+            console.log(`DOTS3_FINISH_REASON=${result.finishReason}`);
+            console.log(`DOTS3_PROVIDER_REQUEST_ID_PRESENT=${result.providerRequestId ? "true" : "false"}`);
+            console.log(`ACTUAL_DOTS3_SMOKE_COST=${result.telemetry.reportedCostUsd ?? "UNREPORTED"}`);
+            console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+            if (!valid || result.usage.totalTokens <= 0) process.exit(1);
+          } catch {
+            console.log("DOTS3_CONNECTIVITY=FAIL");
+            console.log("DOTS3_FAILURE_KIND=discovery_or_transport");
+            console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+            process.exit(1);
+          }
+          NODE
+
+      - name: DeepSeek V3.2 smoke through candidate AtlasCloudClientV1
+        id: deep
+        continue-on-error: true
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { AtlasCloudClientV1 } from "./dist/src/model/providers/atlascloud-client.js";
+          import { DEEPSEEK_V3_2_MODEL_V1 } from "./dist/src/model/atlas-hybrid-cognition-router.js";
+          const key = process.env.ATLASCLOUD_API_KEY?.trim();
+          if (!key) {
+            console.log("ATLAS_AUTH=FAIL");
+            console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+            process.exit(2);
+          }
+          const client = new AtlasCloudClientV1({ apiKey: key });
+          console.log("ATLAS_AUTH=PASS");
+          console.log(`DEEPSEEK_MODEL=${DEEPSEEK_V3_2_MODEL_V1}`);
+          const result = await client.complete({
+            model: DEEPSEEK_V3_2_MODEL_V1,
+            stage: "cognition",
+            attemptNumber: 1,
+            systemPrompt: "Connectivity test only. Return a harmless JSON object with required non-empty string field answer. No authority is delegated.",
+            userPrompt: "Reply with the word ok in the answer field.",
+            maxOutputTokens: 256,
+            timeoutMs: 15000,
+            requireJson: true,
+          });
+          if (!result.ok) {
+            console.log("DEEPSEEK_V3_2_CONNECTIVITY=FAIL");
+            console.log(`DEEPSEEK_FAILURE_KIND=${result.failureKind}`);
+            console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+            process.exit(1);
+          }
+          const structured = result.structured && typeof result.structured === "object" && !Array.isArray(result.structured)
+            ? result.structured
+            : {};
+          const valid = typeof structured.answer === "string" && structured.answer.trim().length > 0;
+          console.log("DEEPSEEK_V3_2_CONNECTIVITY=PASS");
+          console.log(`DEEPSEEK_RESPONSE_VALID=${valid ? "PASS" : "FAIL"}`);
+          console.log(`DEEPSEEK_USAGE_CAPTURED=${result.usage.totalTokens > 0 ? "PASS" : "FAIL"}`);
+          console.log(`DEEPSEEK_INPUT_TOKENS=${result.usage.inputTokens}`);
+          console.log(`DEEPSEEK_CACHED_INPUT_TOKENS=${result.usage.cachedInputTokens ?? "UNREPORTED"}`);
+          console.log(`DEEPSEEK_OUTPUT_TOKENS=${result.usage.outputTokens}`);
+          console.log(`DEEPSEEK_REASONING_TOKENS=${result.usage.reasoningTokens ?? "UNREPORTED"}`);
+          console.log(`DEEPSEEK_TOTAL_TOKENS=${result.usage.totalTokens}`);
+          console.log(`DEEPSEEK_FINISH_REASON=${result.finishReason}`);
+          console.log(`DEEPSEEK_PROVIDER_REQUEST_ID_PRESENT=${result.providerRequestId ? "true" : "false"}`);
+          console.log(`ACTUAL_DEEPSEEK_SMOKE_COST=${result.telemetry.reportedCostUsd ?? "UNREPORTED"}`);
+          console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+          if (!valid || result.usage.totalTokens <= 0) process.exit(1);
+          NODE
 
       - name: Guard clean source
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
           git diff --quiet
           git diff --cached --quiet
           echo "TRACKED_SOURCE_MUTATION=false"
+          echo "DEPLOYMENT_PERFORMED=false"
+
+      - name: Require both providers
+        if: always()
+        shell: bash
+        env:
+          DOTS_OUTCOME: ${{ steps.dots.outcome }}
+          DEEP_OUTCOME: ${{ steps.deep.outcome }}
+        run: |
+          set -euo pipefail
+          test "$DOTS_OUTCOME" = "success"
+          test "$DEEP_OUTCOME" = "success"
+          echo "REAL_ATLAS_SMOKE=PASS"
