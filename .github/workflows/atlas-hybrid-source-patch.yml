@@ -1,0 +1,44 @@
+name: Atlas Hybrid Source Patch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch-private-successor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 3f933c7121e9a5f9d4ca76d05a526f10c6a03125
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Verify, patch, build, test, and push isolated successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "3f933c7121e9a5f9d4ca76d05a526f10c6a03125"
+          test "$(git rev-parse HEAD^)" = "13106276199de1d6eda129b124d3e60ccec07348"
+          test "$(git hash-object src/application/production-collaboration.ts)" = "024857657e086432bfbf79469b564a49dc1d4220"
+          printf '%s  %s\n' "95d73cb922bc89517195922c01c6383f149d74d71565c225ef4bf09439fbaa6b" ".github/atlas-hybrid-spawn.patch" | sha256sum -c -
+          git apply --check .github/atlas-hybrid-spawn.patch
+          git apply .github/atlas-hybrid-spawn.patch
+          rm .github/atlas-hybrid-spawn.patch
+          git show HEAD^:.github/workflows/final-integrated-verification.yml > .github/workflows/final-integrated-verification.yml
+          test "$(sha256sum src/application/production-collaboration.ts | cut -d' ' -f1)" = "7aa283106db8d4a3e7edba374017036a52477e1e94f1fd6503c00286eebbc9bd"
+          git diff --check
+          npm install --no-audit --no-fund
+          npm run build
+          npm test
+          git config user.name "sentient-atlas-engineering"
+          git config user.email "sentient-atlas-engineering@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "atlas: route production Spawn through bounded hybrid cognition"
+          git push origin HEAD:atlas-hybrid-cognition-mvp-v1-final-20261029
