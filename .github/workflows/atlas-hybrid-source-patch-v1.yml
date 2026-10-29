@@ -54,7 +54,16 @@ jobs:
           cp runner/runner-fixtures/governor-convergence-v1.ts src/deployment-governor/convergence.ts
           git show "${EXPERIMENTAL_GOVERNOR_SHA}:src/deployment-governor/deployment.ts" > src/deployment-governor/deployment.ts
           cp runner/runner-fixtures/governor-convergence-v1.test.ts test/governor-convergence-v1.test.ts
-          sed -i 's/const SKILLS = "b".repeat(40);/const SKILLS = "b3df9b32b47370a7140d6fe814eeba975646663ab";/' test/governor-convergence-v1.test.ts
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("test/governor-convergence-v1.test.ts")
+          s = p.read_text()
+          old = 'const SKILLS = "b".repeat(40);'
+          new = 'const SKILLS = "b3df9b32b47370a7140d6fe814eeba97564663ab";'
+          if s.count(old) != 1:
+              raise SystemExit(f"skills fixture contract changed: {s.count(old)}")
+          p.write_text(s.replace(old, new, 1))
+          PY
 
           python runner/scripts/governor_contract_patch.py
           git diff --check
