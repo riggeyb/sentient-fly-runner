@@ -25,45 +25,6 @@ function phase1HardStopFailure(reason: string, telemetry: readonly HybridModelTe
 }
 ''')
 
-p = "src/spawn/orchestrator.ts"
-replace_once(
-    p,
-    '''      const result = await backend.execute({
-        identity,
-        taskPackage,
-        target: selected.target,
-        signal: input.signal,
-      });''',
-    '''      const runtimeSignal = AbortSignal.timeout(taskPackage.effectiveGrant.budgets.maxRuntimeMs);
-      const executionSignal = AbortSignal.any([input.signal, runtimeSignal]);
-      const result = await backend.execute({
-        identity,
-        taskPackage,
-        target: selected.target,
-        signal: executionSignal,
-      });
-      const liveResult = executionSignal.aborted
-        ? {
-            status: "timed_out" as const,
-            output: null,
-            artifactRefs: [],
-            evidenceRefs: [],
-            toolActions: [],
-            usage: { costMicros: 0, toolRounds: 0, toolActions: 0 },
-            costMicros: 0,
-            failure: { class: "timeout", message: "late_model_output_rejected", retryable: false },
-            unresolvedAmbiguities: [],
-          }
-        : result;''',
-)
-# Replace references in the block between backend result and verification decision.
-s = Path(p).read_text()
-anchor = "      const liveResult = executionSignal.aborted"
-a = s.index(anchor)
-b = s.index("      const verification =", a)
-segment = s[a:b].replace("result.", "liveResult.").replace("(result)", "(liveResult)")
-Path(p).write_text(s[:a] + segment + s[b:])
-
 p = "src/phase1/core-runtime.ts"
 replace_once(
     p,
