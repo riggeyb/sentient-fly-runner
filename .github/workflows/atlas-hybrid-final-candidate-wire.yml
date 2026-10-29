@@ -1,10 +1,7 @@
 name: Atlas Hybrid Final Candidate Wire
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/atlas-hybrid-final-candidate-wire.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,7 +9,6 @@ permissions:
 
 jobs:
   wire:
-    if: github.event.head_commit.message == 'operator: wire isolated Atlas final candidate'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -27,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEADD)" = "7a8fb250f9612578417b87ed0a5e8c20d60dabc9"
+          test "$(git rev-parse HEAD)" = "7a8fb250f9612578417b87ed0a5e8c20d60dabc9"
           test "$(git show -s --format=%T HEAD)" = "db2f95c5119f88a37a580115757bad96468760e8"
       - name: Fetch fixed owner-authored patch bodies
         shell: bash
