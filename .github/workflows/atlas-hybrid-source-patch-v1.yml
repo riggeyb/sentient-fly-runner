@@ -16,7 +16,7 @@ permissions:
 jobs:
   patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,56 +24,40 @@ jobs:
           ref: ${{ inputs.source_sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
-          fetch-depth: 1
-      - name: Repair exact Atlas mocked timeout and fetch typing
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Patch and verify exact Atlas timing policy
         shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_TREE: ${{ inputs.source_tree }}
+          TARGET_BRANCH: atlas-timing-governor-convergence-v1
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("test/atlas-hybrid-router.test.ts")
-          text = p.read_text()
-          if text.count("RequestInfo") != 3:
-              raise SystemExit(f"expected 3 RequestInfo occurrences, saw {text.count('RequestInfo')}")
-          text = text.replace("RequestInfo", "Parameters<typeof fetch>[0]")
-          old = '''    return await new Promise<Response>((_resolve, reject) => {
-      const signal = init?.signal;
-      if (signal?.aborted) {
-        reject(new Error("aborted"));
-        return;
-      }
-      signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-    });'''
-          new = '''    return await new Promise<Response>((_resolve, reject) => {
-      const signal = init?.signal;
-      const keepAlive = setTimeout(() => reject(new Error("mock_timeout_guard")), 1_000);
-      const abort = () => {
-        clearTimeout(keepAlive);
-        reject(new Error("aborted"));
-      };
-      if (signal?.aborted) {
-        abort();
-        return;
-      }
-      signal?.addEventListener("abort", abort, { once: true });
-    });'''
-          if text.count(old) != 1:
-              raise SystemExit("hangingFetch contract changed")
-          p.write_text(text.replace(old, new))
-          PY
+          test "$(git rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
+          mkdir -p runner-fixtures
+          cp runner/runner-fixtures/atlas-hybrid-timeout-policy.test.ts runner-fixtures/
+          python runner/scripts/atlas_timing_patch.py
           git diff --check
           npm ci --no-audit --no-fund
           npm run build
-          node --test dist/test/atlas-hybrid-router.test.js dist/test/atlas-dots3-cost-policy.test.js dist/test/phase0-engineering-readiness.test.js
+          node --test \
+            dist/test/atlas-hybrid-timeout-policy.test.js \
+            dist/test/atlas-hybrid-router.test.js \
+            dist/test/atlas-root-timeout-budget.test.js
           git config user.name "sentient-atlas-engineering"
           git config user.email "sentient-atlas-engineering@users.noreply.github.com"
-          git add test/atlas-hybrid-router.test.ts
-          git commit -m "test: make Atlas timeout mock deterministic"
-          git push origin HEAD:refs/heads/atlas-hybrid-cognition-mvp-v1-20261029
+          git add src/model/providers/atlas-hybrid-router.ts test/atlas-hybrid-timeout-policy.test.ts
+          git commit -m "atlas: use stage-aware bounded provider timeouts"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
