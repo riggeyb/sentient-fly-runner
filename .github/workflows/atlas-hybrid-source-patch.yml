@@ -26,7 +26,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "8411570237f220e3fbec017c9932fc8d75dfe476"
           test "$(git rev-parse HEAD^)" = "55d5d9145121b87fd580f1afd1312d02cc4d697e"
           test "$(git rev-parse 'HEAD^{tree}')" = "40f5b584a7eafa97771614cae2ff8538fe640269"
-          printf '%s  %s\n' "969300a975da08544e9094e19d2a18659e3a0b7f64eea812a3df0d5aeb27075c" ".github/atlas-dots3-catalog-resolution.patch" | sha256sum -c -
+          test "$(git hash-object .github/atlas-dots3-catalog-resolution.patch)" = "159cd0cb478c55ae13a8654b7de6febbafb684a3"
           git apply --check .github/atlas-dots3-catalog-resolution.patch
           git apply .github/atlas-dots3-catalog-resolution.patch
           rm .github/atlas-dots3-catalog-resolution.patch
