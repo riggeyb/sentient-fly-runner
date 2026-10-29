@@ -4,11 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Exact riggeyb/sentient successor SHA
         required: true
         type: string
       source_tree:
-        description: Exact riggeyb/sentient successor tree SHA
         required: true
         type: string
 
@@ -27,7 +25,7 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 1
-      - name: Repair exact Atlas test fetch typing and verify
+      - name: Repair exact Atlas mocked timeout and fetch typing
         shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -42,12 +40,33 @@ jobs:
           from pathlib import Path
           p = Path("test/atlas-hybrid-router.test.ts")
           text = p.read_text()
-          old = "RequestInfo"
-          expected = 3
-          count = text.count(old)
-          if count != expected:
-              raise SystemExit(f"expected {expected} RequestInfo occurrences, saw {count}")
-          p.write_text(text.replace(old, "Parameters<typeof fetch>[0]"))
+          if text.count("RequestInfo") != 3:
+              raise SystemExit(f"expected 3 RequestInfo occurrences, saw {text.count('RequestInfo')}")
+          text = text.replace("RequestInfo", "Parameters<typeof fetch>[0]")
+          old = '''    return await new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        reject(new Error("aborted"));
+        return;
+      }
+      signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });'''
+          new = '''    return await new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      const keepAlive = setTimeout(() => reject(new Error("mock_timeout_guard")), 1_000);
+      const abort = () => {
+        clearTimeout(keepAlive);
+        reject(new Error("aborted"));
+      };
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
+      signal?.addEventListener("abort", abort, { once: true });
+    });'''
+          if text.count(old) != 1:
+              raise SystemExit("hangingFetch contract changed")
+          p.write_text(text.replace(old, new))
           PY
           git diff --check
           npm ci --no-audit --no-fund
@@ -56,5 +75,5 @@ jobs:
           git config user.name "sentient-atlas-engineering"
           git config user.email "sentient-atlas-engineering@users.noreply.github.com"
           git add test/atlas-hybrid-router.test.ts
-          git commit -m "test: align Atlas mocked fetch typing with Node"
+          git commit -m "test: make Atlas timeout mock deterministic"
           git push origin HEAD:refs/heads/atlas-hybrid-cognition-mvp-v1-20261029
