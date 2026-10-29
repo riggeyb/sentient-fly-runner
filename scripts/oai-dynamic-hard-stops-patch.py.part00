@@ -1,0 +1,71 @@
+from pathlib import Path
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = Path(path)
+    s = p.read_text()
+    count = s.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: expected one match, got {count}")
+    p.write_text(s.replace(old, new, 1))
+
+p = "src/model/providers/atlas-hybrid-adapters.ts"
+replace_once(
+    p,
+    'import type { JsonObject, JsonValue } from "../types.js";\n',
+    'import type { JsonObject, JsonValue } from "../types.js";\n'
+    'import { awaitModelInvocationV1, createModelInvocationEnvelopeV1, remainingModelInvocationMsV1 } from "../invocation-envelope.js";\n',
+)
+replace_once(
+    p,
+    '''  GOVERNOR_OWNS_EFFECT_AUTHORITY: true,
+  WORKER_AUTHORITY_CANNOT_EXCEED_PARENT: true,
+  DELEGATED_SCOPE_CANNOT_EXPAND: true,
+  MODEL_CANNOT_SELECT_LOWER_TIER_FOR_OWN_ACTION: true,''',
+    '''  GOVERNOR_OWNS_EFFECT_AUTHORITY: true,
+  GOVERNOR_GOVERNS_EFFECTS: true,
+  GOVERNOR_GOVERNS_THOUGHT: false,
+  WORKER_AUTHORITY_CANNOT_EXCEED_PARENT: true,
+  DELEGATED_SCOPE_CANNOT_EXPAND: true,
+  COGNITIVE_SCOPE_DOES_NOT_GRANT_EFFECT_AUTHORITY: true,
+  MODEL_CANNOT_INCREASE_OBJECTIVE_BUDGET: true,
+  MODEL_CANNOT_EXTEND_OWN_DEADLINE: true,
+  MODEL_CANNOT_GRANT_OWN_AUTHORITY: true,
+  MODEL_CANNOT_SELECT_LOWER_TIER_FOR_OWN_ACTION: true,''',
+)
+
+s = Path(p).read_text()
+start = '  public async run(requirements: TaskRequirementsV1): Promise<unknown> {'
+end = '\n}\n\nexport class AtlasHybridPhase3CognitionV1'
+a = s.index(start)
+b = s.index(end, a)
+new_run = r'''  public async run(requirements: TaskRequirementsV1): Promise<unknown> {
+    const now = Date.now();
+    const rawDeadline = requirements.constraints.objectiveAbsoluteDeadline;
+    const parsedDeadline = typeof rawDeadline === "string" ? Date.parse(rawDeadline) : NaN;
+    const deadlineMs = Number.isFinite(parsedDeadline) ? parsedDeadline : now + 30_000;
+    const rawRemaining = requirements.constraints.objectiveRemainingMs;
+    const remainingMs = Math.max(0, Math.min(
+      typeof rawRemaining === "number" && Number.isFinite(rawRemaining) ? rawRemaining : deadlineMs - now,
+      deadlineMs - now,
+    ));
+    if (remainingMs <= 0) return phase1HardStopFailure("objective_budget_exhausted");
+
+    const maxTokens = constraintNumber(requirements, "objectiveMaxTokens");
+    const maxCostMicros = constraintNumber(requirements, "objectiveMaxCostMicros");
+    const defaultOutput = this.#stage === "synthesis" ? 1_024 : 384;
+    const maxOutputTokens = maxTokens === null ? null : Math.max(1, Math.min(defaultOutput, maxTokens));
+    const maxInputTokens = maxTokens === null ? null : Math.max(1, maxTokens - (maxOutputTokens ?? 0));
+    const envelope = createModelInvocationEnvelopeV1({
+      objectiveId: requirements.taskId,
+      executionId: requirements.taskId,
+      parentExecutionId: null,
+      invocationId: `${requirements.requestId}:${this.#stage}`,
+      absoluteDeadline: new Date(deadlineMs).toISOString(),
+      maxWallTimeMs: remainingMs,
+      ...(maxInputTokens === null ? {} : { maxInputTokens }),
+      ...(maxOutputTokens === null ? {} : { maxOutputTokens }),
+      ...(maxCostMicros === null ? {} : { maxCostMicros }),
+    });
+
+    try {
+      const result = aw
