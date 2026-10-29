@@ -36,10 +36,10 @@ const abortPass = !aborted.ok && aborted.reason === "timeout" && abortObserved;
 
 const authPass = deepSeek.auth && dots3.auth;
 console.log(`ATLAS_AUTH=${authPass ? "PASS" : "FAIL"}`);
-console.log(`DEEPSEEK_MODEL=${DEEPSEEK_V3_2_MODD_V1}`);
-console.log(`DOTS3_MODEL=${DOTS3_MODE|}`);
+console.log(`DEEPSEEK_MODEL=${DEEPSEEK_V3_2_MODEL_V1}`);
+console.log(`DOTS3_MODEL=${DOTS3_MODEL}`);
 console.log(`ABORT_SIGNAL_PATH=${abortPass ? "PASS" : "FAIL"}`);
 console.log("ATLASCLOUD_SECRET_EXPOSED=false");
 const overall = deepLatency > 8_000 && deepLatency < 12_000 && dots3.ok && authPass && abortPass;
 console.log(`REAL_ATLAS_SMOKE=${overall ? "PASS" : "FAIL"}`);
-if (!overall) process.exit(3);
+if (!overall) process
