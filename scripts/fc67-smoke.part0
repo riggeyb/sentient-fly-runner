@@ -1,0 +1,28 @@
+const { AtlasCloudClientV1 } = await import("./dist/src/model/providers/atlas-cloud-client.js");
+const { DEEPSEEK_V3_2_MODEL_V1 } = await import("./dist/src/model/providers/atlas-hybrid-router.js");
+
+const DOTS3_MODEL = "dots-studio/dots-3-note-prev-free";
+const key = String(process.env.ATLASCLOUD_API_KEY ?? "").trim();
+if (!key) throw new Error("atlas_secret_unavailable");
+const client = new AtlasCloudClientV1({ apiKey: key });
+
+async function call(label, input) {
+  const result = await client.complete(input);
+  if (!result.ok) {
+    console.log(`${label}_CONNECTIVITY=FAIL`);
+    console.log(`${label}_FAILURE_REASON=${result.reason}`);
+    console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
+    return { ok: false, auth: result.reason !== "authentication", result };
+  }
+  const usageCaptured = [result.usage.inputTokens, result.usage.outputTokens, result.usage.totalTokens]
+    .every((value) => typeof value === "number");
+  console.log(`${label}_CONNECTIVITY=PASS`);
+  console.log(`${label}_RESPONSE_VALID=PASS`);
+  console.log(`${label}_USAGE_CAPTURED=${usageCaptured ? "PASS" : "FAIL"}`);
+  console.log(`${label}_INPUT_TOKENS=${result.usage.inputTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_CACHED_INPUT_TOKENS=${result.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_OUTPUT_TOKENS=${result.usage.outputTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_REASONING_TOKENS=${result.usage.reasoningTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_TOTAL_TOKENS=${result.usage.totalTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
+  console.log(`${label}_FINISH_REASON=${result.finishReason ?? "NOT_REPORTED"}`);
