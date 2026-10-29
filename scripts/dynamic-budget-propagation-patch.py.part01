@@ -1,0 +1,143 @@
+      const remaining = Math.max(1, overall - (this.#now() - started));''',
+)
+replace_once(
+    "src/model/providers/atlas-hybrid-router.ts",
+    '''          maxInputTokens: input.maxInputTokens ?? 4_096,
+maxOutputTokens: Math.min(input.maxOutputTokens ?? step.maxOutput, step.maxOutput),
+signal,''',
+    '''          maxInputTokens: localInputCeiling,
+maxOutputTokens: localOutputCeiling,
+signal,''',
+)
+
+replace_once(
+    "src/model/providers/atlas-hybrid-adapters.ts",
+    '''      ...(control?.maxCostMicros === undefined ? {} : { maxCostMicros: control.maxCostMicros }),
+      ...(remaining === undefined ? {} : { timeoutMs: remaining }),''',
+    '''      ...(control?.maxCostMicros === undefined ? {} : { maxCostMicros: control.maxCostMicros }),
+      ...(control?.maxTotalTokens === undefined ? {} : { maxTotalTokens: control.maxTotalTokens }),
+      ...(remaining === undefined ? {} : { timeoutMs: remaining }),''',
+)
+replace_once(
+    "src/model/providers/atlas-hybrid-adapters.ts",
+    '''        costMicros: true,''',
+    '''        costMicros: false,''',
+)
+replace_once(
+    "src/model/providers/atlas-hybrid-adapters.ts",
+    '''      maxInputTokens: Math.min(budget.maxInputTokens, 8_192),
+      maxOutputTokens: Math.min(budget.maxOutputTokens, verification ? 32 : 384),
+      maxCostMicros: budget.maxCostMicros,''',
+    '''      maxInputTokens: Math.min(budget.maxInputTokens, 8_192),
+      maxOutputTokens: Math.min(budget.maxOutputTokens, verification ? 32 : 384),
+      maxTotalTokens: budget.maxTotalTokens,
+      maxCostMicros: budget.maxCostMicros,''',
+)
+
+replace_once(
+    "src/fly/server-runtime.ts",
+    '''import { isBearerAuthorized } from "./bearer-auth.js";''',
+    '''import { isBearerAuthorized } from "./bearer-auth.js";
+import {
+  normalizeBudgetEnvelopeV1,
+  parseAbsoluteDeadlineV1,
+} from "../application/objective-budget.js";''',
+)
+replace_once(
+    "src/fly/server-runtime.ts",
+    '''    const mode = parseMode(body.mode);
+    const privacy = body.privacy === "public_fixture" ? "public_fixture" : "private";
+    const receipt = await objectiveRunner.enqueue({''',
+    '''    const mode = parseMode(body.mode);
+    const privacy = body.privacy === "public_fixture" ? "public_fixture" : "private";
+    const budget = normalizeBudgetEnvelopeV1(body.budget);
+    const deadline = optional(body.deadline);
+    if (deadline !== null) parseAbsoluteDeadlineV1(deadline);
+    const receipt = await objectiveRunner.enqueue({''',
+)
+replace_once(
+    "src/fly/server-runtime.ts",
+    '''      privacy,
+      ...(body.engineeringJob === undefined ? {} : { engineeringJob: body.engineeringJob }),''',
+    '''      privacy,
+      ...(budget === undefined ? {} : { budget }),
+      ...(deadline === null ? {} : { deadline }),
+      ...(body.engineeringJob === undefined ? {} : { engineeringJob: body.engineeringJob }),''',
+)
+
+replace_once(
+    "src/fly/self-execution.ts",
+    '''import { ProductionCollaborationLeaseLiveErrorV1 } from "../application/production-collaboration.js";''',
+    '''import { ProductionCollaborationLeaseLiveErrorV1 } from "../application/production-collaboration.js";
+import {
+  normalizeBudgetEnvelopeV1,
+  objectiveExecutionEnvelopeV1,
+  parseAbsoluteDeadlineV1,
+} from "../application/objective-budget.js";''',
+)
+replace_once(
+    "src/fly/self-execution.ts",
+    '''  privacy: SentientObjectiveInput["privacy"];
+  engineeringJob: EngineeringJobInputV1 | null;''',
+    '''  privacy: SentientObjectiveInput["privacy"];
+  budget: SentientObjectiveInput["budget"] | null;
+  deadline: string | null;
+  engineeringJob: EngineeringJobInputV1 | null;''',
+)
+replace_once(
+    "src/fly/self-execution.ts",
+    '''    const engineeringJob = input.engineeringJob === undefined
+      ? null''',
+    '''    const budget = normalizeBudgetEnvelopeV1(input.budget) ?? null;
+    const admittedEnvelope = objectiveExecutionEnvelopeV1(
+      {
+        objectiveId: input.objectiveId,
+        ...(budget === null ? {} : { budget }),
+        ...(input.deadline === undefined ? {} : { deadline: input.deadline }),
+      },
+      Date.now(),
+    );
+    const admittedDeadline = new Date(admittedEnvelope.absoluteDeadlineMs).toISOString();
+    const engineeringJob = input.engineeringJob === undefined
+      ? null''',
+)
+replace_once(
+    "src/fly/self-execution.ts",
+    '''      privacy: input.privacy,
+      engineeringJob,''',
+    '''      privacy: input.privacy,
+      budget,
+      deadline: admittedDeadline,
+      engineeringJob,''',
+)
+replace_once(
+    "src/fly/self-execution.ts",
+    '''      mode: metadata.mode,
+      privacy: metadata.privacy,
+    };''',
+    '''      mode: metadata.mode,
+      privacy: metadata.privacy,
+      ...(metadata.budget === null ? {} : { budget: metadata.budget }),
+      ...(metadata.deadline === null ? {} : { deadline: metadata.deadline }),
+    };''',
+)
+replace_once(
+    "src/fly/self-execution.ts",
+    '''  let engineeringJob: EngineeringJobInputV1 | null = null;
+  if (metadata.engineeringJob !== null && metadata.engineeringJob !== undefined) {''',
+    '''  let budget: SentientObjectiveInput["budget"] | null = null;
+  try {
+    budget = normalizeBudgetEnvelopeV1(metadata.budget) ?? null;
+  } catch {
+    return null;
+  }
+  let deadline: string | null = null;
+  if (metadata.deadline !== null && metadata.deadline !== undefined) {
+    deadline = text(metadata.deadline);
+    if (deadline === null) return null;
+    try {
+      parseAbsoluteDeadlineV1(deadline);
+    } catch {
+      return null;
+    }
+  }
