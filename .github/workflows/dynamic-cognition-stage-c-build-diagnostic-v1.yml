@@ -1,0 +1,94 @@
+name: Dynamic Cognition Stage C Build Diagnostic V1
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Apply exact Stage C patch ephemerally and print build tail
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("runner/scripts/dynamic-successor-stage-c-objective-envelope.py")
+          s = p.read_text()
+          fixes = [
+              ("    ''import { isBearerAuthorized }", "    " + "'"*3 + "import { isBearerAuthorized }"),
+              ("      engineeringJob','',", "      engineeringJob, " + "'"*3 + "),
+              ("    'gimport {completeProductionObjectiveStateV1", "    " + "'"*3 + "import {completeProductionObjectiveStateV1"),
+          ]
+          for old, new in fixes:
+              if s.count(old) != 1:
+                  raise SystemExit(f"quote repair expected one match: {old!r}, got {s.count(old)}")
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          python -m py_compile runner/scripts/dynamic-successor-stage-c-objective-envelope.py
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD{tree}')" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          python ../runner/scripts/dynamic-successor-stage-c-objective-envelope.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("src/application/production-mission-control.ts")
+          s = p.read_text()
+          broken = '"\n\n"'
+          if s.count(broken) != 2:
+              raise SystemExit(f"newline repair expected 2 matches, got {s.count(broken)}")
+          p.write_text(s.replace(broken, '"\\n\\n"'))
+
+          p = Path("src/fly/self-execution.ts")
+          s = p.read_text()
+          fixes = [
+              ('  budget: SentientObjectiveInput["budget"] | null;', '  budget: NonNullable<SentientObjectiveInput["budget"]> | null;'),
+              ('  let budget: SentientObjectiveInput["budget"] | null = null;', '  let budget: NonNullable<SentientObjectiveInput["budget"]> | null = null;'),
+          ]
+          for old,new in fixes:
+              if s.count(old) != 1:
+                  raise SystemExit(f"type repair expected one match: {old!r}, got {s.count(old)}")
+              s = s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
+          set +e
+          npm run build >/tmp/build.log 2>&1
+          rc=$?
+          set -e
+          echo "BUILD_RC=$rc"
+          echo "::group::BUILD_TAIL"
+          tail -n 100 /tmp/build.log
+          echo "::endgroup::"
+          echo "TRACKED_SOURCE_MUTATION_LOCAL=true"
+          echo "DEPLOYMENT_PERFORMED=false"
+          exit "$rc"
