@@ -1,0 +1,107 @@
+name: Atlas Hybrid Source Patch V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact riggeyb/sentient successor SHA
+        required: true
+        type: string
+      source_tree:
+        description: Exact riggeyb/sentient successor tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate immutable identity
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 1
+      - name: Verify exact source and apply bounded cleanup
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path: str, old: str, new: str, expected: int = 1):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} occurrences, saw {count}: {old!r}")
+              p.write_text(text.replace(old, new))
+
+          replace_exact(
+              "src/model/providers/atlas-hybrid-adapters.ts",
+              "ATLAS_HYBRID_ROUTE_MODD_ID_V1",
+              "ATLAS_HYBRID_ROUTE_MODEL_ID_V1",
+          )
+          replace_exact(
+              "test/atlas-hybrid-router.test.ts",
+              "DEEPSEEK_V3_2_MODD_V1",
+              "DEEPSEEK_V3_2_MODEL_V1",
+          )
+          replace_exact(
+              "src/application/production-composition.ts",
+              'dots3Role:"presentation_only"',
+              'dots3Role:"co_cognition_and_synthesis"',
+          )
+          replace_exact(
+              "src/application/production-composition.ts",
+              'transport:"LOCAL"|null',
+              'transport:"LOCAL"|"ATLAS_CLOUD"|null',
+          )
+          replace_exact(
+              "test/phase0-engineering-readiness.test.ts",
+              'dots3Role: "presentation_only"',
+              'dots3Role: "co_cognition_and_synthesis"',
+          )
+          replace_exact(
+              "test/phase0-engineering-readiness.test.ts",
+              'test("Phase0 readiness is independent of later cognition readiness and keeps Dots3 presentation-only", () => {',
+              'test("Phase0 readiness is independent of later cognition readiness and preserves the explicit non-authoritative Dots3 hybrid role", () => {',
+          )
+          replace_exact(
+              "test/phase0-engineering-readiness.test.ts",
+              'assert.equal(readiness.dots3Role, "presentation_only");',
+              'assert.equal(readiness.dots3Role, "co_cognition_and_synthesis");',
+          )
+          PY
+          git diff --check
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test dist/test/atlas-hybrid-router.test.js dist/test/atlas-dots3-cost-policy.test.js
+          git config user.name "sentient-engineering"
+          git config user.email "sentient-engineering@users.noreply.github.com"
+          git add \
+            src/model/providers/atlas-hybrid-adapters.ts \
+            test/atlas-hybrid-router.test.ts \
+            src/application/production-composition.ts \
+            test/phase0-engineering-readiness.test.ts
+          git commit -m "fix: align Atlas hybrid contracts before runtime wiring"
+          git push origin HEAD:refs/heads/atlas-hybrid-cognition-mvp-v1-20261029
