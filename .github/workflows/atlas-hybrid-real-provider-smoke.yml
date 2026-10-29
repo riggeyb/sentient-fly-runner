@@ -16,6 +16,7 @@ jobs:
         with:
           repository: riggeyb/sentient
           ref: 91c0b36526f7bd0fc5d8cae1de9c98677b4998a8
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           fetch-depth: 1
 
       - name: Guard exact source identity
@@ -83,7 +84,7 @@ jobs:
           if (!modelsResponse.ok) throw new Error(`atlas model-list request failed with status ${modelsResponse.status}`);
           const modelsPayload = await modelsResponse.json();
           const ids = collectModelIds(modelsPayload);
-          const ranked = ids.map(id => ({ id, score: scoreDots(id) })).filter(x => x.score > 0).sort((a,b) => b.score - a.score || a.id.localeCompare(b.id));
+          const ranked = ids.map(id => ({ id, score: scoreDots(id) }).filter(x => x.score > 0).sort((a,b) => b.score - a.score || a.id.localeCompare(b.id));
           if (ranked.length === 0) throw new Error("Atlas model list contained no Dots3-Note candidate");
           const bestScore = ranked[0].score;
           const best = ranked.filter(x => x.score === bestScore);
@@ -93,7 +94,7 @@ jobs:
           console.log("ATLAS_AUTH=PASS");
           console.log(`DOTS3_MODEL=${dotsModel}`);
 
-          const client = new AtlasCloudClientV1({ apiKey: key });
+          const client = new AtlasCloudClientV1(; apiKey: key });
           async function smoke(label, model, maxOutputTokens) {
             const result = await client.complete({
               model,
