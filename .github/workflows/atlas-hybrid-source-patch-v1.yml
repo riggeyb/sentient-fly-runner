@@ -16,7 +16,7 @@ permissions:
 jobs:
   patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,40 +25,54 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
+
       - uses: actions/checkout@v4
         with:
           path: runner
           ref: ${{ github.ref_name }}
           persist-credentials: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Patch and verify exact Atlas timing policy
+
+      - name: Patch and verify Governor convergence/readiness fencing
         shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_TREE: ${{ inputs.source_tree }}
           TARGET_BRANCH: atlas-timing-governor-convergence-v1
+          EXPERIMENTAL_GOVERNOR_SHA: c4afaf414cf87c1c0dc23b1f983dfc6c0d2c8af7
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
-          mkdir -p runner-fixtures
-          cp runner/runner-fixtures/atlas-hybrid-timeout-policy.test.ts runner-fixtures/
-          sed -i 's/DEEPSEEEK/DEEPSEEK/g' runner-fixtures/atlas-hybrid-timeout-policy.test.ts
-          python runner/scripts/atlas_timing_patch.py
+          git cat-file -e "${EXPERIMENTAL_GOVERNOR_SHA}^{commit}"
+
+          git show "${EXPERIMENTAL_GOVERNOR_SHA}:src/deployment-governor/convergence.ts" > src/deployment-governor/convergence.ts
+          git show "${EXPERIMENTAL_GOVERNOR_SHA}:src/deployment-governor/deployment.ts" > src/deployment-governor/deployment.ts
+          cp runner/runner-fixtures/governor-convergence-v1.test.ts test/governor-convergence-v1.test.ts
+          sed -i 's/const SKILLS = "b".repeat(40);/const SKILLS = "b3df9b32b47370a7140d6fe814e5ba97564663ab";/' test/governor-convergence-v1.test.ts
+
+          python runner/scripts/governor_convergence_patch.py
           git diff --check
           npm ci --no-audit --no-fund
           npm run build
           node --test \
-            dist/test/atlas-hybrid-timeout-policy.test.js \
-            dist/test/atlas-hybrid-router.test.js \
-            dist/test/atlas-root-timeout-budget.test.js
-          git config user.name "sentient-atlas-engineering"
-          git config user.email "sentient-atlas-engineering@users.noreply.github.com"
-          git add src/model/providers/atlas-hybrid-router.ts test/atlas-hybrid-timeout-policy.test.ts
-          git commit -m "atlas: use stage-aware bounded provider timeouts"
+            dist/test/governor-convergence-v1.test.js \
+            dist/test/deployment-governor.test.js
+
+          git config user.name "sentient-governor-engineering"
+          git config user.email "sentient-governor-engineering@users.noreply.github.com"
+          git add \
+            src/deployment-governor/convergence.ts \
+            src/deployment-governor/deployment.ts \
+            src/deployment-governor/fly-exec.ts \
+            src/deployment-governor/policy.ts \
+            src/deployment-governor/server-main.ts \
+            test/governor-convergence-v1.test.ts
+          git commit -m "governor: separate Fly convergence from readiness"
           test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
           git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
