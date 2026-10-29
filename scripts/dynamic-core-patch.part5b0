@@ -1,0 +1,25 @@
+ders/huggingface.js";
+import { executeSentientPhase1TurnV1, type Phase1CognitionPort } from "../src/phase1/core-runtime.js";
+
+const DOTS = "dots/test";
+class LocalRunner implements LocalHfRunnerV1 {
+  calls = 0;
+  async initialize(): Promise<void> {}
+  async generate(_input: LocalHfGenerateInputV1): Promise<LocalHfGenerationV1> {
+    this.calls += 1;
+    return { text: "local", inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+  }
+}
+function response(text: string): Response {
+  return new Response(JSON.stringify({
+    id: "req-test",
+    choices: [{ message: { content: text }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+test("Atlas HTTP timeout aborts the actual request signal", async () => {
+  let observedAbort = false;
+  const client = new AtlasCloudClientV1( {
+    apiKey: "not-a-secret",
+    fetchImpl: (async (_url, init) => await new Promise<Response>((_
