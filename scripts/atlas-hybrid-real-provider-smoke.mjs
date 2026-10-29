@@ -38,7 +38,7 @@ const candidates = rows
       row.model,
       row.description,
       row.slug,
-    ].filter(value => typeof value === "string").join(" ").toLowerCase();
+  ].filter(value => typeof value === "string").join(" ").toLowerCase();
     let score = 0;
     if (
       searchable.includes("dots3-note")
@@ -70,7 +70,7 @@ const topIds = [
 ];
 if (topIds.length !== 1) {
   console.log(`DOTS3_MODEL_CANDIDATE_COUNT=${topIds.length}`);
-  for (const id of topIds) console.log(`DOTS3_MODD_CANDIDATE=${id}`);
+  for (const id of topIds) console.log(`DOTS3_MODEL_CANDIDATE=${id}`);
   throw new Error("Atlas Dots3-Note resolution ambiguous");
 }
 const dotsModel = topIds[0];
@@ -81,13 +81,13 @@ const clientOptions = Object.create(null);
 clientOptions.apiKey = key;
 const client = new AtlasCloudClientV1(clientOptions);
 
-async function smoke(label, model) {
+async function smoke(label, model, maxOutputTokens) {
   const result = await client.complete({
     model,
     systemPrompt:
       "Connectivity test only. Return one tiny JSON object. Do not call tools or take actions.",
     userPrompt: 'Return exactly {"status":"ok"}.',
-    maxOutputTokens: 128,
+    maxOutputTokens,
     timeoutMs: 15_000,
     requireJsonObject: true,
     requiredTextValidator: text => /"status"\s*:\s*"ok"/i.test(text),
@@ -140,8 +140,8 @@ async function smoke(label, model) {
   if (!usageCaptured) throw new Error(`${label} usage missing`);
 }
 
-await smoke("DEEPSEEK_V3_2", "deepseek-ai/deepseek-v3.2");
-await smoke("DOTS3", dotsModel);
+await smoke("DEEPSEEK_V3__2", "deepseek-ai/deepseek-v3.2", 1024);
+await smoke("DOTS3", dotsModel, 128);
 
 console.log("ATLASCLOUD_SECRET_EXPOSED=false");
 console.log("REAL_ATLAS_SMOKE=PASS");
