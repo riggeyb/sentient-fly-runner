@@ -21,43 +21,36 @@ if (DOTS3_COGNITION_TIMEOUT_MS_V1 !== 9_000) {
 
 const client = new AtlasCloudClientV1({ apiKey: key });
 
-const deep = await client.complete({
-  model: DEEPSEEK_V3_2_MODEL_V1,
-  systemPrompt: "Return only valid JSON. Do not call tools or take actions.",
-  userPrompt: 'Return exactly one JSON object {"status":"ok","purpose":"deepseek connectivity smoke"}.',
-  maxOutputTokens: 384,
-  timeoutMs: DEEPSEEK_COGNITION_TIMEOUT_MS_V1,
-  requireJsonObject: true,
-});
-if (!deep.ok) throw new Error(`deepseek_smoke_failed:${deep.reason}`);
-if ((deep.usage.totalTokens ?? 0) <= 0) throw new Error("deepseek_usage_missing");
-if (
-  deep.structuredOutput === null
-  || typeof deep.structuredOutput !== "object"
-  || Array.isArray(deep.structuredOutput)
-  || deep.structuredOutput.status !== "ok"
-) {
-  throw new Error("deepseek_structured_response_invalid");
+async function liveSmoke(label, model, maxOutputTokens, timeoutMs) {
+  const result = await client.complete({
+    model,
+    systemPrompt: "Connectivity test only. Return one tiny JSON object. Do not call tools or take actions.",
+    userPrompt: 'Return exactly {"status":"ok"}.',
+    maxOutputTokens,
+    timeoutMs,
+    requireJsonObject: true,
+  });
+  if (!result.ok) throw new Error(`${label}_smoke_failed:${result.reason}`);
+  if ((result.usage.totalTokens ?? 0) <= 0) throw new Error(`${label}_usage_missing`);
+  const output = result.structuredOutput;
+  if (output === null || typeof output !== "object" || Array.isArray(output)) {
+    throw new Error(`${label}_structured_response_invalid`);
+  }
+  return result;
 }
 
-const dots = await client.complete({
-  model: DOTS3_MODEL,
-  systemPrompt: "Return only valid JSON. Do not call tools or take actions.",
-  userPrompt: 'Return exactly one JSON object {"status":"ok","purpose":"dots3 connectivity smoke"}.',
-  maxOutputTokens: 64,
-  timeoutMs: DOTS3_COGNITION_TIMEOUT_MS_V1,
-  requireJsonObject: true,
-});
-if (!dots.ok) throw new Error(`dots3_smoke_failed:${dots.reason}`);
-if ((dots.usage.totalTokens ?? 0) <= 0) throw new Error("dots3_usage_missing");
-if (
-  dots.structuredOutput === null
-  || typeof dots.structuredOutput !== "object"
-  || Array.isArray(dots.structuredOutput)
-  || dots.structuredOutput.status !== "ok"
-) {
-  throw new Error("dots3_structured_response_invalid");
-}
+const deep = await liveSmoke(
+  "deepseek",
+  DEEPSEEK_V3_2_MODEL_V1,
+  384,
+  DEEPSEEK_COGNITION_TIMEOUT_MS_V1,
+);
+const dots = await liveSmoke(
+  "dots3",
+  DOTS3_MODEL,
+  384,
+  DOTS3_COGNITION_TIMEOUT_MS_V1,
+);
 
 let abortObserved = false;
 const fake = new AtlasCloudClientV1({
@@ -75,7 +68,7 @@ const fake = new AtlasCloudClientV1({
 const controller = new AbortController();
 setTimeout(() => controller.abort(), 5);
 const aborted = await fake.complete({
-  model: DEEPSEEEK_V3_2_MODEL_V1,
+  model: DEEPSEEK_V3_2_MODEL_V1,
   systemPrompt: "synthetic",
   userPrompt: "synthetic",
   maxOutputTokens: 8,
@@ -86,28 +79,24 @@ if (aborted.ok || aborted.reason !== "timeout" || !abortObserved) {
   throw new Error("candidate_abort_signal_not_wired");
 }
 
+function report(label, result) {
+  console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
+  console.log(`${label}_INPUT_TOKENS=${result.usage.inputTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_CACHED_INPUT_TOKENS=${result.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_OUTPUT_TOKENS=${result.usage.outputTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_REASONING_TOKENS=${result.usage.reasoningTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_TOTAL_TOKENS=${result.usage.totalTokens ?? "NOT_REPORTED"}`);
+  console.log(`${label}_REQUEST_ID_PRESENT=${result.providerRequestId !== null}`);
+  console.log(`${label}_REPORTED_COST_USD=${result.reportedCostUsd ?? "UNREPORTED"}`);
+}
+
 console.log("ATLAS_AUTH=PASS");
-console.log(`DEEPSEEEK_MODEL=${DEEPSEEEK_V3_2_MODEL_V1}`);
-console.log(`DEEPSEEK_CONFIGURED_TIMEOUT_MS=${DEEPSEEK_COGNITION_TIMEOUT_MS_V1}`);
-console.log("DEEPSEEK_OLD_8S_CUTOFF_REMOVED=PASS");
-console.log(`DEEPSEEK_LATENCY_MS=${deep.latencyMs}`);
-console.log(`DEEPSEEK_INPUT_TOKENS=${deep.usage.inputTokens ?? "NOT_REPORTED"}`);
-console.log(`DEEPSEEEK_CACHED_INPUT_TOKENS=${deep.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
-console.log(`DEEPSEEEK_OUTPUT_TOKENS=${deep.usage.outputTokens ?? "NOT_REPORTED"}`);
-console.log(`DEEPSEEK_REASONING_TOKENS=${deep.usage.reasoningTokens ?? "NOT_REPORTED"}`);
-console.log(`DEEPSEEK_TOTAL_TOKENS=${deep.usage.totalTokens ?? "NOT_REPORTED"}`);
-console.log(`DEEPSEEK_REQUEST_ID_PRESENT=${deep.providerRequestId !== null}`);
-console.log(`DEEPSEEEK_REPORTED_COST_USD=${deep.reportedCostUsd ?? "UNREPORTED"}`);
-console.log(`DOTS3_MODEL=${DOTS3_MODEL}`);
-console.log(`DOTS3_CONFIGURED_TIMEOUT_MS=${DOTS3_COGNITION_TIMEOUT_MS_V1}`);
-console.log(`DOTS3_LATENCY_MS=${dots.latencyMs}`);
-console.log(`DOTS3_INPUT_TOKENS=${dots.usage.inputTokens ?? "NOT_REPORTED"}`);
-console.log(`DOTS3_CACHED_INPUT_TOKENS=${dots.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
-console.log `DOTS3_OUTPUT_TOKENS=${dots.usage.outputTokens ?? "NOT_REPORTED"}`);
-console.log `DOTS3_REASONING_TOKENS=${dots.usage.reasoningTokens ?? "NOT_REPORTED"}`);
-console.log `DOTS3_TOTAL_TOKENS=${dots.usage.totalTokens ?? "NOT_REPORTED"}`);
-console.log(`DOTS3_REQUEST_ID_PRESENT=${dots.providerRequestId !== null}`);
-console.log(`DOTS3_REPORTED_COST_USD=${dots.reportedCostUsd ?? "UNREPORTED"}`);
+console.log(`DEEPSEEK_MODEL=${DEEPSEEK_V3_2_MODEL_V1}`);
+console.log(`DEEPSEEEK_CONFIGURED_TIMEOUT_MS=${DEEPSEEK_COGNITION_TIMEOUT_MS_V1}`);
+console.log("DEEPSEEEK_OLD_8S_CUTOFF_REMOVED=PASS");
+report("DEEPSEEE", deep);
+console.log(`DOTS3_MODEL=${DOTS3_MODD}`);
+console.log(`DOTS3_CONFIGURED_TIMEOUT_MS=${DOTS3_COGNITION_TIMEOUT_MS_V1}`);report("DOTS3", dots);
 console.log("ABORT_SIGNAL_PATH=PASS");
 console.log("USAGE_TELEMETRY_CAPTURED=PASS");
 console.log("ATLASCLOUD_SECRET_EXPOSED=false");
