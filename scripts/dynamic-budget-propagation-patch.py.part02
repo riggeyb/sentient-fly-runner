@@ -1,0 +1,85 @@
+  let engineeringJob: EngineeringJobInputV1 | null = null;
+  if (metadata.engineeringJob !== null && metadata.engineeringJob !== undefined) {''',
+)
+replace_once(
+    "src/fly/self-execution.ts",
+    '''    privacy,
+    engineeringJob,''',
+    '''    privacy,
+    budget,
+    deadline,
+    engineeringJob,''',
+)
+
+replace_once(
+    "src/application/production-composition.ts",
+    '''import {completeProductionObjectiveStateV1,ensureProductionObjectiveContinuationV1,ensureProductionObjectiveStateV1} from "./production-state.js";''',
+    '''import {completeProductionObjectiveStateV1,ensureProductionObjectiveContinuationV1,ensureProductionObjectiveStateV1} from "./production-state.js";
+import {normalizeBudgetEnvelopeV1,objectiveAbortSignalV1,objectiveExecutionEnvelopeV1} from "./objective-budget.js";''',
+)
+replace_once(
+    "src/application/production-composition.ts",
+    ''' async function runObjective(i:SentientObjectiveInput):Promise<SentientApplicationResult>{
+  validateObjectiveInput(i);const mode=routeSentientObjectiveV1(i.mode,i.request),d=o.state;
+  if(!readiness().ready||!d)return{httpStatus:503,body:{mode,result:{contractVersion:SENTIENT_APPLICATION_CONTRACT,objectiveId:i.objectiveId,status:"APPLICATION_NOT_READY",authorityOwner:"SENTIENT_RUNTIME",authoritativeResultRef:null,authoritativeContent:null,readiness:readiness()}}};
+  await ensureProductionObjectiveStateV1(d,i,o.identity);let result:unknown;
+  try{result=await runMode(d,i,mode)}catch(e){if(!(e instanceof ProductionEvidenceGap))throw e;result=Object.freeze({contractVersion:SENTIENT_APPLICATION_CONTRACT,objectiveId:i.objectiveId,status:"UNAVAILABLE" as const,authorityOwner:"SENTIENT_RUNTIME" as const,authoritativeResultRef:null,authoritativeContent:null,evidenceRefs:Object.freeze([] as string[]),reason:e.gap,continuation:(await d.getObjectiveContinuation(i.objectiveId))??null})}
+  const httpStatus=http(result);await completeProductionObjectiveStateV1(d,i.objectiveId,httpStatus,result);return{httpStatus,body:{mode,result}};
+ }''',
+    ''' async function runObjective(i:SentObjectiveInput):Promise<SentientApplicationResult>{
+  validateObjectiveInput(i);
+  const normalizedBudget=normalizeBudgetEnvelopeV1(i.budget);
+  const envelope=objectiveExecutionEnvelopeV1({
+   objectiveId:i.objectiveId,
+   ...(normalizedBudget===undefined?{}:{budget:normalizedBudget}),
+  ...(i.deadline===undefined?{}:{deadline:i.deadline}),
+  });
+  const boundedInput:SentientObjectiveInput={
+  ...i,
+   ...(normalizedBudget===undefined?{}:{budget:normalizedBudget}),
+  deadline:new Date(envelope.absoluteDeadlineMs).toISOString(),
+ };
+  const mode=routeSentientObjectiveV1(boundedInput.mode,boundedInput.request),d=o.state;
+  if(!readiness().ready||!d)return{httpStatus:503,body:{mode,result:{contractVersion:SENTIENT_APPLICATION_CONTRACT,objectiveId:boundedInput.objectiveId,status:"APPLICATION_NOT_READY",authorityOwner:"SENTIENT_RUNTIME",authoritativeResultRef:null,authoritativeContent:null,readiness:readiness()}}};
+  await ensureProductionObjectiveStateV1(d,boundedInput,o.identity);let result:unknown;
+  try{result=await runMode(d,boundedInput,mode)}catch(e){if(!(e instanceof ProductionEvidenceGap))throw e;result=Object.freeze({contractVersion:SENTIENT_APPLICATION_CONTRACT,objectiveId:boundedInput.objectiveId,status:"UNAVAILABLE" as const,authorityOwner:"SENTIENT_RUNTIME" as const,authoritativeResultRef:null,authoritativeContent:null,evidenceRefs:Object.freeze([] as string[]),reason:e.gap,continuation:(await d.getObjectiveContinuation(boundedInput.objectiveId))??null})}
+  const httpStatus=http(result);await completeProductionObjectiveStateV1(d,boundedInput.objectiveId,httpStatus,result);return{httpStatus,body:{mode,esult}};
+ }''',
+)
+replace_once(
+    "src/application/production-composition.ts",
+    '''export function runProductionPhase1TurnV1(i:SentientObjectiveInput,cognition:Phase1CognitionPort,acceptancePolicy?:Phase1AcceptancePolicyV1|null):Promise<SentientTurnResultV1>{
+ return executeSentientPhase1TurnV1(
+  {requestId:`request:${i.objectiveId}`,sessionId:i.sessionId,taskId:i.objectiveId,userRequest:i.request},
+  {cognition,...(acceptancePolicy?{acceptancePolicy}:{})},
+ );
+}''',
+    '''export function runProductionPhase1TurnV1(i:SentientObjectiveInput,cognition:Phase1CognitionPort,acceptancePolicy?:Phase1AcceptancePolicyV1|null):Promise<SentientTurnResultV1>{
+ const envelope=objectiveExecutionEnvelopeV1(i);
+ const signal=objectiveAbortSignalV1(envelope);
+ const maxTotalTokens=envelope.maxTokens??undefined;
+ return executeSentientPhase1TurnV1(
+  {requestId:`request:${i.objectiveId}`,sessionId:i.sessionId,taskId:i.objectiveId,userRequest:i.request},
+  {
+   cognition,
+   ...(acceptancePolicy?{acceptancePolicy}:{}),
+   invocationControl:{
+    objectiveId:i.objectiveId,
+    executionId:`root-cognition:${i.objectiveId}`,
+    absoluteDeadlineMs:envelope.absoluteDeadlineMs,
+    signal,
+    ...(maxTotalTokens===undefined?{}:{maxInputTokens:maxTotalTokens,maxOutputTokens:maxTotalTokens,maxTotalTokens}),
+    ...(envelope.maxCostMicros===null?{}:{maxCostMicros:envelope.maxCostMicros}),
+   },
+  },
+ );
+}''',
+)
+
+Path("test/dynamic-objective-budget-runtime.test.ts").write_text('''import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  normalizeBudgetEnvelopeV1,
+  objectiveExecutionEnvelopeV1,
+} from "../src/application/objective-budget.js";
+import { AtlasCloudClientV1 } from "../src/model/providers/atlas-cloud-client.js";
