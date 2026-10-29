@@ -1,0 +1,159 @@
+eptancePolicyV1 | undefined;
+    invocationControl?: Phase1InvocationControlV1 | undefined;
+  } = {},''')
+replace("src/phase1/core-runtime.ts",
+'''  let rawCandidate: unknown;
+  try {
+    rawCandidate = await options.cognition.run(requirements);
+  } catch {
+    return result(requirements, "COGNITION_UNAVAILABLE", null, { kind: "NONE", accepted: false });
+  }''',
+'''  let rawCandidate: unknown;
+  try {
+    const invocation = options.invocationControl;
+    if (invocation && (invocation.signal.aborted || Date.now() >= invocation.absoluteDeadlineMs)) {
+      return result(requirements, "COGNITION_UNAVAILABLE", null, { kind: "NONE", accepted: false });
+    }
+    const pending = options.cognition.run(requirements, invocation);
+    rawCandidate = invocation === undefined
+      ? await pending
+      : await awaitLivePhase1ResultV1(pending, invocation);
+    if (rawCandidate === PHASE1_LATE_RESULT_V1) {
+      return result(requirements, "COGNITION_UNAVAILABLE", null, { kind: "NONE", accepted: false });
+    }
+  } catch {
+    return result(requirements, "COGNITION_UNAVAILABLE", null, { kind: "NONE", accepted: false });
+  }''')
+replace("src/phase1/core-runtime.ts",
+'''function normalizedPolicyId(policy: Phase1AcceptancePolicyV1): string | null {''',
+r'''const PHASE1_LATE_RESULT_V1 = Symbol("phase1-late-result");
+
+async function awaitLivePhase1ResultV1(
+  pending: Promise<ModelResult | unknown>,
+  control: Phase1InvocationControlV1,
+): Promise<ModelResult | unknown | typeof PHASE1_LATE_RESULT_V1> {
+  if (control.signal.aborted || Date.now() >= control.absoluteDeadlineMs) return PHASE1_LATE_RESULT_V1;
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const remaining = Math.max(1, control.absoluteDeadlineMs - Date.now());
+    const finish = (value: ModelResult | unknown | typeof PHASE1_LATE_RESULT_V1, failed = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      control.signal.removeEventListener("abort", onAbort);
+      failed ? reject(value) : resolve(value);
+    };
+    const onAbort = () => finish(PHASE1_LATE_RESULT_V1);
+    const timer = setTimeout(onAbort, remaining);
+    control.signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (value) => {
+        if (control.signal.aborted || Date.now() >= control.absoluteDeadlineMs) {
+          finish(PHASE1_LATE_RESULT_V1);
+        } else {
+          finish(value);
+        }
+      },
+      (error) => finish(error, true),
+    );
+  });
+}
+
+function normalizedPolicyId(policy: Phase1AcceptancePolicyV1): string | null {''')
+
+replace("src/model/providers/huggingface.ts",
+'''  Phase1CognitionPort,
+  TaskRequirementsV1,''',
+'''  Phase1CognitionPort,
+  Phase1InvocationControlV1,
+  TaskRequirementsV1,''')
+replace("src/model/providers/huggingface.ts",
+'''  public async run(requirements: TaskRequirementsV1): Promise<unknown> {
+    const started = Date.now();
+    try {
+      const completion = await this.#runtime.complete({''',
+'''  public async run(
+    requirements: TaskRequirementsV1,
+    control?: Phase1InvocationControlV1,
+  ): Promise<unknown> {
+    const started = Date.now();
+    const fallbackSignal = control === undefined ? AbortSignal.timeout(28_000) : null;
+    const signal = control?.signal ?? fallbackSignal!;
+    try {
+      if (signal.aborted || (control !== undefined && Date.now() >= control.absoluteDeadlineMs)) {
+        throw new Error("local_hf_generation_cancelled");
+      }
+      const completion = await this.#runtime.complete({''')
+replace("src/model/providers/huggingface.ts",
+'''        maxInputTokens: 4_096,
+        maxOutputTokens: 1_024,
+      });''',
+'''        maxInputTokens: Math.min(4_096, control?.maxInputTokens ?? 4_096),
+        maxOutputTokens: Math.min(1_024, control?.maxOutputTokens ?? 1_024),
+        signal,
+      });
+      if (signal.aborted || (control !== undefined && Date.now() >= control.absoluteDeadlineMs)) {
+        throw new Error("local_hf_generation_cancelled");
+      }''')
+
+replace("src/model/providers/atlas-cloud-client.ts",
+'''    const headerRequestId =
+      response.headers.get("x-request-id")''',
+'''    if (signal.aborted) {
+      return this.#failure(model, "timeout", "atlascloud_timeout", started, null);
+    }
+
+    const headerRequestId =
+      response.headers.get("x-request-id")''')
+replace("src/model/providers/atlas-cloud-client.ts",
+'''    const providerRequestId = safeId(headerRequestId) ?? safeId(row.id);
+
+    if (!response.ok) {''',
+'''    const providerRequestId = safeId(headerRequestId) ?? safeId(row.id);
+    if (signal.aborted) {
+      return this.#failure(model, "timeout", "atlascloud_timeout", started, providerRequestId);
+    }
+
+    if (!response.ok) {''')
+replace("src/model/providers/atlas-cloud-client.ts",
+'''    return {
+      ok: true,
+      provider: "atlascloud",
+      model,
+      text,
+      structuredOutput,
+      structuredOutputValid: true,
+      usage: parseUsage(record(row.usage)),
+      latencyMs: Date.now() - started,
+      finishReason: typeof first.finish_reason === "string" ? first.finish_reason : null,
+      providerRequestId,
+      reportedCostUsd: reportedCostUsd(row),
+    };''',
+'''    const reportedCost = reportedCostUsd(row);
+    if (
+      input.maxCostMicros !== undefined
+      && reportedCost !== null
+      && Math.ceil(reportedCost * 1_000_000) > input.maxCostMicros
+    ) {
+      return this.#failure(
+        model,
+        "cost_budget_rejected",
+        "atlascloud_reported_cost_exceeded_budget",
+        started,
+        providerRequestId,
+      );
+    }
+    if (signal.aborted) {
+      return this.#failure(model, "timeout", "atlascloud_timeout", started, providerRequestId);
+    }
+
+    return {
+      ok: true,
+      provider: "atlascloud",
+      model,
+      text,
+      structuredOutput,
+      structuredOutputValid: true,
+      usage: parseUsage(record(row.usage)),
+      latencyMs: Date.now() - started,
+      finishReason: typeof first.finish_reason === "string" ? first.finish_r
