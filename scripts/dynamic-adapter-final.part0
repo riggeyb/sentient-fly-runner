@@ -1,0 +1,16 @@
+from pathlib import Path
+p=Path("src/model/providers/atlas-hybrid-adapters.ts")
+s=p.read_text()
+def r(old,new,n=1):
+    global s
+    c=s.count(old)
+    if c!=n: raise SystemExit(f"mismatch {c}/{n}: {old[:80]!r}")
+    s=s.replace(old,new,n)
+r('import type { Phase1CognitionPort, TaskRequirementsV1 } from "../../phase1/core-runtime.js";',
+  'import type { Phase1CognitionPort, TaskRequirementsV1 } from "../../phase1/core-runtime.js";\nimport type { ModelInvocationEnvelopeV1 } from "../invocation-envelope.js";\nimport { modelInvocationLiveV1, modelInvocationRemainingMsV1 } from "../invocation-envelope.js";\nimport { normalizeDynamicCognitionV1 } from "../dynamic-cognition.js";')
+r('  MODEL_CANNOT_SELECT_LOWER_TIER_FOR_OWN_ACTION: true,\n',
+  '  MODEL_CANNOT_SELECT_LOWER_TIER_FOR_OWN_ACTION: true,\n  GOVERNOR_GOVERNS_EFFECTS: true,\n  GOVERNOR_GOVERNS_THOUGHT: false,\n  COGNITIVE_SCOPE_DOES_NOT_GRANT_EFFECT_AUTHORITY: true,\n  HUMAN_INTENT_CAN_ONLY_BE_CHANGED_BY_HUMAN: true,\n  MODEL_CANNOT_INCREASE_OBJECTIVE_BUDGET: true,\n  MODEL_CANNOT_EXTEND_OWN_DEADLINE: true,\n  MODEL_CANNOT_GRANT_OWN_AUTHORITY: true,\n')
+r('  public async run(requirements: TaskRequirementsV1): Promise<unknown> {\n    const result = this.#stage === "synthesis"\n      ? await this.#router.synthesis({',
+  '  public async run(requirements: TaskRequirementsV1, invocation?: ModelInvocationEnvelopeV1): Promise<unknown> {\n    if (invocation && !modelInvocationLiveV1(invocation)) return unavailable("invocation_dead_before_dispatch");\n    const controls = invocationControls(invocation);\n    const result = this.#stage === "synthesis"\n      ? await this.#router.synthesis({')
+r('          maxInputTokens: 8_192,\n          maxOutputTokens: 1_024,\n        })',
+  '          maxInputTokens: boundedTokens(8_192, in
