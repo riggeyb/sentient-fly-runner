@@ -15,10 +15,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: atlas-hybrid-real-provider-smoke-v3
-  cancel-in-progress: false
-
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -27,20 +23,19 @@ jobs:
       EXPECTED_SHA: ${{ inputs.source_sha }}
       EXPECTED_TREE: ${{ inputs.source_tree }}
     steps:
-      - name: Validate immutable source inputs
+      - name: Validate source inputs
         shell: bash
         run: |
           set -euo pipefail
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
 
-      - name: Checkout trusted runner code
+      - name: Checkout runner
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-          fetch-depth: 1
 
-      - name: Checkout exact Sentient candidate
+      - name: Checkout candidate
         uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
@@ -50,7 +45,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-       - name: Guard exact source identity
+      - name: Guard source
         shell: bash
         working-directory: sentient
         run: |
@@ -62,10 +57,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: sentient/package-lock.json
 
-      - name: Build exact candidate
+      - name: Build
         shell: bash
         working-directory: sentient
         run: |
@@ -74,15 +67,13 @@ jobs:
           npm run build >/dev/null
           echo "BUILD=PASS"
 
-      - name: Resolve Dots3-Note and smoke Atlas models
+      - name: Real Atlas smoke
         shell: bash
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
-        run: |
-          set -euo pipefail
-          node scripts/atlas-hybrid-real-provider-smoke.mjs
+        run: node scripts/atlas-hybrid-real-provider-smoke.mjs
 
-      - name: Verify Sentient source remained unmodified
+      - name: Guard clean source
         shell: bash
         working-directory: sentient
         run: |
