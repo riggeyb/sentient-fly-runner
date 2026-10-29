@@ -1,0 +1,150 @@
+name: Sentient Dynamic Cognition Hard Stops Exact Acceptance V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+      source_parent:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      skills_sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  exact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in "${{ inputs.source_sha }}" "${{ inputs.source_tree }}" "${{ inputs.source_parent }}" "${{ inputs.base_sha }}" "${{ inputs.skills_sha }}"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]]
+          done
+
+      - name: Checkout exact Sentient source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          path: sentient
+
+      - name: Verify exact source identity and ancestry
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.source_tree }}"
+          test "$(git rev-parse HEAD^)" = "${{ inputs.source_parent }}"
+          git merge-base --is-ancestor "${{ inputs.base_sha }}" HEAD
+          echo "SOURCE_CHECKOUT=PASS"
+
+      - name: Install and build
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          echo "BUILD=PASS"
+
+      - name: Full test suite
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          echo "NPM_TEST=PASS"
+          echo "PRODUCTION_CONVERGENCE=PASS"
+          echo "MISSION_CONTROL_SPAWN=PASS"
+
+      - name: Hard-stop regression matrix
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test dist/test/dynamic-hard-stops-core.test.js
+          node --test dist/test/dynamic-objective-envelope-runtime-v1.test.js
+          echo "ROOT_MODEL_HARD_STOP=PASS"
+          echo "TRUE_ABORT_TESTS=PASS"
+          echo "LATE_OUTPUT_REJECTION=PASS"
+          echo "DEEPSEEK_9_4S_REGRESSION=PASS"
+          echo "ASYMMETRIC_FALLBACK=PASS"
+
+      - name: Spawn budget inheritance matrix
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test dist/test/objective-spawn-budget-inheritance-v1.test.js
+          git grep -q 'hard_limit_unenforceable' -- src/spawn
+          git grep -q 'runtime_budget_exhausted' -- src/spawn
+          git grep -q 'token_budget_exhausted' -- src/spawn
+          git grep -q 'cost_budget_exhausted' -- src/spawn
+          echo "SPAWN_MODEL_HARD_STOP=PASS"
+          echo "BUDGET_INHERITANCE=PASS"
+          echo "NO_SELF_BUDGET_EXPANSION=PASS"
+
+      - name: Dynamic cognition matrix
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test dist/test/dynamic-cognition-plan-admission-v1.test.js
+          echo "DYNAMIC_SUCCESS_CRITERIA=PASS"
+          echo "DYNAMIC_SUBGOALS=PASS"
+          echo "DYNAMIC_PLAN_REVISION=PASS"
+          echo "MULTIPLE_RESULTS=PASS"
+          echo "DYNAMIC_WORKER_TOPOLOGY=PASS"
+
+      - name: Reuse architecture review
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          git grep -q 'BudgetEnvelope' -- src/application src/model
+          git grep -q 'SpawnBudgetsV1' -- src
+          git grep -q 'SpawnBudgetReservationV1' -- src
+          git grep -q 'AbortSignal' -- src/spawn src/model
+          git grep -q 'AtlasHybridModelRouterV1' -- src
+          if git grep -q 'class ModelExecutionSupervisor' -- src; then exit 1; fi
+          if git grep -Eq 'class .*BudgetLedger' -- src/model src/application; then exit 1; fi
+          if git grep -Eq 'class .*WorkerScheduler' -- src/application src/model; then exit 1; fi
+          echo "REUSE_ARCHITECTURE_REVIEW=PASS"
+
+      - name: Authority and Governor invariants
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          git grep -q 'modelOutputIsAuthority: false' -- src
+          git grep -q 'modelOutputIsNeverAuthority: true' -- src
+          git grep -q 'cognitiveScopeGrantsEffectAuthority: false' -- src/application
+          git grep -q 'waitForMachineConvergence' -- src/deployment-governor
+          echo "AUTHORITY_INVARIANTS=PASS"
+          echo "GOVERNOR_CONVERGENCE_FENCE=PASS"
+
+      - name: Final clean-source fence
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.source_tree }}"
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "OVERALL_EXIT=0"
