@@ -1,0 +1,112 @@
+name: Stage C Test Diagnostic V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Apply exact Stage C workspace and diagnose tests
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("runner/scripts/dynamic-successor-stage-c-objective-envelope.py")
+          s=p.read_text()
+          q=chr(39)*3
+          fixes=[
+            ("    ''import { isBearerAuthorized }","    "+q+"import { isBearerAuthorized }"),
+            ("      engineeringJob','',","      engineeringJob,"+q+","),
+            ("    ''import {completeProductionObjectiveStateV1","    "+q+"import {completeProductionObjectiveStateV1"),
+          ]
+          for old,new in fixes:
+            n=s.count(old)
+            if n!=1: raise SystemExit(f"quote_fix_mismatch:{old!r}:{n}")
+            s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          python -m py_compile runner/scripts/dynamic-successor-stage-c-objective-envelope.py
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          python ../runner/scripts/dynamic-successor-stage-c-objective-envelope.py
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("src/application/production-mission-control.ts")
+          s=p.read_text()
+          broken='"\n\n"'
+          n=s.count(broken)
+          if n!=2: raise SystemExit(f"newline_fix_mismatch:{n}")
+          p.write_text(s.replace(broken,'"\\n\\n"'))
+          p=Path("src/fly/self-execution.ts")
+          s=p.read_text()
+          fixes=[
+            ('  budget: SentientObjectiveInput["budget"] | null;','  budget: NonNullable<SentientObjectiveInput["budget"]> | null;'),
+            ('  let budget: SentientObjectiveInput["budget"] | null = null;','  let budget: NonNullable<SentientObjectiveInput["budget"]> | null = null;'),
+          ]
+          for old,new in fixes:
+            n=s.count(old)
+            if n!=1: raise SystemExit(f"type_fix_mismatch:{old!r}:{n}")
+            s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          npm ci --no-audit --no-fund >/dev/null 2>&1
+          npm run build >/tmp/build.log 2>&1
+          echo BUILD_RESULT=PASS
+          for testfile in \
+            dist/test/dynamic-objective-envelope-runtime-v1.test.js \
+            dist/test/dynamic-hard-stops-core.test.js \
+            dist/test/atlas-hybrid-router.test.js
+          do
+            name="$(basename "$testfile")"
+            if node --test "$testfile" >"/tmp/$name.log" 2>&1; then
+              echo "FOCUSED_TEST=$name:PASS"
+            else
+              echo "FOCUSED_TEST=$name:FAIL"
+              tail -n 120 "/tmp/$name.log"
+              exit 1
+            fi
+          done
+          if npm test >/tmp/npm-test.log 2>&1; then
+            echo NPM_TEST=PASS
+          else
+            echo NPM_TEST=FAIL
+            tail -n 160 /tmp/npm-test.log
+            exit 1
+          fi
+          echo DEPLOYMENT_PERFORMED=false
+          echo SOURCE_MUTATION_PUSHED=false
