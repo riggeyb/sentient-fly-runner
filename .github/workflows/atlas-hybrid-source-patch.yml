@@ -19,7 +19,7 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
-      - name: Verify, patch, build, test, and push isolated successor
+      - name: Verify, edit, build, test, and push isolated successor
         shell: bash
         run: |
           set -euo pipefail
@@ -27,8 +27,233 @@ jobs:
           test "$(git rev-parse HEAD^)" = "55d5d9145121b87fd580f1afd1312d02cc4d697e"
           test "$(git rev-parse 'HEAD^{tree}')" = "40f5b584a7eafa97771614cae2ff8538fe640269"
           test "$(git hash-object .github/atlas-dots3-catalog-resolution.patch)" = "159cd0cb478c55ae13a8654b7de6febbafb684a3"
-          git apply --check .github/atlas-dots3-catalog-resolution.patch
-          git apply .github/atlas-dots3-catalog-resolution.patch
+
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              s = p.read_text()
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one anchor, got {count}: {old[:100]!r}")
+              p.write_text(s.replace(old, new))
+
+          client = "src/model/providers/atlas-cloud-client.ts"
+          replace_once(
+              client,
+              "  public async complete(input: AtlasCloudCompleteInputV1): Promise<AtlasCloudResultV1> {\n",
+              '''  public async listModels(
+              timeoutMs = 5_000,
+              parentSignal?: AbortSignal,
+            ): Promise<readonly string[]> {
+              if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+                throw new Error("atlascloud_timeout_invalid");
+              }
+              const timeoutSignal = AbortSignal.timeout(timeoutMs);
+              const signal = parentSignal
+                ? AbortSignal.any([parentSignal, timeoutSignal])
+                : timeoutSignal;
+              let response: Response;
+              try {
+                response = await this.#fetch(`${this.#baseUrl}/models`, {
+                  method: "GET",
+                  headers: {
+                    Accept: "application/json",
+                    Authorization: `Bearer ${this.#apiKey}`,
+                  },
+                  signal,
+                });
+              } catch (error) {
+                throw new Error(signal.aborted ? "atlascloud_model_catalog_timeout" : safeMessage(error));
+              }
+              if (!response.ok) {
+                throw new Error(`atlascloud_model_catalog_http_${response.status}`);
+              }
+              const body = record(await response.json());
+              const data = Array.isArray(body.data) ? body.data : [];
+              const ids = data
+                .map((value) => record(value).id)
+                .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+                .map((value) => value.trim());
+              if (ids.length === 0) throw new Error("atlascloud_model_catalog_empty");
+              return Object.freeze(ids);
+            }
+
+            public async complete(input: AtlasCloudCompleteInputV1): Promise<AtlasCloudResultV1> {
+          ''')
+          replace_once(
+              client,
+              "export function isAtlasFailoverEligibleV1(reason: AtlasCloudFailureReasonV1): boolean {\n",
+              '''export async function resolveAtlasDots3NoteModelV1(
+              client: AtlasCloudClientV1,
+              configured?: string | null,
+              timeoutMs = 5_000,
+              signal?: AbortSignal,
+            ): Promise<string> {
+              const explicit = configured?.trim();
+              if (explicit) return explicit;
+              const ids = await client.listModels(timeoutMs, signal);
+              const matches = ids.filter((id) => {
+                const normalized = id.toLowerCase().replace(/[_\\s]+/g, "-");
+                return normalized.includes("dots")
+                  && /(^|[^0-9])3([^0-9]|$)/.test(normalized)
+                  && normalized.includes("note");
+              });
+              if (matches.length !== 1) {
+                throw new Error(
+                  matches.length === 0
+                    ? "atlascloud_dots3_note_model_not_found"
+                    : "atlascloud_dots3_note_model_ambiguous",
+                );
+              }
+              return matches[0]!;
+            }
+
+            export function isAtlasFailoverEligibleV1(reason: AtlasCloudFailureReasonV1): boolean {
+          ''')
+
+          router = "src/model/providers/atlas-hybrid-router.ts"
+          replace_once(
+              router,
+              '''import type {
+            AtlasCloudClientV1,
+            AtlasCloudFailureReasonV1,
+            AtlasCloudUsageV1,
+          } from "./atlas-cloud-client.js";
+          ''',
+              '''import type {
+            AtlasCloudClientV1,
+            AtlasCloudFailureReasonV1,
+            AtlasCloudUsageV1,
+          } from "./atlas-cloud-client.js";
+          import { resolveAtlasDots3NoteModelV1 } from "./atlas-cloud-client.js";
+          ''')
+          replace_once(router, "  readonly #dots3Model: string | null;\n", "  #dots3Model: string | null;\n")
+          replace_once(
+              router,
+              '''    if (this.#atlas !== null && this.#dots3Model === null) {
+              throw new Error("atlas_dots3_model_required_when_atlas_enabled");
+            }
+          ''',
+              "")
+          replace_once(
+              router,
+              '{ kind: "atlas" as const, model: this.#dots3Model, maxOutput: DOTS3_COGNITION_MAX_OUTPUT_TOKENS_V1 },',
+              '{ kind: "atlas" as const, model: this.#dots3Model, resolveDots3: true, maxOutput: DOTS3_COGNITION_MAX_OUTPUT_TOKENS_V1 },')
+          replace_once(
+              router,
+              '{ kind: "atlas" as const, model: this.#dots3Model, maxOutput: DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS_V1 },',
+              '{ kind: "atlas" as const, model: this.#dots3Model, resolveDots3: true, maxOutput: DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS_V1 },')
+          replace_once(
+              router,
+              '''      model: string | null;
+              maxOutput: number;
+          ''',
+              '''      model: string | null;
+              resolveDots3?: boolean;
+              maxOutput: number;
+          ''')
+          replace_once(
+              router,
+              '''      if (step.kind === "atlas") {
+                if (this.#atlas === null || step.model === null) continue;
+                const remaining = Math.max(1, overall - (Date.now() - started));
+                const result = await this.#atlas.complete({
+                  model: step.model,
+          ''',
+              '''      if (step.kind === "atlas") {
+                if (this.#atlas === null) continue;
+                let model = step.model;
+                const remainingBeforeResolution = Math.max(1, overall - (Date.now() - started));
+                if (model === null && step.resolveDots3 === true) {
+                  try {
+                    model = await resolveAtlasDots3NoteModelV1(
+                      this.#atlas,
+                      null,
+                      Math.min(5_000, remainingBeforeResolution),
+                      input.signal,
+                    );
+                    this.#dots3Model = model;
+                  } catch {
+                    fallbackReason = "provider_unavailable";
+                    continue;
+                  }
+                }
+                if (model === null) continue;
+                const remaining = Math.max(1, overall - (Date.now() - started));
+                const result = await this.#atlas.complete({
+                  model,
+          ''')
+
+          fly = "src/fly/production-runtime.ts"
+          replace_once(
+              fly,
+              '''export const ATLAS_DOTS3_NOTE_MODEL_V1 =
+            "dots-studio/dots-3-note-prev-free" as const;
+          ''',
+              "")
+          replace_once(
+              fly,
+              '''  const dots3Model =
+              optional(process.env.ATLAS_DOTS3_MODEL_ID) ?? ATLAS_DOTS3_NOTE_MODEL_V1;
+          ''',
+              '''  const dots3Model = optional(process.env.ATLAS_DOTS3_MODD_ID);
+          ''')
+
+          Path("test/atlas-dots3-model-resolution.test.ts").write_text('''import assert from "node:assert/strict";
+          import test from "node:test";
+          import {
+            AtlasCloudClientV1,
+            resolveAtlasDots3NoteModelV1,
+          } from "../src/model/providers/atlas-cloud-client.js";
+
+          test("Dots3 Note resolves from the Atlas model catalog instead of a guessed default", async () => {
+            const calls: string[] = [];
+            const fetchImpl = (async (input: Parameters<typeof fetch>[0]) => {
+              calls.push(String(input));
+              return new Response(JSON.stringify({
+                data: [
+                  { id: "deepseek-ai/deepseek-v3.2" },
+                  { id: "dots-studio/dots-3-note-preview-20260813:free" },
+                ],
+              }), { status: 200, headers: { "content-type": "application/json" } });
+            }) as typeof fetch;
+            const client = new AtlasCloudClientV1({ apiKey: "secret", fetchImpl });
+            assert.equal(
+              await resolveAtlasDots3NoteModelV1(client),
+              "dots-studio/dots-3-note-preview-20260813:free",
+            );
+            assert.deepEqual(calls, ["https://api.atlascloud.ai/v1/models"]);
+          });
+
+          test("Dots3 Note catalog resolution fails closed on ambiguity", async () => {
+            const fetchImpl = (async () => new Response(JSON.stringify {
+              data: [
+                { id: "dots-studio/dots-3-note-a" },
+                { id: "dots-studio/dots-3-note-b" },
+              ],
+            }), { status: 200 })) as typeof fetch;
+            const client = new AtlasCloudClientV1({ apiKey: "secret", fetchImpl });
+            await assert.rejects(
+              resolveAtlasDots3NoteModelV1(client),
+              /atlascloud_dots3_note_model_ambiguous/,
+            );
+          });
+
+          test("explicit Dots3 model override remains supported without catalog access", async () => {
+            const fetchImpl = (async () => {
+              throw new Error("must not fetch");
+            }) as typeof fetch;
+            const client = new AtlasCloudClientV1({ apiKey: "secret", fetchImpl });
+            assert.equal(
+              await resolveAtlasDots3NoteModelV1(client, "dots-studio/configured-note"),
+              "dots-studio/configured-note",
+            );
+          });
+          ''')
+          PY
+
           rm .github/atlas-dots3-catalog-resolution.patch
           git diff --check
           npm ci --no-audit --no-fund
