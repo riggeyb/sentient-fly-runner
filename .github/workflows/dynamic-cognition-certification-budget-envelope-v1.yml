@@ -1,0 +1,70 @@
+name: Dynamic Cognition Certification Budget Envelope V1
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+          path: sentient
+      - name: Exact source fence and patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum scripts/dynamic-certification-budget-envelope-v1.py.gz | cut -d' ' -f1)" = "3482f2ec4fe317f7dd929581278be9779f1c19819b25ad37ec49d285d7ae2e1d"
+          gzip -dc scripts/dynamic-certification-budget-envelope-v1.py.gz > /tmp/patch.py
+          test "$(sha256sum /tmp/patch.py | cut -d' ' -f1)" = "8732e46c2f1a7d1de94c28698427e16b8be2cfb58c6585677a4d4634d1790870"
+          cd sentient
+          test "$(git rev-parse HEAD)" = "${{ inputs.expected_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.expected_tree }}"
+          test -z "$(git status --porcelain)"
+          python3 /tmp/patch.py
+          git diff --check
+      - name: Build and focused tests
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+          node --test dist/test/dynamic-objective-model-envelope.test.js dist/test/dynamic-provider-timeout-v1.test.js dist/test/atlas-hybrid-router.test.js
+      - name: Commit exact successor
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-dynamic-cognition-engineering"
+          git config user.email "sentient-dynamic-cognition-engineering@users.noreply.github.com"
+          git add src/model/invocation-envelope.ts src/phase3/cognitive-components.ts src/model/providers/atlas-cloud-client.ts src/model/providers/atlas-hybrid-router.ts src/model/providers/atlas-hybrid-adapters.ts src/application/production-composition.ts test/dynamic-objective-model-envelope.test.ts
+          git diff --cached --check
+          git commit -m "cognition: propagate objective envelope through all root model calls"
+          new_sha="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse HEAD^{tree})"
+          git fetch origin "${{ inputs.branch }}"
+          test "$(git rev-parse FETCH_HEAD)" = "${{ inputs.expected_sha }}"
+          git push origin "HEAD:refs/heads/${{ inputs.branch }}"
+          echo "SUCCESSOR_SHA=$new_sha"
+          echo "SUCCESSOR_TREE=$new_tree"
+          echo "DEPLOYMENT_PERFORMED=false"
