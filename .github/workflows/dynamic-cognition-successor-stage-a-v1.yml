@@ -43,7 +43,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
           git fetch --no-tags origin d135bf7c391aeca2b31623bb00afa0f34c792571
-          cat ../runner/scripts/dynamic-successor-stage-a.part0 ../runner/scripts/dynamic-successor-stage-a.part1 ../runner/scripts/dynamic-successor-stage-a.part2 > /tmp/stage-a.py
+          cat ../runner/scripts/dynamic-successor-stage-a.part0 ../runner/scripts/dynamic-successor-stage-a.part1 ../runner/scripts/dynamic-successor-stage-a.part2 ../runner/scripts/dynamic-successor-stage-a.part3 > /tmp/stage-a.py
           python -m py_compile /tmp/stage-a.py
           python /tmp/stage-a.py
           git diff --check
@@ -58,13 +58,13 @@ jobs:
       - name: Commit
         working-directory: sentient
         env:
-          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          SOURCE_BRANCH: ${{ input.source_branch }}
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "Sentient Engineering"
           git config user.email "sentient-engineering@users.noreply.github.com"
-          git add src/model/providers/atlas-hybrid-router.ts src/deployment-governor/convergence.ts src/deployment-governor/deployment.ts src/deployment-governor/policy.ts test/governor-convergence-v1.test.ts test/dynamic-provider-timeout-v1.test.ts
+          git add src/model/providers/atlas-hybrid-router.ts src/deployment-governor/convergence.ts src/deployment-governor/deployment.ts src/deployment-governor/policy.ts src/deployment-governor/fly-exec.ts test/governor-convergence-v1.test.ts test/dynamic-provider-timeout-v1.test.ts test/atlas-hybrid-router.test.ts test/dynamic-hard-stops-core.test.ts
           test -n "$(git status --porcelain)"
           git commit -m "runtime: stage-aware model stops and Governor convergence fence"
           git push origin "HEAD:${SOURCE_BRANCH}"
