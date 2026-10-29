@@ -1,0 +1,84 @@
+name: Stage C Compact Diagnostic V3
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch: {required: true, type: string}
+      expected_sha: {required: true, type: string}
+      expected_tree: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: runner, persist-credentials: false, fetch-depth: 1}
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 1
+      - shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("runner/scripts/dynamic-successor-stage-c-objective-envelope.py")
+          s=p.read_text()
+          q=chr(39)*3
+          fixes=[
+            ("    ''import { isBearerAuthorized }","    "+q+"import { isBearerAuthorized }"),
+            ("      engineeringJob','',","      engineeringJob,"+q+","),
+            ("    ''import {completeProductionObjectiveStateV1","    "+q+"import {completeProductionObjectiveStateV1"),
+          ]
+          for old,new in fixes:
+            n=s.count(old)
+            if n!=1: raise SystemExit(f"quote_fix_mismatch:{old!r}:{n}")
+            s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          python -m py_compile runner/scripts/dynamic-successor-stage-c-objective-envelope.py
+          cd sentient
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          python ../runner/scripts/dynamic-successor-stage-c-objective-envelope.py
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("src/application/production-mission-control.ts")
+          s=p.read_text()
+          broken='"\n\n"'
+          n=s.count(broken)
+          if n!=2: raise SystemExit(f"newline_fix_mismatch:{n}")
+          p.write_text(s.replace(broken,'"\\n\\n"'))
+
+          p=Path("src/fly/self-execution.ts")
+          s=p.read_text()
+          fixes=[
+            ('  budget: SentientObjectiveInput["budget"] | null;','  budget: NonNullable<SentientObjectiveInput["budget"]> | null;'),
+            ('  let budget: SentientObjectiveInput["budget"] | null = null;','  let budget: NonNullable<SentientObjectiveInput["budget"]> | null = null;'),
+          ]
+          for old,new in fixes:
+            n=s.count(old)
+            if n!=1: raise SystemExit(f"type_fix_mismatch:{old!r}:{n}")
+            s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          npm ci --no-audit --no-fund >/dev/null 2>&1
+          if npm run build >/tmp/build.log 2>&1; then
+            echo BUILD_RESULT=PASS
+          else
+            echo BUILD_RESULT=FAIL
+            tail -n 100 /tmp/build.log
+            exit 1
+          fi
+          echo DEPLOYMENT_PERFORMED=false
+          echo SOURCE_MUTATION_PUSHED=false
