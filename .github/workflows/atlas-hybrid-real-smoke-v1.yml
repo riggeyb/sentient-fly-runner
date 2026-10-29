@@ -1,0 +1,151 @@
+name: Atlas Hybrid Real Smoke V1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlas-hybrid-real-smoke-v1
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: 91c0b36526f7bd0fc5d8cae1de9c98677b4998a8
+      EXPECTED_TREE: 98b53ac978e5d664ac459933cfcb534bc277ed64
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCMOUD_API_KEY }}
+    steps:
+      - name: Checkout exact frozen successor
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 91c0b36526f7bd0fc5d8cae1de9c98677b4998a88
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Guard exact source and secret presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD{tree}'")" = "$EXPECTED_TREE"
+          test -n "${ATLASCLOUD_API_KEY:-}"
+          echo "SOURCE_CHECKOUT=PASS"
+          echo "ATLASCMOUD_SECRET_PRESENT=PASS"
+
+      - name: Build exact successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+          echo "BUILD=PASS"
+
+      - name: Resolve Dots3 and smoke exact candidate client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/atlas-real-smoke.mjs <<'NODE'
+          import { AtlasCloudClientV1 } from process.cwd() + "/dist/src/model/providers/atlas-cloud-client.js";
+
+          const key = process.env.ATLASCMOUD_API_KEY?.trim();
+          if (!key) throw new Error("atlas_secret_missing");
+
+          const base = "https://api.atlascloud.ai/v1";
+          const modelsResponse = await fetch(`${base}/models`, {
+            method: "GET",
+            headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!modelsResponse.ok) {
+            console.log(`ATLAS_AUTH=FAIL_HTTP_${modelsResponse.status}`);
+            process.exit(2);
+          }
+          console.log("ATLAS_AUTH=PASS");
+
+          const modelsJson = await modelsResponse.json();
+          const rows = Array.isArray(modelsJson?.data)
+            ? modelsJson.data
+            : Array.isArray(modelsJson?.models)
+              ? modelsJson.models
+              : [];
+          const candidates = rows
+            .map((row) => ({
+              id: typeof row?.id === "string" ? row.id.trim() : "",
+              name: [
+                row?.name,
+                row?.display_name,
+                row?.displayName,
+                row?.model,
+                row?.id,
+              ].filter((v) => typeof v === "string").join(" "),
+            }))
+            .filter((row) => row.id && /dots\s*3|dots[-_/ ]?3/i.test(row.name) && /note/i.test(row.name));
+
+          const exactIds = [...new Set(candidates.map((row) => row.id))];
+          if (exactIds.length !== 1) {
+            console.log(`DOTS3_MODEL_RESOLUTION=FAIL_MATCH_COUNT_${exactIds.length}`);
+            for (const id of exactIds.slice(0, 5)) console.log(`DOTS3_CANDIDATE=${id}`);
+            process.exit(3);
+          }
+          const dotsModel = exactIds[0];
+          console.log("DOTS3_MODEL_RESOLUTION=PASS");
+          console.log(`DOTS3_MODEL=${dotsModel}`);
+
+          const client = new AtlasCloudClientV1({ apiKey: key });
+          const deepseekModel = "deepseek-ai/deepseek-v3.2";
+
+          async function smoke(label, model) {
+            const result = await client.complete({
+              model,
+              systemPrompt: "Return a tiny JSON object only. Do not call tools or take actions.",
+              userPrompt: 'Return exactly one JSON object with key "status" and value "ok".',
+              maxOutputTokens: 64,
+              timeoutMs: 15_000,
+              requireJsonObject: true,
+              requiredTextValidator: (text) => /"status"\s*\:\s*"ok"/i.test(text),
+            });
+
+            if (!result.ok) {
+              console.log(`${label}_CONNECTIVITY=FAIL`);
+              console.log(`${label}_FAILURE_REASON=${result.reason}`);
+              process.exitCode = 4;
+              return;
+            }
+            console.log(`${label}_CONNECTIVITY=PASS`);
+            console.log(`${label}_RESPONSE_VALID=PASS`);
+            const usageCaptured =
+              result.usage.inputTokens !== null
+              || result.usage.outputTokens !== null
+              || result.usage.totalTokens !== null;
+            console.log(`${label}_USAGE_CAPTURED=${usageCaptured ? "PASS" : "FAIL"}`);
+            console.log(`${label}_INPUT_TOKENS=${result.usage.inputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_CACHED_INPUT_TOKENS=${result.usage.cachedInputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_OUTPUT_TOKENS=${result.usage.outputTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_REASONING_TOKENS=${result.usage.reasoningTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_TOTAL_TOKENS=${result.usage.totalTokens ?? "NOT_REPORTED"}`);
+            console.log(`${label}_FINISH_REASON=${result.finishReason ?? "NOT_REPORTED"}`);
+            console.log(`${label}_PROVIDER_REQUEST_ID=${result.providerRequestId ?? "NOT_REPORTED"}`);
+            console.log(`${label}_REPORTED_COST_USD=${result.reportedCostUsd ?? "NOT_REPORTED"}`);
+          }
+
+          await smoke("DEEPSEEK_V3_2", deepseekModel);
+          if (!process.exitCode) await smoke("DOTS3", dotsModel);
+          if (process.exitCode) process.exit(process.exitCode);
+
+          console.log("ATLASCMOUD_SECRET_EXPOSED=false");
+          console.log("REAL_ATLAS_SMOKE=PASS");
+          NODE
+          node /tmp/atlas-real-smoke.mjs
+
+      - name: Verify checkout remained unmodified
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TRACKED_SOURCE_MUTATION=false"
