@@ -42,10 +42,10 @@ jobs:
           cd sentient
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
-          cat ../operator/scripts/dynamic-core-patch.gz.part0 ../operator/scripts/dynamic-core-patch.gz.part1 > /tmp/dynamic-core-patch.py.gz
-          test "$(sha256sum /tmp/dynamic-core-patch.py.gz | awk '{print $1}')" = "1bc551af8db79b968842cea329b26b81c1d05c2f99949bcea98eab86df386eb0"
+          cat ../operator/scripts/dynamic-core-patch.gz.part0 ../operator/scripts/dynamic-core-patch.gz.part1a ../operator/scripts/dynamic-core-patch.gz.part1b > /tmp/dynamic-core-patch.py.gz
+          test "$(sha256sum /tmp/dynamic-core-patch.py.gz | awk '{print $1}')" = "3c37d13ba71ce9d34eee112e4aa7119293a68489f6a2875d73d107d0cbcc6d09"
           gzip -dc /tmp/dynamic-core-patch.py.gz > /tmp/dynamic-core-patch.py
-          test "$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')" = "483d376880ee5a37fe69ab32099e615d661ce3edce639a8d09f15be111449e6b"
+          test "$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')" = "acf4e257070b7f0d335c35a451e8aad2e323a649ee22db6168be739f3212fa2a"
           python /tmp/dynamic-core-patch.py
           git diff --check
           npm ci --no-audit --no-fund >/dev/null
