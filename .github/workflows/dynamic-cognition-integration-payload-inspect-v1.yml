@@ -20,14 +20,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          : > /tmp/dynamic-integration-patch.gz
-          for part in \
+          cat \
             scripts/dynamic-integration-patch.gz.q00 \
             scripts/dynamic-integration-patch.gz.q01 \
-            scripts/dynamic-integration-patch.gz.q02
-          do
-            base64 -d "$part" >> /tmp/dynamic-integration-patch.gz
-          done
+            scripts/dynamic-integration-patch.gz.q02 \
+            > /tmp/dynamic-integration-patch.gz
           gzip -t /tmp/dynamic-integration-patch.gz
           gzip -dc /tmp/dynamic-integration-patch.gz > /tmp/dynamic-integration.patch
           echo "PAYLOAD_GZIP_SHA256=$(sha256sum /tmp/dynamic-integration-patch.gz | awk '{print $1}')"
