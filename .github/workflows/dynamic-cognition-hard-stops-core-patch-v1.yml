@@ -46,29 +46,8 @@ jobs:
           test "$(sha256sum /tmp/dynamic-core-patch.py.gz | awk '{print $1}')" = "3c37d13ba71ce9d34eee112e4aa7119293a68489f6a2875d73d107d0cbcc6d09"
           gzip -dc /tmp/dynamic-core-patch.py.gz > /tmp/dynamic-core-patch.py
           test "$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')" = "acf4e257070b7f0d335c35a451e8aad2e323a649ee22db6168be739f3212fa2a"
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("/tmp/dynamic-core-patch.py")
-          s = p.read_text()
-          old = """    fetchImpl: (async (_url, init) => await new Promise<Response>((_resolve, reject) => {
-      const signal = init?.signal;
-      const abort = () => { observedAbort = true; reject(new Error("aborted")); };
-      if (signal?.aborted) return abort();
-      signal?.addEventListener("abort", abort, { once: true });
-    })) as typeof fetch,
-"""
-          new = """    fetchImpl: (async (_url, init) => await new Promise<Response>((_resolve, reject) => {
-      const signal = init?.signal;
-      const keeper = setTimeout(() => reject(new Error("transport_safety_timeout")), 250);
-      const abort = () => { clearTimeout(keeper); observedAbort = true; reject(new Error("aborted")); };
-      if (signal?.aborted) return abort();
-      signal?.addEventListener("abort", abort, { once: true });
-    })) as typeof fetch,
-"""
-          if s.count(old) != 1:
-              raise SystemExit("expected one timeout test anchor")
-          p.write_text(s.replace(old, new, 1))
-          PY
+          test "$(sha256sum ../operator/scripts/fix-dynamic-patch-timeout-test.py | awk '{print $1}')" = "a6dfbc97970335809a5de24780936c9975aecb61ec4ac07b9aa99365cd5c7a8b"
+          python ../operator/scripts/fix-dynamic-patch-timeout-test.py
           test "$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')" = "400c9bcc9d4ab52ac2895cc302903d3abcbda6f0349454d888965bfc9cbe4a89"
           python /tmp/dynamic-core-patch.py
           git diff --check
