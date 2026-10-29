@@ -1,0 +1,81 @@
+from pathlib import Path
+
+def rpl(path, old, new):
+    p = Path(path); s = p.read_text()
+    if s.count(old) != 1: raise SystemExit(f"{path}: anchor {s.count(old)}")
+    p.write_text(s.replace(old, new, 1))
+
+p="src/deployment-governor/fly-exec.ts"
+rpl(p,
+'''type Result = { ok: boolean; code: number | null; out: string; err: string };''',
+'''export interface FlyMachineConvergenceEvidence {
+  ok: boolean;
+  reason: string | null;
+  machineId: string | null;
+  state: string | null;
+  version: string | null;
+  imageRef: string | null;
+}
+
+type Result = { ok: boolean; code: number | null; out: string; err: string };''')
+
+rpl(p,
+'''  public async probe(path: "/healthz" | "/readyz"): Promise<HttpProbeEvidence> {''',
+'''  public async waitCandidateMachineConvergence(
+    candidate: SentientCandidateDeploymentInput,
+    timeoutMs = 10 * 60_000,
+  ): Promise<FlyMachineConvergenceEvidence> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("machine_convergence_timeout_invalid");
+    const deadline = Date.now() + Math.floor(timeoutMs);
+    let last = await this.#candidateMachineConvergence(candidate);
+    while (!last.ok && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+      last = await this.#candidateMachineConvergence(candidate);
+    }
+    return last;
+  }
+
+  public async probe(path: "/healthz" | "/readyz"): Promise<HttpProbeEvidence> {''')
+
+rpl(p,
+'''  async #run(args: readonly string[], cwd: string, timeout: number): Promise<Result> {
+    return runFlyctl(args, cwd, timeout, this.#token, this.#secrets);
+  }
+}
+
+export function probeMatches(''',
+'''  async #candidateMachineConvergence(candidate: SentientCandidateDeploymentInput): Promise<FlyMachineConvergenceEvidence> {
+    const inventory = await this.resourceEnvelope();
+    const machineId = inventory.machineState?.machineId ?? null;
+    if (!inventory.ok || machineId === null) return {
+      ok: false,
+      reason: inventory.reason ?? "candidate_machine_inventory_unavailable",
+      machineId,
+      state: inventory.machineState?.state ?? null,
+      version: null,
+      imageRef: null,
+    };
+    const status = await this.#run(
+      ["machine", "status", machineId, "--app", SENTIENT_DEPLOYMENT_APP, "--json"],
+      process.cwd(),
+      20_000,
+    );
+    if (!status.ok) return {
+      ok: false,
+      reason: `candidate_machine_status_unavailable:${detail(status)}`,
+      machineId,
+      state: inventory.machineState?.state ?? null,
+      version: null,
+      imageRef: null,
+    };
+    return { ...machineConvergenceEvidenceV1(parse(status.out), candidate), machineId };
+  }
+
+  async #run(args: readonly string[], cwd: string, timeout: number): Promise<Result> {
+    return runFlyctl(args, cwd, timeout, this.#token, this.#secrets);
+  }
+}
+
+export function machineConvergenceEvidenceV1(
+  value: unknown,
+  candidate: SentientCandidateDeploymentInput,
