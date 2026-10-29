@@ -1,0 +1,101 @@
+licyDecision: SpawnPolicyDecisionV1;
+  selectedTarget: SpawnExecutionTargetV1 | null;
+  taskPackage: ChildTaskPackageV1 | null;
+  result: ChildExecutionResultV1 | null;
+  verification: SpawnVerificationResultV1 | null;
+  episode: SpawnEpisodeV1;
+}
+
+export async function runSpawnSentientV1(
+  dependencies: SpawnOrchestratorDependenciesV1,
+  input: SpawnOrchestratorInputV1,
+): Promise<SpawnOrchestratorOutcomeV1> {
+  if (new Set(dependencies.backends.map((backend) => backend.backendId)).size !== dependencies.backends.length) {
+    throw new Error("duplicate SpawnSentient backend id");
+  }
+  const request = structuredClone(input.request);
+  const parent = await dependencies.repository.getSpawnExecution(request.parentExecutionId);
+  if (!parent) throw new Error(`missing SpawnSentient parent ${request.parentExecutionId}`);
+  const groups = await Promise.all(dependencies.backends.map(async (backend) => {
+    const targets = await backend.describe();
+    if (targets.some((target) => target.backendId !== backend.backendId)) throw new Error("divergent backend binding");
+    return targets;
+  }));
+  const catalog = groups.flat();
+  const ledger = await dependencies.repository.spawnLedger(request.taskId, request.parentExecutionId);
+  const decision = await evaluateSpawnPolicyV1({
+    policy: dependencies.policy,
+    parent: { identity: parent.identity, effectiveGrant: parent.effectiveGrant, remainingBudgets: parent.remainingBudgets },
+    request,
+    ledger,
+    targetCatalog: catalog,
+  });
+  const startedAt = dependencies.now();
+  const requestRecord: SpawnRequestRecordV1 = {
+    id: request.requestId, request, requestDigest: decision.requestDigest,
+    policyDecision: structuredClone(decision), createdAt: startedAt,
+  };
+  if (decision.decision === "deny") {
+    const episode = deniedSpawnEpisodeV1(request, decision, startedAt);
+    await dependencies.repository.recordDeniedSpawn(requestRecord, episode);
+    return { status: "denied", policyDecision: decision, selectedTarget: null, taskPackage: null, result: null, verification: null, episode };
+  }
+  if (!decision.effectiveGrant || !decision.reservation) throw new Error("allow decision missing grant or reservation");
+
+  const target = selectSpawnExecutionTargetV1(request, decision.effectiveGrant, catalog);
+  const backend = dependencies.backends.find((candidate) => candidate.backendId === target.backendId);
+  if (!backend) throw new Error("selected backend unavailable");
+  const executionId = dependencies.executionId?.(request) ?? `${request.requestId}:execution`;
+  const depth = parent.identity.depth + 1;
+  if (!executionId.trim()) throw new Error("blank execution id");
+  const taskPackage = await buildChildTaskPackageV1({
+    request, executionId, depth, target, sentientCode: dependencies.sentientCode,
+    effectiveGrant: decision.effectiveGrant, resolvedSkills: input.resolvedSkills,
+    contextCandidates: input.contextCandidates, contextBounds: input.contextBounds,
+  });
+  const identity: SentientExecutionIdentityV1 = {
+    taskId: request.taskId, executionId, parentExecutionId: request.parentExecutionId, depth,
+    role: request.role, targetId: target.targetId, backendId: target.backendId, provider: target.provider,
+    model: target.model, targetRevision: target.revision, sentientCode: structuredClone(dependencies.sentientCode),
+    requestDigest: taskPackage.requestDigest, packageDigest: taskPackage.packageDigest,
+    skillSetDigest: taskPackage.skillSetDigest, contextDigest: taskPackage.contextDigest,
+    startedAt, endedAt: null, status: "reserved",
+  };
+  const execution: SpawnExecutionRecordV1 = {
+    id: executionId, identity: structuredClone(identity), requestId: request.requestId,
+    effectiveGrant: structuredClone(decision.effectiveGrant), reservedFromParent: structuredClone(decision.reservation),
+    remainingBudgets: structuredClone(decision.effectiveGrant.budgets), observedUsage: null,
+    reservationReconciled: false, updatedAt: startedAt,
+  };
+  const lineage: ExecutionLineageEdgeV1 = {
+    taskId: request.taskId, parentExecutionId: request.parentExecutionId,
+    childExecutionId: executionId, requestId: request.requestId, createdAt: startedAt,
+  };
+  await dependencies.repository.reserveSpawnChild({ request: requestRecord, execution, lineage, expectedLedger: ledger });
+  await dependencies.repository.markSpawnRunning(executionId, startedAt);
+
+  const runtimeSignal = AbortSignal.timeout(Math.max(1, decision.reservation.runtimeMs));
+  const signal = input.signal ? AbortSignal.any([input.signal, runtimeSignal]) : runtimeSignal;
+  let raw: BackendExecutionResultV1;
+  try {
+    raw = await awaitSpawnBackendWithinReservationV1(
+      backend.execute({ identity: { ...identity, status: "running" }, taskPackage, target, signal }),
+      signal,
+    );
+  } catch (error) {
+    raw = spawnBackendFailureV1(error);
+  }
+  if (signal.aborted && raw.status === "succeeded") raw = runtimeTimeoutFailureV1();
+
+  const endedAt = dependencies.now();
+  const snapshot = await dependencies.repository.spawnSnapshot();
+  const children = snapshot.records.lineage.filter((edge) => edge.parentExecutionId === executionId).map((edge) => edge.childExecutionId).sort();
+  let result = normalizeSpawnChildResultV1(raw, { ...identity, status: "running" }, taskPackage, children, endedAt);
+  const verification = signal.aborted ? null : await verifySpawnResultV1(dependencies.verifier, request, taskPackage, result);
+  if (verification) result = { ...result, verifierResultRefs: [`spawn-verification:${request.requestId}:${verification.verifierId}`] };
+  await dependencies.repository.completeSpawnChild({ executionId, endedAt, result });
+
+  const episode: SpawnEpisodeV1 = {
+    schemaVersion: SPAWN_EPISODE_VERSION, id: `${request.requestId}:episode`, requestId: request.requestId,
+    taskId: request.taskId, parentExecutionId: request.parentExecutionId, executionId, whySpawned: request.objective,
+    taskClass: "delegated_execution", role: request.role, requestedCapabilit
