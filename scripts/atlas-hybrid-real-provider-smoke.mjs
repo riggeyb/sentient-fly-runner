@@ -45,7 +45,7 @@ const candidates = rows
       || searchable.includes("dots3_note")
       || searchable.includes("dots3/note")
     ) score += 120;
-    if (searchable.includes("dots 3 note") score += 110;
+    if (searchable.includes("dots 3 note")) score += 110;
     if (searchable.includes("dots3") && searchable.includes("note")) score += 100;
     if (
       searchable.includes("dots")
@@ -55,7 +55,7 @@ const candidates = rows
     return { id, score };
   })
   .filter(row => row.id && row.score > 0)
-  .sort((a, b) => b.score - a.score || a.id.localCompare(b.id));
+  .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 
 if (candidates.length === 0) {
   throw new Error("Atlas model catalog contained no Dots3-Note candidate");
@@ -145,7 +145,7 @@ let failed = false;
 if (!await smoke("DEEPSEEK_V3_2", "deepseek-ai/deepseek-v3.2", 1_024)) failed = true;
 if (!await smoke("DOTS3", dotsModel, 128)) failed = true;
 
-console.log("ATLASCLOUD_SECRET_EXPOSED=false";
+console.log("ATLASCLOUD_SECRET_EXPOSED=false");
 if (failed) {
   console.log("REAL_ATLAS_SMOKE=FAIL");
   process.exit(3);
