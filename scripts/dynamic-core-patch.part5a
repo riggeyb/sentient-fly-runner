@@ -1,0 +1,61 @@
+ies: [...request.targetPolicy.requiredCapabilities],
+    policyDecision: structuredClone(decision), selectedTarget: structuredClone(target),
+    selectionEvidenceRefs: [...target.routingEvidenceRefs], skillSetDigest: taskPackage.skillSetDigest,
+    contextDigest: taskPackage.contextDigest, toolGrantDigest: await sha256Json(decision.effectiveGrant.tools),
+    scopeGrantDigest: await sha256Json(decision.effectiveGrant.scopes), reservedBudgets: structuredClone(decision.reservation),
+    observedUsage: structuredClone(result.usage), latencyMs: result.latencyMs, costMicros: result.costMicros,
+    resultSummary: `child execution ${result.terminalStatus}`, failureClass: result.failure?.class ?? null,
+    verification, repairExecutionIds: [], escalationExecutionIds: [], finalOutcome: verification?.outcome ?? null, createdAt: endedAt,
+  };
+  assertNoForbiddenSpawnMaterialV1(episode, "spawn episode");
+  await dependencies.repository.appendSpawnEpisode(episode);
+  return { status: "completed", policyDecision: decision, selectedTarget: target, taskPackage, result, verification, episode };
+}
+
+async function awaitSpawnBackendWithinReservationV1(
+  pending: Promise<BackendExecutionResultV1>,
+  signal: AbortSignal,
+): Promise<BackendExecutionResultV1> {
+  if (signal.aborted) return runtimeTimeoutFailureV1();
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: BackendExecutionResultV1) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    const onAbort = () => finish(runtimeTimeoutFailureV1());
+    signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (value) => finish(signal.aborted ? runtimeTimeoutFailureV1() : value),
+      (error) => finish(signal.aborted ? runtimeTimeoutFailureV1() : spawnBackendFailureV1(error)),
+    );
+  });
+}
+
+function runtimeTimeoutFailureV1(): BackendExecutionResultV1 {
+  return {
+    status: "timed_out", output: null, artifactRefs: [], evidenceRefs: [], toolActions: [],
+    usage: { inputTokens: null, outputTokens: null, totalTokens: null, costMicros: 0, runtimeMs: null, toolRounds: 0, toolActions: 0, currency: "USD", telemetryComplete: false },
+    latencyMs: null, costMicros: 0, providerReceipt: null,
+    failure: { class: "runtime_budget_exhausted", message: "Spawn execution exceeded its existing runtime reservation.", retryable: false },
+    unresolvedAmbiguities: [],
+  };
+}
+''')
+
+write("test/dynamic-hard-stops-core.test.ts", r'''import assert from "node:assert/strict";
+import test from "node:test";
+import { AtlasCloudClientV1 } from "../src/model/providers/atlas-cloud-client.js";
+import {
+  ATLAS_CLOUD_ATTEMPT_TIMEOUT_MS_V1,
+  AtlasHybridModelRouterV1,
+  DEEPSEEK_V3_2_MODEL_V1,
+} from "../src/model/providers/atlas-hybrid-router.js";
+import {
+  LocalHuggingFaceRuntimeV1,
+  type LocalHfGenerateInputV1,
+  type LocalHfGenerationV1,
+  type LocalHfRunnerV1,
+} from "../src/model/provi
