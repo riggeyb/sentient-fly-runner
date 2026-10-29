@@ -49,6 +49,9 @@ jobs:
           test "$(sha256sum ../operator/scripts/fix-dynamic-patch-timeout-test.py | awk '{print $1}')" = "a6dfbc97970335809a5de24780936c9975aecb61ec4ac07b9aa99365cd5c7a8b"
           python ../operator/scripts/fix-dynamic-patch-timeout-test.py
           test "$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')" = "400c9bcc9d4ab52ac2895cc302903d3abcbda6f0349454d888965bfc9cbe4a89"
+          test "$(sha256sum ../operator/scripts/fix-dynamic-patch-attempt-liveness.py | awk '{print $1}')" = "2beec8d1cf8d37ce49e0385cac8325dd27ce5d752c0f917a13d81107d480ee61"
+          python ../operator/scripts/fix-dynamic-patch-attempt-liveness.py
+          test "$(sha256sum /tmp/dynamic-core-patch.py | awk '{print $1}')" = "c48488d2faf428986260770cdd478e0b8c1c7ef196cf55b5cc9962e49a9513de"
           python /tmp/dynamic-core-patch.py
           git diff --check
           npm ci --no-audit --no-fund >/dev/null
