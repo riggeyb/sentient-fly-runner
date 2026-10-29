@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: 3f933c7121e9a5f9d4ca76d05a526f10c6a03125
+          ref: 8411570237f220e3fbec017c9932fc8d75dfe476
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 0
@@ -23,22 +23,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "3f933c7121e9a5f9d4ca76d05a526f10c6a03125"
-          test "$(git rev-parse HEAD^)" = "13106276199de1d6eda129b124d3e60ccec07348"
-          test "$(git hash-object src/application/production-collaboration.ts)" = "024857657e086432bfbf79469b564a49dc1d4220"
-          printf '%s  %s\n' "95d73cb922bc89517195922c01c6383f149d74d71565c225ef4bf09439fbaa6b" ".github/atlas-hybrid-spawn.patch" | sha256sum -c -
-          git apply --check .github/atlas-hybrid-spawn.patch
-          git apply .github/atlas-hybrid-spawn.patch
-          rm .github/atlas-hybrid-spawn.patch
-          git show HEAD^:.github/workflows/final-integrated-verification.yml > .github/workflows/final-integrated-verification.yml
-          test "$(sha256sum src/application/production-collaboration.ts | cut -d' ' -f1)" = "7aa283106db8d4a3e7edba374017036a52477e1e94f1fd6503c00286eebbc9bd"
+          test "$(git rev-parse HEAD)" = "8411570237f220e3fbec017c9932fc8d75dfe476"
+          test "$(git rev-parse HEAD^)" = "55d5d9145121b87fd580f1afd1312d02cc4d697e"
+          test "$(git rev-parse 'HEAD^{tree}')" = "40f5b584a7eafa97771614cae2ff8538fe640269"
+          printf '%s  %s\n' "969300a975da08544e9094e19d2a18659e3a0b7f64eea812a3df0d5aeb27075c" ".github/atlas-dots3-catalog-resolution.patch" | sha256sum -c -
+          git apply --check .github/atlas-dots3-catalog-resolution.patch
+          git apply .github/atlas-dots3-catalog-resolution.patch
+          rm .github/atlas-dots3-catalog-resolution.patch
           git diff --check
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run build
           npm test
           git config user.name "sentient-atlas-engineering"
           git config user.email "sentient-atlas-engineering@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "atlas: route production Spawn through bounded hybrid cognition"
+          git commit -m "atlas: resolve Dots3 Note from Atlas model catalog"
           git push origin HEAD:atlas-hybrid-cognition-mvp-v1-final-20261029
