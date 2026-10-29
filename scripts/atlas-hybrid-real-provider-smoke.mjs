@@ -96,7 +96,7 @@ async function smoke(label, model, maxOutputTokens) {
   if (!result.ok) {
     console.log(`${label}_CONNECTIVITY=FAIL`);
     console.log(`${label}_FAILURE_REASON=${result.reason}`);
-    throw new Error(`${label} provider smoke failed`);
+    return false;
   }
 
   const structured = result.structuredOutput;
@@ -106,8 +106,8 @@ async function smoke(label, model, maxOutputTokens) {
     || Array.isArray(structured)
     || structured.status !== "ok"
   ) {
-    console.log(`${label}_RESPONSE_VALID=FAIL`);
-    throw new Error(`${label} structured response invalid`);
+    console.log(`${label}_RESPONSE_VALID=FAILq);
+    return false;
   }
 
   const usage = result.usage;
@@ -137,11 +137,13 @@ async function smoke(label, model, maxOutputTokens) {
   );
   console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
 
-  if (!usageCaptured) throw new Error(`${label} usage missing`);
+  if (!usageCaptured) return false;
+  return true;
 }
 
-await smoke("DEEPSEEK_V3__2", "deepseek-ai/deepseek-v3.2", 1024);
-await smoke("DOTS3", dotsModel, 128);
+const deepseekOk = await smoke("DEEPSEEK_V3__2", "deepseek-ai/deepseek-v3.2", 1024);
+const dotsOk = await smoke("DOTS3", dotsModel, 128);
 
 console.log("ATLASCLOUD_SECRET_EXPOSED=false");
-console.log("REAL_ATLAS_SMOKE=PASS");
+console.log(`REAL_ATLAS_SMOKE=${deepseekOk && dotsOk ? "PASS" : "FAIL"}`);
+if (!deepseekOk || !dotsOk) process.exit(6);
