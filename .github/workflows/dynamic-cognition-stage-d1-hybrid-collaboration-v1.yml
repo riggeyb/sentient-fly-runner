@@ -48,7 +48,7 @@ jobs:
           git diff --check
           grep -q 'ATLAS_HYBRID_SPAWN_BACKEND_ID_V1' src/application/production-collaboration.ts
           grep -q 'ATLAS_HYBRID_PROVIDER_ID_V1' src/application/production-collaboration.ts
-          grep -q 'ATLAS_HYBRID_ROUTE_MODD_ID_V1' src/application/production-collaboration.ts
+          grep -q 'ATLAS_HYBRID_ROUTE_MODEL_ID_V1' src/application/production-collaboration.ts
           grep -q 'maxCostMicros: 25_000' src/application/production-collaboration.ts
           grep -q 'maxCostMicros: 100_000' src/application/production-collaboration.ts
           grep -q 'modelOutputIsAuthority === false' src/application/production-collaboration.ts
