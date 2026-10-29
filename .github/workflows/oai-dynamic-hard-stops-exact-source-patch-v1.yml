@@ -1,0 +1,88 @@
+name: OAI Dynamic Hard Stops Exact Source Patch V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout runner
+        uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+
+      - name: Checkout exact Sentient branch
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: source
+          fetch-depth: 0
+
+      - name: Verify exact source identity
+        working-directory: source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          echo "SOURCE_IDENTITY=PASS"
+
+      - name: Apply narrow hard-stop patch
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cat \
+            ../runner/scripts/oai-dynamic-hard-stops-patch.py.part00 \
+            ../runner/scripts/oai-dynamic-hard-stops-patch.py.part01 \
+            ../runner/scripts/oai-dynamic-hard-stops-patch.py.part02 \
+            > /tmp/oai-dynamic-hard-stops-patch.py
+          python /tmp/oai-dynamic-hard-stops-patch.py
+          git diff --check
+          echo "PATCH_APPLIED=PASS"
+
+      - name: Build and focused tests
+        working-directory: source
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          npm test -- --test-name-pattern="spawn|atlas|mission control|root" || npm test
+          echo "PATCH_VALIDATION=PASS"
+
+      - name: Commit exact source patch
+        working-directory: source
+        env:
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git config user.name "Sentient Engineering"
+          git config user.email "sentient-engineering@users.noreply.github.com"
+          git add src/model/providers/atlas-hybrid-adapters.ts src/spawn/orchestrator.ts src/phase1/core-runtime.ts
+          test -n "$(git status --porcelain)"
+          git commit -m "runtime: connect hard stops to existing model and spawn controls"
+          git push origin "HEAD:${SOURCE_BRANCH}"
+          echo "SOURCE_PATCH_PUSHED=true"
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git rev-parse HEAD^{tree})"
