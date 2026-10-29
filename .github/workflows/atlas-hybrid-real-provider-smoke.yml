@@ -30,24 +30,17 @@ jobs:
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
 
-      - name: Checkout runner
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
       - name: Checkout candidate
         uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: ${{ inputs.source_sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          path: sentient
           persist-credentials: false
           fetch-depth: 1
 
       - name: Guard source
         shell: bash
-        working-directory: sentient
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
@@ -60,22 +53,20 @@ jobs:
 
       - name: Build
         shell: bash
-        working-directory: sentient
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund >/dev/null
           npm run build >/dev/null
           echo "BUILD=PASS"
 
-      - name: Real Atlas smoke
+      - name: Real Atlas smoke through candidate AtlasCloudClientV1
         shell: bash
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
-        run: node scripts/atlas-hybrid-real-provider-smoke.mjs
+        run: node dist/src/model/atlas-smoke.js
 
       - name: Guard clean source
         shell: bash
-        working-directory: sentient
         run: |
           set -euo pipefail
           git diff --quiet
