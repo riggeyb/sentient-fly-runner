@@ -1,0 +1,67 @@
+name: Dynamic Cognition Real Atlas Smoke FC67 Wrapper
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: sentient
+      - name: Verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.source_sha }}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${{ inputs.source_tree }}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C sentient rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "${{ inputs.source_tree }}"
+          echo "SOURCE_CHECKOUT=PASS"
+      - name: Build exact candidate
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+          echo "BUILD=PASS"
+      - name: Assemble reviewed smoke script
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat runner/scripts/fc67-smoke.part0 runner/scripts/fc67-smoke.part1 runner/scripts/fc67-smoke.part2 runner/scripts/fc67-smoke.part3 > sentient/.fc67-smoke.mjs
+          node --check sentient/.fc67-smoke.mjs
+      - name: Real Atlas smoke
+        shell: bash
+        env:
+          ATLASCLIOUD_API_KEY: ${{ secrets.ATLASCLIOUD_API_KEY }}
+        run: node sentient/.fc67-smoke.mjs
+      - name: Clean source fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f sentient/.fc67-smoke.mjs
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "DEPLOYMENT_PERFORMED=false"
