@@ -1,0 +1,125 @@
+idate text"}.',
+    "The answer field must be non-empty. Do not add markdown around the JSON.",''',
+'''    'Return only one JSON object with a non-empty "answer" field.',
+    'For ordinary answers, "answer" may be a string. When asked for a cognition plan, "answer" may be a JSON object containing interpretation, successCriteria, subgoals, plan, workers, results, and unresolvedQuestions.',
+    "Do not add markdown around the JSON.",''')
+replace("src/model/providers/atlas-hybrid-router.ts",
+'''  const answer = (value as Record<string, unknown>).answer;
+  return typeof answer === "string" && answer.trim() ? answer.trim() : null;''',
+'''  const answer = (value as Record<string, unknown>).answer;
+  if (typeof answer === "string" && answer.trim()) return answer.trim();
+  if (answer !== null && typeof answer === "object") return JSON.stringify(answer);
+  return null;''')
+
+replace("src/model/providers/atlas-hybrid-adapters.ts",
+'''import type { Phase1CognitionPort, TaskRequirementsV1 } from "../../phase1/core-runtime.js";''',
+'''import type {
+  Phase1CognitionPort,
+  Phase1InvocationControlV1,
+  TaskRequirementsV1,
+} from "../../phase1/core-runtime.js";''')
+replace("src/model/providers/atlas-hybrid-adapters.ts",
+'''  public async run(requirements: TaskRequirementsV1): Promise<unknown> {
+    const result = this.#stage === "synthesis"
+      ? await this.#router.synthesis({
+          systemPrompt: "Synthesize only from supplied accepted and verified context. Never invent effects or authority.",
+          userPrompt: requirements.normalizedUserRequest,
+          maxInputTokens: 8_192,
+          maxOutputTokens: 1_024,
+        })
+      : await this.#router.cognition({
+          systemPrompt: "Analyze intent, decompose tasks, plan, and propose a bounded candidate answer.",
+          userPrompt: requirements.normalizedUserRequest,
+          maxInputTokens: 4_096,
+          maxOutputTokens: 384,
+        });''',
+'''  public async run(
+    requirements: TaskRequirementsV1,
+    control?: Phase1InvocationControlV1,
+  ): Promise<unknown> {
+    const remaining = control === undefined
+      ? undefined
+      : Math.max(1, control.absoluteDeadlineMs - Date.now());
+    const common = {
+      ...(control?.maxCostMicros === undefined ? {} : { maxCostMicros: control.maxCostMicros }),
+      ...(remaining === undefined ? {} : { timeoutMs: remaining }),
+      ...(control?.signal === undefined ? {} : { signal: control.signal }),
+    };
+    const result = this.#stage === "synthesis"
+      ? await this.#router.synthesis({
+          systemPrompt: "Synthesize only from supplied accepted and verified context. Never invent effects or authority.",
+          userPrompt: requirements.normalizedUserRequest,
+          maxInputTokens: Math.min(8_192, control?.maxInputTokens ?? 8_192),
+          maxOutputTokens: Math.min(1_024, control?.maxOutputTokens ?? 1_024),
+          ...common,
+        })
+      : await this.#router.cognition({
+          systemPrompt: "Analyze intent, decompose tasks, plan, revise, critique, and propose bounded candidate results. Human intent is immutable and effect authority never expands.",
+          userPrompt: requirements.normalizedUserRequest,
+          maxInputTokens: Math.min(4_096, control?.maxInputTokens ?? 4_096),
+          maxOutputTokens: Math.min(512, control?.maxOutputTokens ?? 512),
+          ...common,
+        });''')
+replace("src/model/providers/atlas-hybrid-adapters.ts",
+'''        outputSha256: result.outputSha256,
+        telemetry: jsonValue(result.telemetry),''',
+'''        outputSha256: result.outputSha256,
+        structuredCognition: result.structuredOutput === null ? null : jsonValue(result.structuredOutput),
+        telemetry: jsonValue(result.telemetry),''')
+replace("src/model/providers/atlas-hybrid-adapters.ts",
+'''    const verification = input.identity.role === "independent-verification";'',
+'''    const verification = input.identity.role.startsWith("independent-verification");''')
+replace("src/model/providers/atlas-hybrid-adapters.ts",
+'''      timeoutMs: Math.min(budget.maxRuntimeMs, 28_000),''',
+'''      timeoutMs: budget.maxRuntimeMs,''')
+
+write("src/spawn/orchestrator.ts", r'''import type { ContextBounds, ReusableArtifact } from "../retrieval/contracts.js";
+import { sha256Json } from "../retrieval/digest.js";
+import type { SpawnExecutionRecordV1, SpawnRequestRecordV1 } from "../state/spawn-state-types.js";
+import type { SpawnStateRepositoryV1 } from "../state/spawn-repository.js";
+import {
+  SPAWN_EPISODE_VERSION,
+  assertNoForbiddenSpawnMaterialV1,
+  type BackendExecutionResultV1,
+  type ChildExecutionResultV1,
+  type ChildTaskPackageV1,
+  type ExecutionLineageEdgeV1,
+  type SentientExecutionIdentityV1,
+  type SpawnCodeBindingV1,
+  type SpawnDeterministicVerifierV1,
+  type SpawnEpisodeV1,
+  type SpawnExecutionBackendV1,
+  type SpawnExecutionTargetV1,
+  type SpawnPolicyDecisionV1,
+  type SpawnSentientRequestV1,
+  type SpawnVerificationResultV1,
+} from "./contracts.js";
+import { buildChildTaskPackageV1, type SpawnResolvedSkillInputV1 } from "./context.js";
+import {
+  deniedSpawnEpisodeV1,
+  normalizeSpawnChildResultV1,
+  spawnBackendFailureV1,
+  verifySpawnResultV1,
+} from "./orchestrator-result.js";
+import { evaluateSpawnPolicyV1, type SpawnPolicyV1 } from "./policy.js";
+import { selectSpawnExecutionTargetV1 } from "./selection.js";
+
+export interface SpawnOrchestratorDependenciesV1 {
+  repository: SpawnStateRepositoryV1;
+  policy: SpawnPolicyV1;
+  backends: readonly SpawnExecutionBackendV1[];
+  verifier: SpawnDeterministicVerifierV1;
+  sentientCode: SpawnCodeBindingV1;
+  now: () => string;
+  executionId?: (request: SpawnSentientRequestV1) => string;
+}
+export interface SpawnOrchestratorInputV1 {
+  request: SpawnSentientRequestV1;
+  resolvedSkills: readonly SpawnResolvedSkillInputV1[];
+  contextCandidates: readonly ReusableArtifact[];
+  contextBounds: ContextBounds;
+  signal?: AbortSignal;
+}
+export interface SpawnOrchestratorOutcomeV1 {
+  status: "denied" | "completed";
+  pol
