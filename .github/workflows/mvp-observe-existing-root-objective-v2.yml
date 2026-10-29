@@ -23,20 +23,16 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$OID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
-          cat >"$RUNNER_TEMP/identity.sh" <<'SH'
-          set -eu
-          h="$(curl -fsS --max-time 8 http://127.0.0.1:8080/healthz)"
-          r="$(curl -fsS --max-time 8 http://127.0.0.1:8080/readyz)"
-          jq -e --arg s "$SHA" --arg t "$TREE" '.application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null <<EOF
-          $h
-          EOF
-          jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' >/dev/null <<EOF
-          $r
-          EOF
-          echo LIVE_EXACT_IDENTITY=PASS
-          SH
-          b64="$(base64 -w0 "$RUNNER_TEMP/identity.sh")"
-          timeout 120s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/identity.sh; SHA=$SHA TREE=$TREE sh /tmp/identity.sh; rc=\$?; rm -f /tmp/identity.sh; exit \$rc'"
+          cat >"$RUNNER_TEMP/identity.mjs" <<'NODE'
+          const sha=process.env.SHA, tree=process.env.TREE;
+          const h=await (await fetch("http://127.0.0.1:8080/healthz",{signal:AbortSignal.timeout(8000)})).json();
+          const r=await (await fetch("http://127.0.0.1:8080/readyz",{signal:AbortSignal.timeout(8000)})).json();
+          if(h?.application?.identity?.source?.sha!==sha || h?.application?.identity?.source?.tree!==tree) throw new Error("health_identity_mismatch");
+          if(r?.ready!==true || r?.identity?.source?.sha!==sha || r?.identity?.source?.tree!==tree) throw new Error("ready_identity_mismatch");
+          console.log("LIVE_EXACT_IDENTITY=PASS");
+          NODE
+          b64="$(base64 -w0 "$RUNNER_TEMP/identity.mjs")"
+          timeout 120s flyctl ssh console -a "$APP" -C "sh -lc 'echo $b64 | base64 -d >/tmp/identity.mjs; SHA=$SHA TREE=$TREE node /tmp/identity.mjs; rc=\$?; rm -f /tmp/identity.mjs; exit \$rc'"
       - name: GET only existing objective
         shell: bash
         run: |
