@@ -1,0 +1,94 @@
+name: Atlas Hybrid Cost Delta V1
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact riggeyb/sentient source SHA
+        required: true
+        type: string
+      tree:
+        description: Exact expected source tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify exact source and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          npm ci --no-audit --no-fund >/tmp/npm-ci.log 2>&1
+          npm run build >/tmp/build.log 2>&1
+          echo "SOURCE_CHECKOUT=PASS"
+          echo "BUILD=PASS"
+      - name: Measure actual Atlas model-cost delta around one harmless smoke
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${ATLASCLOUD_API_KEY:-}"
+          deep="deepseek-ai/deepseek-v3.2"
+          dots="$(node --input-type=module <<'NODE'
+          import { AtlasCloudClientV1, resolveAtlasDots3NoteModelV1 } from "./dist/src/model/providers/atlascloud-client.js";
+          const key = process.env.ATLASCLOUD_API_KEY?.trim();
+          if (!key) process.exit(2);
+          const model = await resolveAtlasDots3NoteModelV1(new AtlasCloudClientV1({ apiKey: key }));
+          if (!/^[A-Za-z0-9._:/-]{1,240}$/.test(model)) process.exit(3);
+          process.stdout.write(model);
+          NODE
+          )"
+          cost() {
+            local model="$1"
+            local start end
+            start="$(date -u +%F)"
+            end="$(date -u -d 'tomorrow' +%F)"
+            curl -fsS --max-time 10 -G https://api.atlascloud.ai/public/v1/model-costs \
+              -H "Authorization: Bearer ${ATLASCLOUD_API_KEY}" \
+              -H "Accept: application/json" \
+              --data-urlencode "start_date=${start}" \
+              --data-urlencode "end_date=${end}" \
+              --data-urlencode "scope=self" \
+              --data-urlencode "model_types[]=text" \
+              --data-urlencode "model_ids[]=${model}" |
+              jq -er '[.data[]?.results[]?.amount.value | tonumber] | add // 0'
+          }
+          before_deep="$(cost "$deep")"
+          before_dots="$(cost "$dots")"
+          node dist/src/model/atlas-smoke.js
+          after_deep="$(cost "$deep")"
+          after_dots="$(cost "$dots")"
+          deep_delta="$(awk -v a="$after_deep" -v b="$before_deep" 'BEGIN { printf "%.12f", a-b }')"
+          dots_delta="$(awk -v a="$after_dots" -v b="$before_dots" 'BEGIN { printf "%.12f", a-b }')"
+          echo "COST_TELEMETRY_SOURCE=atlascloud_model_costs_account_delta"
+          echo "DEEPSEEK_COST_WINDOW_BEFORE_USD=$before_deep"
+          echo "DEEPSEEK_COST_WINDOW_AFTER_USD=$after_deep"
+          echo "ACTUAL_DEEPSEEK_SMOKE_COST_USD=$deep_delta"
+          echo "DOTS3_COST_WINDOW_BEFORE_USD=$before_dots"
+          echo "DOTS3_COST_WINDOW_AFTER_USD=$after_dots"
+          echo "ACTUAL_DOTS3_SMOKE_COST_USD=$dots_delta"
+          echo "COST_DELTA_CAPTURED=PASS"
+          echo "ATLASCLOUD_SECRET_EXPOSED=false
