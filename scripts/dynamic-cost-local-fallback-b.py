@@ -45,7 +45,7 @@ new='''    backends: {
       denied: [] as string[],
     },
     preferenceOrder: [
-      `${ATLAS_HYBRID_SPAWN_BACKEND_ID_V1}:${ATLAS_HYBRID_ROUTE_MODD_ID_V1}`,
+      `${ATLAS_HYBRID_SPAWN_BACKEND_ID_V1}:${ATLAS_HYBRID_ROUTE_MODEL_ID_V1}`,
       `${HUGGINGFACE_LOCAL_SPAWN_BACKEND_ID_V1}:${LOCAL_HF_MODEL_V1}@${LOCAL_HF_MODEL_REVISION_V1}`,
     ],'''
 if s.count(old)!=1: raise SystemExit(f"targets:{s.count(old)}")
