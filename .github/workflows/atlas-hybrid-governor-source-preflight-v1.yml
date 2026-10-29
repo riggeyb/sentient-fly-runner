@@ -1,0 +1,124 @@
+name: Atlas Hybrid Governor Source Preflight V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact riggeyb/sentient successor SHA
+        required: true
+        type: string
+      source_tree:
+        description: Exact successor tree
+        required: true
+        type: string
+      source_parent:
+        description: Exact successor parent SHA
+        required: true
+        type: string
+      base_sha:
+        description: Exact production baseline SHA
+        required: true
+        type: string
+      skills_sha:
+        description: Exact riggeyb/skills SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA: ${{ inputs.source_sha }}
+      EXPECTED_TREE: ${{ inputs.source_tree }}
+      EXPECTED_PARENT: ${{ inputs.source_parent }}
+      EXPECTED_BASE: ${{ inputs.base_sha }}
+      EXPECTED_SKILLS_SHA: ${{ inputs.skills_sha }}
+    steps:
+      - name: Validate immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in "$EXPECTED_SHA" "$EXPECTED_TREE" "$EXPECTED_PARENT" "$EXPECTED_BASE" "$EXPECTED_SKILLS_SHA"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]]
+          done
+
+      - name: Checkout exact successor
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: sentient
+
+      - name: Guard successor identity and baseline ancestry
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse 'HEAD^')" = "$EXPECTED_PARENT"
+          git cat-file -e "${EXPECTED_BASE}^{commit}"
+          git merge-base --is-ancestor "$EXPECTED_BASE" "$EXPECTED_SHA"
+          echo "SOURCE_CHECKOUT=PASS"
+          echo "SUCCESSOR_DESCENDS_FROM_BASE=PASS"
+
+      - name: Checkout exact skills
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/skills
+          ref: ${{ inputs.skills_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: skills
+
+      - name: Guard skills identity
+        working-directory: skills
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SKILLS_SHA"
+          echo "SKILLS_FENCE=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build exact successor
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund >/dev/null
+          npm run build >/dev/null
+          echo "BUILD=PASS"
+
+      - name: Governor source preflight regressions
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            dist/test/deployment-governor-boundaries.test.js \
+            dist/test/deployment-governor-cloud-bootstrap.test.js \
+            dist/test/deployment-governor-fly-token-durability.test.js \
+            dist/test/deployment-governor-skills-fence.test.js \
+            dist/test/deployment-governor.test.js \
+            dist/test/phase0-engineering-readiness.test.js
+          echo "GOVERNOR_PREFLIGHT=PASS"
+
+      - name: Guard no mutation and no deployment
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "DEPLOYMENT_PERFORMED=false"
