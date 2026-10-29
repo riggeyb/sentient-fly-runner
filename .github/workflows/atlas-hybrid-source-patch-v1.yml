@@ -1,4 +1,4 @@
-name: Atlas Hybrid Source Patch V1
+name: Sentient Dynamic Cognition Hard Stops Patch V1
 
 on:
   workflow_dispatch:
@@ -16,16 +16,23 @@ permissions:
 jobs:
   patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout engineering scripts
+        uses: actions/checkout@v4
+        with:
+          ref: sentient-dynamic-cognition-hard-stops-v1
+          path: runner
+      - name: Checkout exact Sentient integration head
+        uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: ${{ inputs.source_sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: true
           fetch-depth: 1
-      - name: Repair exact Atlas mocked timeout and fetch typing
+          path: sentient
+      - name: Guard exact source and apply hard-stop integration
         shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -34,46 +41,32 @@ jobs:
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git show -s --format=%T HEAD)" = "$SOURCE_TREE"
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("test/atlas-hybrid-router.test.ts")
-          text = p.read_text()
-          if text.count("RequestInfo") != 3:
-              raise SystemExit(f"expected 3 RequestInfo occurrences, saw {text.count('RequestInfo')}")
-          text = text.replace("RequestInfo", "Parameters<typeof fetch>[0]")
-          old = '''    return await new Promise<Response>((_resolve, reject) => {
-      const signal = init?.signal;
-      if (signal?.aborted) {
-        reject(new Error("aborted"));
-        return;
-      }
-      signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-    });'''
-          new = '''    return await new Promise<Response>((_resolve, reject) => {
-      const signal = init?.signal;
-      const keepAlive = setTimeout(() => reject(new Error("mock_timeout_guard")), 1_000);
-      const abort = () => {
-        clearTimeout(keepAlive);
-        reject(new Error("aborted"));
-      };
-      if (signal?.aborted) {
-        abort();
-        return;
-      }
-      signal?.addEventListener("abort", abort, { once: true });
-    });'''
-          if text.count(old) != 1:
-              raise SystemExit("hangingFetch contract changed")
-          p.write_text(text.replace(old, new))
-          PY
-          git diff --check
+          test "$(git -C sentient rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$SOURCE_TREE"
+          python runner/scripts/dynamic_hard_stops_stage1b.py
+          python runner/scripts/dynamic_hard_stops_stage2.py
+          python runner/scripts/dynamic_hard_stops_stage3.py
+          python runner/scripts/dynamic_hard_stops_stage4.py
+          git -C sentient diff --check
+      - name: Build and focused hard-stop verification
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
           npm ci --no-audit --no-fund
           npm run build
-          node --test dist/test/atlas-hybrid-router.test.js dist/test/atlas-dots3-cost-policy.test.js dist/test/phase0-engineering-readiness.test.js
-          git config user.name "sentient-atlas-engineering"
-          git config user.email "sentient-atlas-engineering@users.noreply.github.com"
-          git add test/atlas-hybrid-router.test.ts
-          git commit -m "test: make Atlas timeout mock deterministic"
-          git push origin HEAD:refs/heads/atlas-hybrid-cognition-mvp-v1-20261029
+          node --test dist/test/dynamic-hard-stops-v1.test.js
+          node --test dist/test/atlas-hybrid-router.test.js
+          node --test dist/test/governor-convergence-v1.test.js
+      - name: Commit verified integration
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-hard-stop-engineering"
+          git config user.email "sentient-hard-stop-engineering@users.noreply.github.com"
+          git add src test
+          git commit -m "runtime: connect objective and Spawn hard stops"
+          git push origin HEAD:refs/heads/sentient-dynamic-cognition-hard-stops-v1-integration
+          echo "SUCCESSOR_SHA=$(git rev-parse HEAD)"
+          echo "SUCCESSOR_TREE=$(git show -s --format=%T HEAD)"
