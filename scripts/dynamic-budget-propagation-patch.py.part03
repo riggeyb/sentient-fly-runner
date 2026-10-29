@@ -1,0 +1,76 @@
+import { AtlasHybridSpawnExecutionBackendV1 } from "../src/model/providers/atlas-hybrid-adapters.js";
+import type { AtlasHybridModelRouterV1 } from "../src/model/providers/atlas-hybrid-router.js";
+
+test("objective budget uses existing BudgetEnvelope semantics and the earliest hard deadline", () => {
+  const budget = normalizeBudgetEnvelopeV1({
+    maxTokens: 900,
+    maxCostUsd: 0.125,
+    maxDurationSeconds: 20,
+  });
+  assert.deepEqual(budget, {
+    maxTokens: 900,
+    maxCostUsd: 0.125,
+    maxDurationSeconds: 20,
+  });
+  const envelope = objectiveExecutionEnvelopeV1(
+    {
+      objectiveId: "objective-budget-test",
+      budget,
+      deadline: new Date(15_000).toISOString(),
+    },
+    1_000,
+  );
+  assert.equal(envelope.absoluteDeadlineMs, 15_000);
+  assert.equal(envelope.maxTokens, 900);
+  assert.equal(envelope.maxCostMicros, 125_000);
+});
+
+test("Atlas token ceilings reject before network dispatch when hard bounds cannot be satisfied", async () => {
+  let calls = 0;
+  const client = new AtlasCloudClientV1({
+    apiKey: "test-only",
+    fetchImpl: (async () => {
+      calls += 1;
+      throw new Error("network_should_not_be_called");
+    }) as typeof fetch,
+  });
+
+  const inputExceeded = await client.complete({
+    model: "deepseek-ai/deepseek-v3.2",
+    systemPrompt: "abcd",
+    userPrompt: "efgh",
+    maxInputTokens: 4,
+    maxOutputTokens: 8,
+    timeoutMs: 1_000,
+  });
+  assert.equal(inputExceeded.ok, false);
+  if (!inputExceeded.ok) assert.equal(inputExceeded.reason, "context_limit");
+  assert.equal(calls, 0);
+
+  const totalExhausted = await client.complete({
+    model: "deepseek-ai/deepseek-v3.2",
+    systemPrompt: "a",
+    userPrompt: "b",
+    maxInputTokens: 10,
+    maxOutputTokens: 8,
+    maxTotalTokens: 2,
+    timeoutMs: 1_000,
+  });
+  assert.equal(totalExhausted.ok, false);
+  if (!totalExhausted.ok) assert.equal(totalExhausted.reason, "context_limit");
+  assert.equal(calls, 0);
+});
+
+test("cloud Spawn advertises only hard limits it can enforce", async () => {
+  const backend = new AtlasHybridSpawnExecutionBackendV1(
+    {} as unknown as AtlasHybridModelRouterV1,
+  );
+  const [target] = await backend.describe();
+  assert.ok(target);
+  assert.equal(target!.hardLimitEnforcement.inputTokens, true);
+  assert.equal(target!.hardLimitEnforcement.outputTokens, true);
+  assert.equal(target!.hardLimitEnforcement.totalTokens, true);
+  assert.equal(target!.hardLimitEnforcement.runtimeMs, true);
+  assert.equal(target!.hardLimitEnforcement.costMicros, false);
+});
+''')
