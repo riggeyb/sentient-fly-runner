@@ -1,0 +1,262 @@
+name: MVP Atlas Dots3 No SmolLM2 Engineering V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Exact engineering branch
+        required: true
+        type: string
+      expected_sha:
+        description: Exact branch head before mutation
+        required: true
+        type: string
+      expected_tree:
+        description: Exact tree before mutation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Fence exact source and patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.expected_sha }}"
+          test "$(git rev-parse 'HEAD^{tree}')" = "${{ inputs.expected_tree }}"
+          test -z "$(git status --porcelain)"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path, old, new, expected=1):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} occurrences, found {count}")
+              p.write_text(text.replace(old, new))
+
+          local_step = '        { kind: "local" as const, model: LOCAL_HF_MODEL_V1, maxOutput: input.maxOutputTokens ?? 1_024, timeoutMs: LOCAL_HF_ATTEMPT_TIMEOUT_MS_V1 },\n'
+          replace_exact("src/model/providers/atlas-hybrid-router.ts", local_step, "", expected=2)
+
+          replace_exact(
+              "src/fly/production-runtime.ts",
+              'import { LocalHuggingFaceSpawnExecutionBackendV1 } from "../spawn/backends/huggingface.js";\n',
+              "",
+          )
+          replace_exact(
+              "src/fly/production-runtime.ts",
+              '  const spawnBackends = [\n    new AtlasHybridSpawnExecutionBackendV1(hybridRouter),\n    new LocalHuggingFaceSpawnExecutionBackendV1(localHfRuntime),\n  ];',
+              '  const spawnBackends = [\n    new AtlasHybridSpawnExecutionBackendV1(hybridRouter),\n  ];',
+          )
+
+          old_targets = '''function targets() {
+            return {
+              targets: { allowed: [] as string[], denied: [] as string[] },
+              backends: {
+                allowed: [ATLAS_HYBRID_SPAWN_BACKEND_ID_V1, HUGGINGFACE_LOCAL_SPAWN_BACKEND_ID_V1],
+                denied: ["openrouter", "huggingface-inference-api"],
+              },
+              providers: {
+                allowed: [ATLAS_HYBRID_PROVIDER_ID_V1, LOCAL_HF_PROVIDER_V1],
+                denied: ["openai", "openrouter", "huggingface"],
+              },
+              models: {
+                allowed: [ATLAS_HYBRID_ROUTE_MODEL_ID_V1, LOCAL_HF_MODEL_V1],
+                denied: [] as string[],
+              },
+              preferenceOrder: [
+                `${ATLAS_HYBRID_SPAWN_BACKEND_ID_V1}:${ATLAS_HYBRID_ROUTE_MODD_ID_V1}`,
+                `${HUGGINGFACE_LOCAL_SPAWN_BACKEND_ID_V1}:${LOCAL_HF_MODEL_V1}@${LOCAL_HF_MODEL_REVISION_V1}`,
+              ],
+            };
+          }'''
+          new_targets = '''function targets() {
+            return {
+              targets: { allowed: [] as string[], denied: [] as string[] },
+              backends: {
+                allowed: [ATLAS_HYBRID_SPAWN_BACKEND_ID_V1],
+                denied: ["openrouter", "huggingface-inference-api"],
+              },
+              providers: {
+                allowed: [ATLAS_HYBRID_PROVIDER_ID_V1],
+                denied: ["openai", "openrouter", "huggingface"],
+              },
+              models: {
+                allowed: [ATLAS_HYBRID_ROUTE_MODEL_ID_V1],
+                denied: [] as string[],
+              },
+              preferenceOrder: [
+                `${ATLAS_HYBRID_SPAWN_BACKEND_ID_V1}:${ATLAS_HYBRID_ROUTE_MODEL_ID_V1}`,
+              ],
+            };
+          }'''
+          replace_exact("src/application/production-collaboration.ts", old_targets, new_targets)
+
+          test_path = "test/atlas-hybrid-router.test.ts"
+          replace_exact(
+              test_path,
+              'test("cognition routes DeepSeek -> Dots3 -> Local HF with finite attempts", async (t) => {',
+              'test("cognition routes DeepSeek -> Dots3 and stops without local fallback", async (t) => {',
+          )
+          replace_exact(
+              test_path,
+              '''  const local = fixture([res("down", 503), res("bad-json")], "local cognition");
+            const l = await local.router.cognition({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(l.ok && l.provider === "huggingface-local" && l.text === "local cognition", true);
+            assert.equal(local.runner.calls, 1);
+
+            const terminal = fixture([res("down", 503), res("down", 503)], "unused", true);
+            const f = await terminal.router.cognition({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(f.ok, false);
+            if (!f.ok) {
+              assert.equal(f.reason, "terminal_unavailable");
+              assert.deepEqual(f.telemetry.map((v) => v.attemptNumber), [1, 2, 3]);
+            }''',
+              '''  const terminal = fixture([res("down", 503), res("bad-json")], "must not run");
+            const f = await terminal.router.cognition({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(f.ok, false);
+            assert.equal(terminal.runner.calls, 0);
+            if (!f.ok) {
+              assert.equal(f.reason, "terminal_unavailable");
+              assert.deepEqual(f.telemetry.map((v) => v.attemptNumber), [1, 2]);
+              assert.deepEqual(f.telemetry.map((v) => v.model), [DEEPSEEK_V3_2_MODEL_V1, DOTS]);
+            }''',
+          )
+
+          replace_exact(
+              test_path,
+              'test("synthesis routes Dots3 -> DeepSeek -> Local HF", async (t) => {',
+              'test("synthesis routes Dots3 -> DeepSeek and stops without local fallback", async (t) => {',
+          )
+          replace_exact(
+              test_path,
+              '''  const local = fixture([res("down", 503), res("down", 503)], "local final");
+            const l = await local.router.synthesis({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(l.ok && l.provider === "huggingface-local" && l.text === "local final", true);
+            assert.equal(local.runner.calls, 1);''',
+              '''  const terminal = fixture([res("down", 503), res("down", 503)], "must not run");
+            const l = await terminal.router.synthesis({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(l.ok, false);
+            assert.equal(terminal.runner.calls, 0);
+             if (!l.ok) assert.deepEqual(l.telemetry.map((v) => v.attemptNumber), [1, 2]);''',
+          )
+
+          replace_exact(
+              test_path,
+              '''test("authentication does not fail over; Atlas unavailable permits local cognition", async () => {
+            const auth = fixture([res("unauthorized", 401)]);
+            const denied = await auth.router.cognition({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(denied.ok, false);
+            assert.equal(auth.calls.length, 1);
+            assert.equal(auth.runner.calls, 0);
+
+            const runner = new LocalRunner("degraded");
+            const router = new AtlasHybridModelRouterV1({
+              atlasClient: null,
+              dots3Model: null,
+              localRuntime: new LocalHuggingFaceRuntimeV1({ runner }),
+            });
+            const local = await router.cognition({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(local.ok && local.provider === "huggingface-local" && local.text === "degraded", true);
+          });''',
+              '''test("authentication does not fail over; Atlas unavailable is terminal", async () => {
+            const auth = fixture([res("unauthorized", 401)]);
+            const denied = await auth.router.cognition({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(denied.ok, false);
+            assert.equal(auth.calls.length, 1);
+            assert.equal(auth.runner.calls, 0);
+
+            const runner = new LocalRunner("must not run");
+            const router = new AtlasHybridModelRouterV1({
+              atlasClient: null,
+              dots3Model: null,
+              localRuntime: new LocalHuggingFaceRuntimeV1({ runner }),
+            });
+            const unavailable = await router.cognition({ systemPrompt: "s", userPrompt: "u" });
+            assert.equal(unavailable.ok, false);
+            assert.equal(runner.calls, 0);
+          });''',
+          )
+
+          marker = 'test("authority invariants and root timeout remain exact", () => {'
+          cost_test = '''test("DeepSeek cost ceiling rejection falls through to free Dots3 without local execution", async () => {
+            const overBudget = new Response(JSON.stringify({
+              choices: [{ message: { content: '{"answer":"paid"}' }, finish_reason: "stop" }],
+              usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 },
+              cost_usd: 0.026,
+            }), { status: 200, headers: { "content-type": "application/json" } });
+            const x = fixture([overBudget, res('{"answer":"dots-free"}')], "must not run");
+            const result = await x.router.cognition({
+              systemPrompt: "s",
+              userPrompt: "u",
+              maxCostMicros: 25_000,
+            });
+            assert.equal(result.ok && result.model === DOTS && result.text === "dots-free", true);
+            assert.equal(x.runner.calls, 0);
+            if (result.ok) {
+              assert.equal(result.telemetry[0]?.fallbackReason, "cost_budget_rejected");
+              assert.equal(result.telemetry.at(-1)?.model, DOTS);
+            }
+          });
+
+          '''
+          replace_exact(test_path, marker, cost_test + marker)
+
+          router = Path("src/model/providers/atlas-hybrid-router.ts").read_text()
+          if router.count('kind: "local" as const') != 0:
+              raise SystemExit("production hybrid local fallback still reachable")
+          runtime = Path("src/fly/production-runtime.ts").read_text()
+          if "new LocalHuggingFaceSpawnExecutionBackendV1(localHfRuntime)" in runtime:
+              raise SystemExit("standalone local Spawn backend still registered")
+          collaboration = Path("src/application/production-collaboration.ts").read_text()
+          target_block = collaboration.split("function targets() {", 1)[1].split("export function objectiveSpawnBudgetsV1", 1)[0]
+          if "HUGGINGFACE_LOCAL_SPAWN_BACKEND_ID_V1" in target_block or "LOCAL_HF_MODEL_V1" in target_block:
+              raise SystemExit("standalone local target still allowed by production collaboration")
+          PY
+
+          git diff --check
+          actual="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' src/application/production-collaboration.ts src/fly/production-runtime.ts src/model/providers/atlas-hybrid-router.ts test/atlas-hybrid-router.test.ts | sort)"
+          test "$actual" = "$expected"
+
+      - name: Build and directly relevant acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+          node --test dist/test/mvp-root-routing-containment-v1.test.js dist/test/atlas-hybrid-router.test.js
+          npm test
+
+      - name: Commit and push exact engineering successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-mvp-root-engineering"
+          git config user.email "sentient-mvp-root-engineering@users.noreply.github.com"
+          git add src/application/production-collaboration.ts src/fly/production-runtime.ts src/model/providers/atlas-hybrid-router.ts test/atlas-hybrid-router.test.ts
+          git diff --cached --check
+          git commit -m "mvp: route paid ceiling fallback to Dots3 and retire SmolLM2 production fallback"
+          new_sha="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse 'HEAD^{tree}')"
+          git fetch origin "${{ inputs.branch }}"
+          test "$(git rev-pars`FeTCH_HEAD)" = "${{ inputs.expected_sha }}"
+          git push origin "HEAD:refs/heads/${{ inputs.branch }}"
+          echo "SUCCESSOR_SHA=$new_sha"
+          echo "SUCCESSOR_TREE=$new_tree"
+          echo "DEPLOYMENT=false"
