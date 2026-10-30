@@ -1,0 +1,70 @@
+from pathlib import Path
+
+ROOT = Path("sentient")
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = ROOT / path
+    text = p.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: expected one occurrence, found {count}: {old[:120]!r}")
+    p.write_text(text.replace(old, new, 1))
+
+replace_once(
+    "src/spawn/selection.ts",
+    '''    && (budget.maxTotalTokens === 0 || limits.totalTokens)
+    && (budget.maxCostMicros === 0 || limits.costMicros)
+    && (budget.maxRuntimeMs === 0 || limits.runtimeMs)''',
+    '''    && (budget.maxTotalTokens === 0 || limits.totalTokens)
+    // maxCostMicros is an inherited accounting/admission ceiling. Cloud providers
+    // that truthfully cannot preempt on exact spend remain eligible; reported
+    // spend is reconciled against the grant after execution. Callers that require
+    // a provider-enforceable hard-dollar guarantee must express that explicitly
+    // through targetPolicy.costRequirements matched against truthful costTags.
+    && (budget.maxRuntimeMs === 0 || limits.runtimeMs)''',
+)
+
+replace_once(
+    "src/application/production-mission-control-context.ts",
+    '      inScope: ["mission", "broad relevant investigation"],',
+    '      inScope: ["mission"],',
+)
+
+path = ROOT / "src/application/production-collaboration.ts"
+text = path.read_text()
+start = text.index("export async function proposeProductionCognitionPlanV1(")
+end = text.index("\nfunction dynamicPlanningObjectiveV1(", start)
+new = r'''export async function proposeProductionCognitionPlanV1(
+  repository: PostgresSpawnObjectiveRepository,
+  input: ProductionCollaborationInputV1,
+  identity: ProductionCollaborationIdentityV1,
+  backends: readonly SpawnExecutionBackendV1[],
+): Promise<DynamicCognitionPlanV1> {
+  await ensureProductionSpawnRootV1(repository, input, identity);
+  const role = "root-planning";
+  let claimed:
+    | Awaited<ReturnType<typeof prepareProductionCollaborationLaneV1>>["claimed"]
+    | null = null;
+  let requestId: string | null = null;
+  let workId: string | null = null;
+
+  try {
+    const prepared = await prepareProductionCollaborationLaneV1(repository, input, role);
+    claimed = prepared.claimed;
+    requestId = prepared.requestId;
+    workId = prepared.workId;
+
+    const outcome = await runSpawnSentientV1(
+      {
+        repository,
+        policy: spawnPolicy(input),
+        backends,
+        verifier: deterministicVerifier(),
+        sentientCode: { sha: identity.sourceSha, version: identity.applicationVersion },
+        now: () => new Date().toISOString(),
+      },
+      {
+        request: spawnRequest(input, role, requestId, dynamicPlanningObjectiveV1(input.request)),
+        resolvedSkills: [],
+        contextCandidates: [],
+        contextBounds: { maxArtifacts: 4, m
