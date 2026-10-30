@@ -50,11 +50,11 @@ jobs:
               scripts/mvp-root-routing-containment-v1.py.part03 \
               > /tmp/mvp-root-routing-containment-v1.py
           python3 -m py_compile /tmp/mvp-root-routing-containment-v1.py
-          cd sentient
-          test "$(git rev-parse HEAD)" = "${{ inputs.expected_sha }}"
-          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.expected_tree }}"
-          test -z "$(git status --porcelain)"
+          test "$(git -C sentient rev-parse HEAD)" = "${{ inputs.expected_sha }}"
+          test "$(git -C sentient rev-parse HEAD^{tree})" = "${{ inputs.expected_tree }}"
+          test -z "$(git -C sentient status --porcelain)"
           python3 /tmp/mvp-root-routing-containment-v1.py
+          cd sentient
           git diff --check
           actual="$(git diff --name-only | sort)"
           expected="$(printf '%s\n' \
