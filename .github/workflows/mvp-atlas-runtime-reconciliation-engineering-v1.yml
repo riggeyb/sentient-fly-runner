@@ -48,7 +48,12 @@ jobs:
           test -z "$(git status --porcelain)"
           python3 ../runner/scripts/mvp-atlas-runtime-reconcile-v1.py
           git diff --check
-          actual="$(git diff --name-only | sort)"
+          actual="$(
+            {
+              git diff --name-only
+              git ls-files --others --exclude-standard
+            } | sort
+          )"
           expected="$(printf '%s\n'             src/model/providers/atlas-hybrid-adapters.ts             test/atlas-hybrid-spawn-runtime-reconciliation.test.ts | sort)"
           test "$actual" = "$expected"
           grep -q 'runtimeMs,' src/model/providers/atlas-hybrid-adapters.ts
@@ -79,7 +84,7 @@ jobs:
           successor_tree="$(git rev-parse 'HEAD^{tree}')"
           git fetch origin "${{ inputs.branch }}"
           test "$(git rev-parse FETCH_HEAD)" = "${{ inputs.expected_sha }}"
-          git push origin "HEAD:refs/heads/${{ inputs.branch }}"
+          git push origin "HEAD:Refs/heads/${{ inputs.branch }}"
           echo "SUCCESSOR_SHA=$successor_sha"
-          echo "SUCCESSOR_TREE=$succcessor_tree"
+          echo "SUCCESSOR_TREE=$successor_tree"
           echo "DEPLOYMENT=false"
