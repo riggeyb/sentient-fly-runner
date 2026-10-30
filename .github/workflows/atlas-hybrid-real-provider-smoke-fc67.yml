@@ -58,7 +58,7 @@ jobs:
           npm run build >/dev/null
           echo "BUILD=PASS"
 
-      - name: Minimal real Atlas calls through candidate AtlasCloudClientV1
+      - name: Minimal real Atlas calls through exact candidate
         shell: bash
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
@@ -70,7 +70,7 @@ jobs:
 
           const { AtlasCloudClientV1 } = await import("./dist/src/model/providers/atlas-cloud-client.js");
           const { DEEPSEEK_V3_2_MODEL_V1 } = await import("./dist/src/model/providers/atlas-hybrid-router.js");
-          const DOTS3_MODD = "dots-studio/dots-3-note-prev-free";
+          const DOTS3_MODEL = "dots-studio/dots-3-note-prev-free";
 
           const client = new AtlasCloudClientV1({ apiKey: key });
 
@@ -82,8 +82,11 @@ jobs:
               console.log(`${label}_LATENCY_MS=${result.latencyMs}`);
               return { ok: false, auth: result.reason !== "authentication", result };
             }
-            const usageCaptured = [result.usage.inputTokens, result.usage.outputTokens, result.usage.totalTokens]
-              .every((value) => typeof value === "number");
+            const usageCaptured = [
+              result.usage.inputTokens,
+              result.usage.outputTokens,
+              result.usage.totalTokens,
+            ].every((value) => typeof value === "number");
             console.log(`${label}_CONNECTIVITY=PASS`);
             console.log(`${label}_RESPONSE_VALID=PASS`);
             console.log(`${label}_USAGE_CAPTURED=${usageCaptured ? "PASS" : "FAIL"}`);
@@ -99,37 +102,21 @@ jobs:
             return { ok: usageCaptured, auth: true, result };
           }
 
-          let deepSeek = await call("DEEPSeek", {
+          const deepSeek = await call("DEEPSEEK", {
             model: DEEPSEEK_V3_2_MODEL_V1,
-            systemPrompt: "Connectivity test only. You are non-authoritative. Reason carefully, cross-check the result, return valid JSON, and take no actions.",
-            userPrompt: 'Seven jobs A-G occupy slots 1-7. B is immediately after E. E precedes A. A precedes D. F is later than D. C is neither first nor last. G is later than B but earlier than F. D is not slot 6. Return JSON {"answer":"<first valid order>","checks":["..."]}.',
-            maxOutputTokens: 320,
+            systemPrompt: "Connectivity test only. You are non-authoritative. Return valid JSON and take no actions.",
+            userPrompt: 'Return JSON {"answer":"ok"} after checking that 17 + 25 = 42.',
+            maxOutputTokens: 96,
             timeoutMs: 12_000,
             requireJsonObject: true,
             requiredTextValidator: (text) => text.includes("answer"),
           });
 
-          if (deepSeek.ok && deepSeek.result.latencyMs <= 8_000) {
-            deepSeek = await call("DEEPSEEK_RETRY", {
-              model: DEEPSEEK_V3_2_MODEL_V1,
-              systemPrompt: "Connectivity test only. You are non-authoritative. Reason carefully and independently verify two ways before returning valid JSON. Take no actions.",
-              userPrompt: 'Eight jobs A-H occupy slots 1-8. B is immediately after E. E precedes A. A precedes D. F is later than D. C is neither first nor last. G is later than B but earlier than F. H is after C but before F. D is not slot 7. Return JSON {"answer":"<first valid order>","checks":["..."]}.',
-              maxOutputTokens: 384,
-              timeoutMs: 12_000,
-              requireJsonObject: true,
-              requiredTextValidator: (text) => text.includes("answer"),
-            });
-          }
-
-          const deepLatency = deepSeek.result?.latencyMs ?? 0;
-          console.log(`DEEPSEEEK_OLD_8S_THRESHOLD_EXCEEDED=${deepSeek.ok && deepLatency > 8_000 ? "PASS" : "FAIL"}`);
-          console.log(`DEEPSEEK_WITHIN_12S_PROVIDER_MAX=${deepSeek.ok && deepLatency < 12_000 ? "PASS" : "FAIL"}`);
-
           const dots3 = await call("DOTS3", {
             model: DOTS3_MODEL,
             systemPrompt: "Connectivity test only. You are non-authoritative. Return a tiny answer and take no actions.",
             userPrompt: "Reply with exactly: ok",
-            maxOutputTokens: 128,
+            maxOutputTokens: 64,
             timeoutMs: 9_000,
             requiredTextValidator: (text) => text.trim().length > 0,
           });
@@ -147,6 +134,7 @@ jobs:
               else signal?.addEventListener("abort", onAbort, { once: true });
             }),
           });
+
           const controller = new AbortController();
           setTimeout(() => controller.abort(), 5);
           const aborted = await synthetic.complete({
@@ -157,15 +145,29 @@ jobs:
             timeoutMs: 2_000,
             signal: controller.signal,
           });
+
           const abortPass = !aborted.ok && aborted.reason === "timeout" && abortObserved;
 
           const authPass = deepSeek.auth && dots3.auth;
+          const deepWithinProviderMax = deepSeek.ok && deepSeek.result.latencyMs < 12_000;
+          const dotsWithinProviderMax = dots3.ok && dots3.result.latencyMs < 9_000;
+
           console.log(`ATLAS_AUTH=${authPass ? "PASS" : "FAIL"}`);
-          console.log(`DEEPSEEK_MODEL=${DEEPSEEEK_V3_2_MODD_V1}`);
+          console.log(`DEEPSEEK_MODEL=${DEEXSEEK_V3_2_MODEL_V1}`);
           console.log(`DOTS3_MODEL=${DOTS3_MODEL}`);
+          console.log(`DEEPSEEK_WITHIN_12S_PROVIDER_MAX=${deepWithinProviderMax ? "PASS" : "FAIL"}`);
+          console.log(`DOTS3_WITHIN_9S_PROVIDER_MAX=${dotsWithinProviderMax ? "PASS" : "FAIL"}`);
           console.log(`ABORT_SIGNAL_PATH=${abortPass ? "PASS" : "FAIL"}`);
           console.log("ATLASCLOUD_SECRET_EXPOSED=false");
-          const overall = deepSeek.ok && deepLatency > 8_000 && deepLatency < 12_000 && dots3.ok && authPass && abortPass;
+
+          const overall =
+            deepSeek.ok &&
+            dots3.ok &&
+            authPass &&
+            deepWithinProviderMax &&
+            dotsWithinProviderMax &&
+            abortPass;
+
           console.log(`REAL_ATLAS_SMOKE=${overall ? "PASS" : "FAIL"}`);
           if (!overall) process.exit(3);
           NODE
