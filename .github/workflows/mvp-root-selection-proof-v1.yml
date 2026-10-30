@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat >/tmp/select-proof.mjs <<'NODE'
+          cat >.select-proof.mjs <<'NODE'
           import { AtlasHybridSpawnExecutionBackendV1 } from "./dist/src/model/providers/atlas-hybrid-adapters.js";
           import { LocalHuggingFaceSpawnExecutionBackendV1 } from "./dist/src/spawn/backends/huggingface.js";
           import { selectSpawnExecutionTargetV1 } from "./dist/src/spawn/selection.js";
@@ -102,7 +102,8 @@ jobs:
           console.log("NORMAL_25000_MICRO_ACCOUNTING_CEILING_SELECTS_ATLAS=true");
           console.log("MODEL_OUTPUT_IS_AUTHORITY=false");
           NODE
-          node /tmp/select-proof.mjs
+          node .select-proof.mjs
+          rm -f .select-proof.mjs
 
       - name: Source immutability
         shell: bash
