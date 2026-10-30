@@ -92,7 +92,7 @@ jobs:
           new_sha="$(git rev-parse HEAD)"
           new_tree="$(git rev-parse HEAD^{tree})"
           git fetch origin "${{ inputs.branch }}"
-          remote_sha="$(git rev-pars`FETCH_HEAD)"
+          remote_sha="$(git rev-parse FETCH_HEAD)"
           test "$remote_sha" = "${{ inputs.expected_sha }}"
           git push origin "HEAD:refs/heads/${{ inputs.branch }}"
           echo "SUCCESSOR_SHA=$new_sha"
