@@ -20,7 +20,7 @@ const deepPrompts = [
 let deepSeek = null;
 for (const p of deepPrompts) {
   deepSeek = await call(p.label, {
-    model: DEEPSEEK_V3_2_MODD_V1,
+    model: DEEPSEEK_V3_2_MODEL_V1,
     systemPrompt: "Connectivity test only. You are non-authoritative. Reason carefully and independently cross-check the result. Return valid JSON and take no actions.",
     userPrompt: p.prompt,
     maxOutputTokens: p.maxOutputTokens,
