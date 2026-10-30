@@ -1,0 +1,94 @@
+name: MVP Dots3 Nonthinking Engineering V1
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout runner support
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-fly-runner
+          ref: main
+          path: runner
+      - name: Checkout exact Sentient engineering branch
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+          path: sentient
+      - name: Fence and apply bounded patch
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.expected_sha }}"
+          test "$(git rev-parse 'HEAD^{tree}')" = "${{ inputs.expected_tree }}"
+          test -z "$(git status --porcelain)"
+          python3 ../runner/scripts/mvp-dots3-nonthinking-v1.py
+          git diff --check
+          actual="$(
+            {
+              git diff --name-only
+              git ls-files --others --exclude-standard
+            } | sort
+          )"
+          expected="$(printf '%s\n' \
+            src/model/providers/atlas-cloud-client.ts \
+            src/model/providers/atlas-hybrid-router.ts \
+            test/atlas-dots3-nonthinking.test.ts | sort)"
+          test "$actual" = "$expected"
+          grep -q 'enableThinking?: boolean' src/model/providers/atlas-cloud-client.ts
+          grep -q 'enable_thinking: input.enableThinking' src/model/providers/atlas-cloud-client.ts
+          test "$(grep -c 'enableThinking: false' src/model/providers/atlas-hybrid-router.ts)" = "2"
+      - name: Build focused tests and full suite
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+          node --test \
+            dist/test/atlas-dots3-nonthinking.test.js \
+            dist/test/atlas-cloud-client.test.js \
+            dist/test/atlas-hybrid-router.test.js \
+            dist/test/atlas-hybrid-spawn-runtime-reconciliation.test.js \
+            dist/test/mvp-root-routing-containment-v1.test.js
+          npm test
+      - name: Commit and push exact successor
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-mvp-dots3-nonthinking"
+          git config user.email "sentient-mvp-dots3-nonthinking@users.noreply.github.com"
+          git add \
+            src/model/providers/atlas-cloud-client.ts \
+            src/model/providers/atlas-hybrid-router.ts \
+            test/atlas-dots3-nonthinking.test.ts
+          git diff --cached --check
+          git commit -m "mvp: run Dots3 fallback without thinking"
+          successor_sha="$(git rev-parse HEAD)"
+          successor_tree="$(git rev-parse 'HEAD^{tree}')"
+          git fetch origin "${{ inputs.branch }}"
+          test "$(git rev-parse FETCH_HEAD)" = "${{ inputs.expected_sha }}"
+          git push origin "HEAD:refs/heads/${{ inputs.branch }}"
+          echo "SUCCESSOR_SHA=$successor_sha"
+          echo "SUCCESSOR_TREE=$successor_tree"
+          echo "DEPLOYMENT=false"
