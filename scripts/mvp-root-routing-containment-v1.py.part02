@@ -1,0 +1,74 @@
+ + new + text[end:])
+
+test = r'''import assert from "node:assert/strict";
+import test from "node:test";
+
+import { AtlasHybridSpawnExecutionBackendV1 } from "../src/model/providers/atlas-hybrid-adapters.js";
+import { LocalHuggingFaceSpawnExecutionBackendV1 } from "../src/spawn/backends/huggingface.js";
+import { inspectSpawnTargetEligibilityV1 } from "../src/spawn/selection.js";
+import { isRecoverableProductionCognitionPlanningFailureV1 } from "../src/application/production-collaboration.js";
+import {
+  productionMissionWorkers,
+  productionRootContext,
+  productionWorkerContext,
+} from "../src/application/production-mission-control-context.js";
+import { defaultDynamicCognitionPlanV1 } from "../src/application/dynamic-cognition.js";
+
+function request(costRequirements: string[] = []) {
+  return {
+    budgets: {
+      maxInputTokens: 4_096,
+      maxOutputTokens: 512,
+      maxTotalTokens: 4_608,
+      maxCostMicros: 25_000,
+      currency: "USD",
+      maxRuntimeMs: 45_000,
+      maxToolRounds: 0,
+      maxToolActions: 0,
+      maxChildExecutions: 0,
+      maxRecursionDepth: 0,
+    },
+    targetPolicy: {
+      requiredCapabilities: ["objective.cognition"],
+      qualityRequirements: [],
+      costRequirements,
+      privacyRequirements: ["private"],
+    },
+    privacyPolicy: {
+      classification: "private",
+      allowedDataHandlingModes: ["atlascloud-openai-compatible", "local-process"],
+      allowExternalProcessing: true,
+    },
+  } as never;
+}
+
+const grant = {
+  targetConstraints: {
+    targets: { allowed: [], denied: [] },
+    backends: { allowed: [], denied: [] },
+    providers: { allowed: [], denied: [] },
+    models: { allowed: [], denied: [] },
+    preferenceOrder: [],
+  },
+} as never;
+
+test("normal inherited cost accounting ceiling keeps truthful Atlas hybrid eligible", async () => {
+  const [atlas] = await new AtlasHybridSpawnExecutionBackendV1(null as never).describe();
+  assert.ok(atlas);
+  assert.equal(atlas.hardLimitEnforcement.costMicros, false);
+  const inspected = inspectSpawnTargetEligibilityV1(request(), grant, atlas);
+  assert.equal(inspected.eligible, true);
+  assert.equal(inspected.reasonCodes.includes("hard_limit_unenforceable"), false);
+});
+
+test("explicit provider-enforced zero-cost requirement still excludes paid Atlas", async () => {
+  const [atlas] = await new AtlasHybridSpawnExecutionBackendV1(null as never).describe();
+  const [local] = await new LocalHuggingFaceSpawnExecutionBackendV1({} as never).describe();
+  assert.ok(atlas);
+  assert.ok(local);
+
+  const hardCostRequest = request(["approved-zero-cost"]);
+  const atlasEligibility = inspectSpawnTargetEligibilityV1(hardCostRequest, grant, atlas);
+  const localEligibility = inspectSpawnTargetEligibilityV1(hardCostRequest, grant, local);
+
+  assert.equal(atlasEligibility.e
