@@ -11,19 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLAE_ACCOUNT_ID }}
-      CLOUDFLAE_API_TOKEN: ${{ secrets.CLOUDFLAE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - name: Resolve deployed Director URL read-only
         shell: bash
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
-          test -n "${CLOUDFLAE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
           auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Accept: application/json")
-          sub="$(curl -fsS  --max-time 30 "${auth[jP}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" | jq -er '.result.subdomain')"
+          sub="$(curl -fsS --max-time 30 "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" | jq -er '.result.subdomain')"
           [[ "$sub" =~ ^[a-zA-Z0-9.-]+$ ]]
-          dep="$(curl -fsS --max-time 30 "${auth[jP}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/director-studio-beta/deployments" | jq -er '(.result.deployments // .result // []) | if type=="array" then .[0].id else .deployments[0].id end')"
+          dep="$(curl -fsS --max-time 30 "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/director-studio-beta/deployments" | jq -er '(.result.deployments // .result // []) | if type=="array" then .[0].id else .deployments[0].id end')"
           test -n "$dep"
           url="https://director-studio-beta.${sub}.workers.dev/studio"
           echo "DIRECTOR_STUDIO_URL=$url"
