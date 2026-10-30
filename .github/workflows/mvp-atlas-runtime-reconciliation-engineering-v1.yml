@@ -84,7 +84,7 @@ jobs:
           successor_tree="$(git rev-parse 'HEAD^{tree}')"
           git fetch origin "${{ inputs.branch }}"
           test "$(git rev-parse FETCH_HEAD)" = "${{ inputs.expected_sha }}"
-          git push origin "HEAD:Refs/heads/${{ inputs.branch }}"
+          git push origin "HEAD:refs/heads/${{ inputs.branch }}"
           echo "SUCCESSOR_SHA=$successor_sha"
           echo "SUCCESSOR_TREE=$successor_tree"
           echo "DEPLOYMENT=false"
