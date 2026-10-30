@@ -1,0 +1,85 @@
+name: MVP Atlas Runtime Reconciliation Engineering V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
+      expected_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout runner support
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient-fly-runner
+          ref: main
+          path: runner
+
+      - name: Checkout exact Sentient engineering branch
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+          path: sentient
+
+      - name: Fence exact source and apply bounded patch
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.expected_sha }}"
+          test "$(git rev-parse 'HEAD^{tree}')" = "${{ inputs.expected_tree }}"
+          test -z "$(git status --porcelain)"
+          python3 ../runner/scripts/mvp-atlas-runtime-reconcile-v1.py
+          git diff --check
+          actual="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n'             src/model/providers/atlas-hybrid-adapters.ts             test/atlas-hybrid-spawn-runtime-reconciliation.test.ts | sort)"
+          test "$actual" = "$expected"
+          grep -q 'runtimeMs,' src/model/providers/atlas-hybrid-adapters.ts
+          grep -q 'sentient-hybrid-model-failure/v1' src/model/providers/atlas-hybrid-adapters.ts
+          grep -q 'attempts=' src/model/providers/atlas-hybrid-adapters.ts
+
+      - name: Build and directly relevant acceptance
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+          node --test             dist/test/atlas-hybrid-spawn-runtime-reconciliation.test.js             dist/test/atlas-hybrid-router.test.js             dist/test/mvp-root-routing-containment-v1.test.js
+          npm test
+
+      - name: Commit and push exact engineering successor
+        shell: bash
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          git config user.name "sentient-mvp-runtime-reconcile"
+          git config user.email "sentient-mvp-runtime-reconcile@users.noreply.github.com"
+          git add             src/model/providers/atlas-hybrid-adapters.ts             test/atlas-hybrid-spawn-runtime-reconciliation.test.ts
+          git diff --cached --check
+          git commit -m "mvp: reconcile Atlas runtime usage and preserve terminal telemetry"
+          successor_sha="$(git rev-parse HEAD)"
+          successor_tree="$(git rev-parse 'HEAD^{tree}')"
+          git fetch origin "${{ inputs.branch }}"
+          test "$(git rev-parse FETCH_HEAD)" = "${{ inputs.expected_sha }}"
+          git push origin "HEAD:refs/heads/${{ inputs.branch }}"
+          echo "SUCCESSOR_SHA=$successor_sha"
+          echo "SUCCESSOR_TREE=$succcessor_tree"
+          echo "DEPLOYMENT=false"
