@@ -1,0 +1,87 @@
+name: Final Cert Objective Attempt Detail V1
+"on":
+  workflow_dispatch:
+    inputs:
+      objective_id:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: sentient-validation-runner
+      ID: ${{ inputs.objective_id }}
+      SHA: ${{ inputs.sha }}
+      TRED: ${{ inputs.tree }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Inspect sanitized Atlas attempt detail
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ID" =~ ^[A-Za-z0-9._:-]{1,200}$ ]]
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          for _ in $(seq 1 60); do
+            if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
+               q -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then break; fi
+            sleep 2
+          done
+          jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null
+          cat >/tmp/detail.mjs <<'NODE'
+          import {PostgresSpawnObjectiveRepository as Repo} from "/app/dist/src/objective-continuation/postgres-spawn-repository.js";
+          const id=String(process.env.CERT_ID??"").trim();
+          const db=String(process.env.DATABASE_URL??process.env.DIRECT_URL??"").trim();
+          if(!id||!db) throw new Error("CERT_ATTEMPT_DETAIL_BINDING_MISSING");
+          const repo=new Repo({connectionString:db});
+          try {
+            const snap=await repo.spawnSnapshot();
+            const rows=snap.records.results
+              .filter(r=>r.result?.identity?.taskId===id)
+              .map(r=>{
+                const result=r.result;
+                const receipt=(result.providerReceipt&&typeof result.providerReceipt==="object"&&!Array.isArray(result.providerReceipt))
+                  ? result.providerReceipt : {};
+                const attempts=Array.isArray(receipt.attempts) ? receipt.attempts.map(a=>({
+                  provider:typeof a?.provider==="string"?a.provider:null,
+                  model:typeof a?.model==="string"?a.model:null,
+                  stage:typeof a?.stage==="string"?a.stage:null,
+                  attemptNumber:Number.isInteger(a?.attemptNumber)?a.attemptNumber:null,
+                  latencyMs:Number.isFinite(a?.latencyMs)?a.latencyMs:null,
+                  structuredOutputValid:a?.structuredOutputValid===true,
+                  fallbackReason:typeof a?.fallbackReason==="string"?a.fallbackReason:null,
+                  finishReason:typeof a?.finishReason==="string"?a.finishReason:null,
+                  inputTokens:Number.isFinite(a?.inputTokens)?a.inputTokens:null,
+                  outputTokens:Number.isFinite(a?.outputTokens)?a.outputTokens:null,
+                  totalTokens:Number.isFinite(a?.totalTokens)?a.totalTokens:null,
+                  reportedCostUsd:Number.isFinite(a?.reportedCostUsd)?a.reportedCostUsd:null
+                })) : [];
+                return {
+                  role:result.identity.role,
+                  terminalStatus:result.terminalStatus,
+                  runtimeMs:Number.isFinite(result.usage?.runtimeMs)?result.usage.runtimeMs:null,
+                  costMicros:Number.isFinite(result.usage?.costMicros)?result.usage.costMicros:null,
+                  failureClass:result.failure?.class??null,
+                  failureMessage:typeof result.failure?.message==="string"
+                    ? result.failure.message.replace(/Bearer\s+[^\s\r\n]+/gi,"Bearer [REDACTED]").slice(0,1000)
+                    : null,
+                  receiptKind:typeof receipt.kind==="string"?receipt.kind:null,
+                  attempts
+                };
+              });
+            console.log("ATLAS_ATTEMPT_DETAIL="+JSON.stringify({objectiveId:id,results:rows}));
+            console.log("SECRET_VALUES_EXPOSED=false");
+          } finally { await repo.close().catch(()=>undefined); }
+          NODE
+          B64="$(base64 -w0 /tmp/detail.mjs)"
+          flyctl ssh console -a "$APP" -C "sh -lc 'echo $B64|base64 -d >/app/.attempt-detail.mjs; CERT_ID=$ID node /app/.attempt-detail.mjs; rc=\$?; rm -f /app/.attempt-detail.mjs; exit \$rc'"
