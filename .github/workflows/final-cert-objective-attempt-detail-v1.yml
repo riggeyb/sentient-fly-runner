@@ -22,7 +22,7 @@ jobs:
       APP: sentient-validation-runner
       ID: ${{ inputs.objective_id }}
       SHA: ${{ inputs.sha }}
-      TRED: ${{ inputs.tree }}
+      TREE: ${{ inputs.tree }}
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Inspect sanitized Atlas attempt detail
@@ -34,7 +34,7 @@ jobs:
           [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
           for _ in $(seq 1 60); do
             if curl -fsS --max-time 8 "https://${APP}.fly.dev/readyz" >/tmp/r.json 2>/dev/null &&
-               q -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then break; fi
+               jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null; then break; fi
             sleep 2
           done
           jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t' /tmp/r.json >/dev/null
