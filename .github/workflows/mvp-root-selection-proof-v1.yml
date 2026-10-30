@@ -1,0 +1,114 @@
+name: MVP Root Selection Proof V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact riggeyb/sentient source SHA
+        required: true
+        type: string
+      tree:
+        description: Exact expected riggeyb/sentient tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Exact source fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.sha }}"
+          test "$(git rev-parse 'HEAD^{tree}')" = "${{ inputs.tree }}"
+
+      - name: Build exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Prove normal inherited cost ceiling selects Atlas hybrid
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/select-proof.mjs <<'NODE'
+          import { AtlasHybridSpawnExecutionBackendV1 } from "./dist/src/model/providers/atlas-hybrid-adapters.js";
+          import { LocalHuggingFaceSpawnExecutionBackendV1 } from "./dist/src/spawn/backends/huggingface.js";
+          import { selectSpawnExecutionTargetV1 } from "./dist/src/spawn/selection.js";
+
+          const [atlas] = await new AtlasHybridSpawnExecutionBackendV1(null).describe();
+          const [local] = await new LocalHuggingFaceSpawnExecutionBackendV1({}).describe();
+          if (!atlas || !local) throw new Error("TARGET_DESCRIPTIONS_MISSING");
+
+          const preferenceOrder = [atlas.targetId, local.targetId];
+          const request = {
+            budgets: {
+              maxInputTokens: 4096,
+              maxOutputTokens: 512,
+              maxTotalTokens: 4608,
+              maxCostMicros: 25000,
+              currency: "USD",
+              maxRuntimeMs: 45000,
+              maxToolRounds: 0,
+              maxToolActions: 0,
+              maxChildExecutions: 0,
+              maxRecursionDepth: 0
+            },
+            targetPolicy: {
+              requiredCapabilities: ["objective.cognition"],
+              qualityRequirements: [],
+              costRequirements: [],
+              privacyRequirements: ["private"]
+            },
+            privacyPolicy: {
+              classification: "private",
+              allowedDataHandlingModes: ["atlascloud-openai-compatible", "local-process"],
+              allowExternalProcessing: true
+            }
+          };
+          const grant = {
+            targetConstraints: {
+              targets: { allowed: [], denied: [] },
+              backends: { allowed: [atlas.backendId, local.backendId], denied: [] },
+              providers: { allowed: [atlas.provider, local.provider], denied: [] },
+              models: { allowed: [atlas.model, local.model], denied: [] },
+              preferenceOrder
+            }
+          };
+          const selected = selectSpawnExecutionTargetV1(request, grant, [local, atlas]);
+          if (atlas.hardLimitEnforcement.costMicros !== false) throw new Error("ATLAS_COST_HARD_LIMIT_TRUTHFULNESS_CHANGED");
+          if (selected.targetId !== atlas.targetId) throw new Error(`ATLAS_NOT_SELECTED:${selected.targetId}`);
+          console.log(`SELECTED_TARGET=${selected.targetId}`);
+          console.log(`ATLAS_COST_HARD_LIMIT_ENFORCEMENT=${atlas.hardLimitEnforcement.costMicros}`);
+          console.log("NORMAL_25000_MICRO_ACCOUNTING_CEILING_SELECTS_ATLAS=true");
+          console.log("MODEL_OUTPUT_IS_AUTHORITY=false");
+          NODE
+          node /tmp/select-proof.mjs
+
+      - name: Source immutability
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain)"
+          echo "TRACKED_SOURCE_MUTATION=false"
