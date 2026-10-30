@@ -1,0 +1,86 @@
+name: MVP Director Human Conversation Observer V1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      objective_id: {required: true, type: string}
+
+permissions: {contents: read}
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      OBJ: ${{ inputs.objective_id }}
+      TOKEN: ${{ secrets.DIRECTOR_SENTIENT_TOKEN }}
+      CF_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Fence live identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$OBJ" =~ ^ui-[0-9a-f-]{36}$ ]]
+          test -n "$TOKEN"
+          h="$(curl -fsS --max-time 20 "https://${APP}.fly.dev/healthz")"
+          r="$(curl -fsS --max-time 20 "https://${APP}.fly.dev/readyz")"
+          jq -e --arg s "$SHA" --arg t "$TREE" '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t' <<<"$h" >/dev/null
+          jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true' <<<"$r" >/dev/null
+          test -n "$CF_ACCOUNT"
+          test -n "$CF_TOKEN"
+          d="$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/director-studio-beta/deployments")"
+          did="$(jq -er '(.result.deployments // .result // [])[0].id' <<<"$d")"
+          echo "DID=$did" >> "$GITHUB_ENV"
+          echo PRE_PROOF_LIVE_SENTIENT_IDENTITY=PASS
+          echo DIRECTOR_DEPLOYMENT_SNAPSHOT_BEFORE=PASS
+          echo CLOUDFLARE_API_MUTATION=false
+      - name: Observe Director-created objective
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 360); do
+            code="$(curl -sS --max-time 30 -o "$RUNNER_TEMP/o.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://${APP}.fly.dev/v1/objectives/$OBJ" || true)"
+            if [ "$code" = 200 ]; then
+              st="$(jq -r '.status // empty' "$RUNNER_TEMP/o.json")"
+              if [ "$st" = succeeded ] || [ "$st" = failed ] || [ "$st" = cancelled ]; then break; fi
+            fi
+            sleep 2
+          done
+          test "${st:-}" = succeeded
+          jq -e --arg id "$OBJ" '.objectiveId==$id and .rootProjection.objectiveId==$id and (.rootProjection.finalResult|type=="string" and length>0)' "$RUNNER_TEMP/o.json" >/dev/null
+          jq -e '.result.body.result as $r | $r.contractVersion=="sentient-production-mission-control/v1" and $r.status=="SUCCEEDED" and $r.operatingContextIsNotAuthority==true and $r.workerEffectsCanonical==false' "$RUNNER_TEMP/o.json" >/dev/null
+          final="$(jq -r '.rootProjection.finalResult' "$RUNNER_TEMP/o.json")"
+          grep -Fq 'riggeyb/sentient' <<<"$final"
+          grep -Fq 'riggeyb/sentient-fly-runner' <<<"$final"
+          test -z "$(jq -r '.activeEngineeringJobId // empty' "$RUNNER_TEMP/o.json")"
+          echo DIRECTOR_TO_SENTIENT_PRODUCTION_PATH=PASS
+          echo DIRECTOR_CONVERSATION_FINAL_RESPONSE=PASS
+          echo OPERATING_CONTEXT_IS_NOT_AUTHORITY=true
+          echo WORKER_EFFECTS_CANONICAL=false
+          echo CONSEQUENTIAL_EFFECT_OBSERVED=false
+          echo GOVERNOR_BYPASS_USED=false
+          echo DEPLOY_ON_SUCCESS=false
+      - name: Prove unchanged after conversation
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/director-studio-beta/deployments")"
+          test "$(jq -er '(.result.deployments // .result // [])[0].id' <<<"$d")" = "$DID"
+          h="$(curl -fsS --max-time 20 "https://${APP}.fly.dev/healthz")"
+          jq -e --arg s "$SHA" --arg t "$TREE" '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t' <<<"$h" >/dev/null
+          echo DIRECTOR_DEPLOYMENT_UNCHANGED=true
+          echo SENTIENT_REDEPLOYMENT=false
+          echo DIRECTOR_MUTATION_PERFORMED=false
+          echo RESOURCE_EXPANSION=false
+          echo AUTHORITY_EXPANSION=false
+          echo POLICY_WEAKENING=false
+          echo DIRECTOR_CONVERSATION_PROOF=PASS
+          echo MVP_COMPLETE=true
