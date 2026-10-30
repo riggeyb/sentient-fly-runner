@@ -60,6 +60,7 @@ jobs:
                   latencyMs:Number.isFinite(a?.latencyMs)?a.latencyMs:null,
                   structuredOutputValid:a?.structuredOutputValid===true,
                   fallbackReason:typeof a?.fallbackReason==="string"?a.fallbackReason:null,
+                  failureReason:typeof a?.failureReason==="string"?a.failureReason:null,
                   finishReason:typeof a?.finishReason==="string"?a.finishReason:null,
                   inputTokens:Number.isFinite(a?.inputTokens)?a.inputTokens:null,
                   outputTokens:Number.isFinite(a?.outputTokens)?a.outputTokens:null,
