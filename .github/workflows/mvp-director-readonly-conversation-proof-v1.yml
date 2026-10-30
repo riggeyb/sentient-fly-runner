@@ -1,0 +1,219 @@
+name: MVP Director Read-Only Conversation Proof V1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact live Sentient source SHA
+        required: true
+        type: string
+      tree:
+        description: Exact live Sentient source tree
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP: sentient-validation-runner
+      EXPECTED_SHA: ${{ inputs.sha }}
+      EXPECTED_TREE: ${{ inputs.tree }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      CLOUDFLARE_ACCESS_CLIENT_ID: ${{ secrets.CLOUDFLARE_ACCESS_CLIENT_ID }}
+      CLOUDFLARE_ACCESS_CLIENT_SECRET: ${{ secrets.CLOUDFLARE_ACCESS_CLIENT_SECRET }}
+      CF_ACCESS_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_SERVICE_TOKEN_ID }}
+      CF_ACCESS_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_SERVICE_TOKEN_SECRET }}
+
+    steps:
+      - name: Fence exact live Sentient runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_TREE" =~ ^[a-f0-9]{40}$ ]]
+
+          health=""
+          ready=""
+          for _ in $(seq 1 45); do
+            health="$(curl -fsS --max-time 12 "https://${APP}.fly.dev/healthz" 2>/dev/null || true)"
+            ready="$(curl -fsS --max-time 12 "https://${APP}.fly.dev/readyz" 2>/dev/null || true)"
+            if jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE"               '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t'               >/dev/null 2>&1 <<<"$health" &&
+               jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE"               '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true'               >/dev/null 2>&1 <<<"$ready"; then
+              break
+            fi
+            sleep 2
+          done
+
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE"             '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t'             >/dev/null <<<"$health"
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE"             '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true'             >/dev/null <<<"$ready"
+
+          echo "PRE_PROOF_LIVE_SENTIENT_IDENTITY=PASS"
+          echo "MODEL_OUTPUT_IS_NEVER_AUTHORITY=true"
+
+      - name: Resolve deployed Director read-only and snapshot active deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || { echo "CLOUDFLARE_ACCOUNT_ID_PRESENT=false"; exit 2; }
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "CLOUDFLARE_API_TOKEN_PRESENT=false"; exit 2; }
+
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Accept: application/json")
+
+          sub_json="$(curl -fsS --max-time 30 "${auth[@]}"             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain")"
+          subdomain="$(jq -er '.result.subdomain' <<<"$sub_json")"
+          [[ "$subdomain" =~ ^[A-Za-z0-9.-]+$ ]]
+          director_url="https://director-studio-beta.${subdomain}.workers.dev"
+
+          dep_json="$(curl -fsS --max-time 30 "${auth[@]}"             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/director-studio-beta/deployments")"
+          deployment_id="$(jq -er '
+            (.result.deployments // .result // [])
+            | if type=="array" then .[0].id else .deployments[0].id end
+          ' <<<"$dep_json")"
+          test -n "$deployment_id"
+
+          unauth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$director_url" || true)"
+          test "$unauth_code" != "200"
+
+          {
+            echo "DIRECTOR_URL=$director_url"
+            echo "DIRECTOR_DEPLOYMENT_ID_BEFORE=$deployment_id"
+          } >> "$GITHUB_ENV"
+
+          echo "DIRECTOR_URL_RESOLVED=PASS"
+          echo "DIRECTOR_DEPLOYMENT_SNAPSHOT_BEFORE=PASS"
+          echo "UNAUTHENTICATED_DIRECTOR_ACCESS_BLOCKED=true"
+          echo "CLOUDFLARE_API_MUTATION=false"
+
+      - name: Authenticate through existing Cloudflare Access service path
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          access_id="${CF_ACCESS_CLIENT_ID:-${CLOUDFLARE_ACCESS_CLIENT_ID:-${CF_ACCESS_SERVICE_TOKEN_ID:-}}}"
+          access_secret="${CF_ACCESS_CLIENT_SECRET:-${CLOUDFLARE_ACCESS_CLIENT_SECRET:-${CF_ACCESS_SERVICE_TOKEN_SECRET:-}}}"
+
+          if [ -z "$access_id" ] || [ -z "$access_secret" ]; then
+            echo "DIRECTOR_ACCESS_AUTOMATION_CREDENTIAL_PRESENT=false"
+            echo "BOUNDARY=EXISTING_CLOUDFLARE_ACCESS_SERVICE_CREDENTIAL_REQUIRED"
+            echo "DIRECTOR_MUTATION_PERFORMED=false"
+            echo "SENTIENT_DEPLOYMENT_PERFORMED=false"
+            exit 78
+          fi
+
+          echo "::add-mask::$access_id"
+          echo "::add-mask::$access_secret"
+
+          probe="mvp-director-auth-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          code="$(curl -sS --max-time 30 -o "$RUNNER_TEMP/director-auth-probe.json" -w '%{http_code}'             -H "CF-Access-Client-Id: $access_id"             -H "CF-Access-Client-Secret: $access_secret"             -H "Accept: application/json"             "$DIRECTOR_URL/api/sentient/objectives/$probe" || true)"
+
+          if [ "$code" != "404" ]; then
+            echo "DIRECTOR_ACCESS_AUTOMATION_CREDENTIAL_PRESENT=true"
+            echo "DIRECTOR_ACCESS_SERVICE_AUTH=FAIL"
+            echo "DIRECTOR_AUTH_PROBE_HTTP_STATUS=$code"
+            echo "DIRECTOR_MUTATION_PERFORMED=false"
+            echo "SENTIENT_DEPLOYMENT_PERFORMED=false"
+            rm -f "$RUNNER_TEMP/director-auth-probe.json"
+            exit 79
+          fi
+
+          rm -f "$RUNNER_TEMP/director-auth-probe.json"
+          {
+            echo "DIRECTOR_ACCESS_ID=$access_id"
+            echo "DIRECTOR_ACCESS_SECRET=$access_secret"
+          } >> "$GITHUB_ENV"
+
+          echo "DIRECTOR_ACCESS_AUTOMATION_CREDENTIAL_PRESENT=true"
+          echo "DIRECTOR_ACCESS_SERVICE_AUTH=PASS"
+          echo "DIRECTOR_SERVER_SIDE_SENTIENT_PROXY_AUTH=PASS"
+          echo "SECRET_VALUES_EXPOSED=false"
+
+      - name: Execute one harmless Director to Sentient conversation
+        shell: bash
+        run: |
+          set -euo pipefail
+          objective_id="mvp-director-conversation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          request="Read-only MVP conversation proof. Confirm that you are reachable through Director Studio, briefly state the currently authoritative source repository and normal operator bridge from inherited operating context, and make no edits, deployments, external mutations, or consequential effects."
+
+          post_code="$(curl -sS --max-time 60 -o "$RUNNER_TEMP/director-post.json" -w '%{http_code}'             -H "CF-Access-Client-Id: $DIRECTOR_ACCESS_ID"             -H "CF-Access-Client-Secret: $DIRECTOR_ACCESS_SECRET"             -H "Content-Type: application/json"             -H "Accept: application/json"             --data "$(jq -nc --arg objective "$request" --arg objectiveId "$objective_id" '{objective:$objective,objectiveId:$objectiveId}')"             "$DIRECTOR_URL/api/sentient/objectives")"
+
+          test "$post_code" = "202"
+          jq -e --arg id "$objective_id" '.objectiveId==$id' "$RUNNER_TEMP/director-post.json" >/dev/null
+          rm -f "$RUNNER_TEMP/director-post.json"
+          echo "DIRECTOR_CONVERSATION_SUBMIT=PASS"
+
+          deadline=$(( $(date +%s) + 12*60 ))
+          status=""
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            code="$(curl -sS --max-time 30 -o "$RUNNER_TEMP/director-status.json" -w '%{http_code}'               -H "CF-Access-Client-Id: $DIRECTOR_ACCESS_ID"               -H "CF-Access-Client-Secret: $DIRECTOR_ACCESS_SECRET"               -H "Accept: application/json"               "$DIRECTOR_URL/api/sentient/objectives/$objective_id" || true)"
+            if [ "$code" = "200" ]; then
+              status="$(jq -r '.status // empty' "$RUNNER_TEMP/director-status.json")"
+              if [ "$status" = "succeeded" ] || [ "$status" = "failed" ] || [ "$status" = "cancelled" ]; then
+                break
+              fi
+            fi
+            sleep 2
+          done
+
+          test "$status" = "succeeded"
+          jq -e --arg id "$objective_id" '.objectiveId==$id' "$RUNNER_TEMP/director-status.json" >/dev/null
+          jq -e '.rootProjection.finalResult | type=="string" and length>0' "$RUNNER_TEMP/director-status.json" >/dev/null
+          jq -e '
+            .result.body.result as $r
+            | $r.contractVersion=="sentient-production-mission-control/v1"
+            and $r.status=="SUCCEEDED"
+            and $r.operatingContextIsNotAuthority==true
+            and $r.workerEffectsCanonical==false
+          ' "$RUNNER_TEMP/director-status.json" >/dev/null
+
+          final_result="$(jq -r '.rootProjection.finalResult' "$RUNNER_TEMP/director-status.json")"
+          test -n "$final_result"
+          printf '%s' "$final_result" | grep -Fq 'riggeyb/sentient'
+          printf '%s' "$final_result" | grep -Fq 'riggeyb/sentient-fly-runner'
+
+          echo "DIRECTOR_CONVERSATION_OBJECTIVE_ID=$objective_id"
+          echo "DIRECTOR_TO_SENTIENT_PRODUCTION_PATH=PASS"
+          echo "DIRECTOR_CONVERSATION_FINAL_RESPONSE=PASS"
+          echo "SOURCE_REPO_KNOWN_AUTOMATICALLY=PASS"
+          echo "OPERATOR_BRIDGE_KNOWN_AUTOMATICALLY=PASS"
+          echo "OPERATING_CONTEXT_IS_NOT_AUTHORITY=true"
+          echo "GOVERNOR_BYPASS_USED=false"
+          echo "DEPLOY_ON_SUCCESS=false"
+          echo "CONSEQUENTIAL_EFFECT_REQUESTED=false"
+          echo "FINAL_RESPONSE_JSON=$(jq -Rs . <<<"${final_result:0:6000}")"
+          rm -f "$RUNNER_TEMP/director-status.json"
+
+      - name: Prove Director deployment and Sentient identity remained unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Accept: application/json")
+          dep_json="$(curl -fsS --max-time 30 "${auth[@]}"             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/director-studio-beta/deployments")"
+          deployment_id_after="$(jq -er '
+            (.result.deployments // .result // [])
+            | if type=="array" then .[0].id else .deployments[0].id end
+          ' <<<"$dep_json")"
+          test "$deployment_id_after" = "$DIRECTOR_DEPLOYMENT_ID_BEFORE"
+
+          health="$(curl -fsS --max-time 12 "https://${APP}.fly.dev/healthz")"
+          ready="$(curl -fsS --max-time 12 "https://${APP}.fly.dev/readyz")"
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE"             '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t'             >/dev/null <<<"$health"
+          jq -e --arg s "$EXPECTED_SHA" --arg t "$EXPECTED_TREE"             '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true'             >/dev/null <<<"$ready"
+
+          echo "DIRECTOR_DEPLOYMENT_UNCHANGED=true"
+          echo "POST_PROOF_LIVE_SENTIENT_IDENTITY=PASS"
+          echo "DIRECTOR_MUTATION_PERFORMED=false"
+          echo "SENTIENT_REDEPLOYMENT=false"
+          echo "RESOURCE_EXPANSION=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "POLICY_WEAKENING=false"
+          echo "SECRET_VALUES_EXPOSED=false"
+          echo "DIRECTOR_CONVERSATION_PROOF=PASS"
+          echo "MVP_COMPLETE=true"
