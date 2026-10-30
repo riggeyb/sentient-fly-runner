@@ -12,16 +12,41 @@ def once(path: str, old: str, new: str) -> None:
 
 path = "src/model/providers/atlas-hybrid-adapters.ts"
 
-once(path, "    const result = await this.#router.cognition({\n", "    const startedAtMs = Date.now();\n    const result = await this.#router.cognition({\n")
-once(path, "    });\n    if (!result.ok) return failure(\"failed\", \"atlas_hybrid_terminal_unavailable\");\n\n    const usage = aggregateUsage(result.telemetry);\n", "    });\n    const runtimeMs = Math.max(0, Date.now() - startedAtMs);\n    if (!result.ok) return hybridFailure(\"failed\", \"atlas_hybrid_terminal_unavailable\", result.telemetry, runtimeMs);\n
-    const usage = aggregateUsage(result.telemetry);\n")
-once(path, "      return failure(\"failed\", \"atlas_hybrid_reported_cost_exceeded_grant\");\n", "      return hybridFailure(\"failed\", \"atlas_hybrid_reported_cost_exceeded_grant\", result.telemetry, runtimeMs);\n")
-once(path, "    ) return failure(\"failed\", \"atlas_hybrid_reported_usage_exceeded_grant\");\n", "    ) return hybridFailure(\"failed\", \"atlas_hybrid_reported_usage_exceeded_grant\", result.telemetry, runtimeMs);\n")
-once(path, "        costMicros,\n        toolRounds: 0,\n", "        costMicros,\n        runtimeMs,\n        toolRounds: 0,\n")
-once(path, "      latencyMs: totalLatency(result.telemetry),\n", "      latencyMs: runtimeMs,\n")
+once(
+    path,
+    '    const result = await this.#router.cognition({\n',
+    '    const startedAtMs = Date.now();\n    const result = await this.#router.cognition({\n',
+)
+once(
+    path,
+    '    });\n    if (!result.ok) return failure("failed", "atlas_hybrid_terminal_unavailable");\n\n    const usage = aggregateUsage(result.telemetry);\n',
+    '    });\n    const runtimeMs = Math.max(0, Date.now() - startedAtMs);\n'
+    '    if (!result.ok) return hybridFailure("failed", "atlas_hybrid_terminal_unavailable", result.telemetry, runtimeMs);\n\n'
+    '    const usage = aggregateUsage(result.telemetry);\n',
+)
+once(
+    path,
+    '      return failure("failed", "atlas_hybrid_reported_cost_exceeded_grant");\n',
+    '      return hybridFailure("failed", "atlas_hybrid_reported_cost_exceeded_grant", result.telemetry, runtimeMs);\n',
+)
+once(
+    path,
+    '    ) return failure("failed", "atlas_hybrid_reported_usage_exceeded_grant");\n',
+    '    ) return hybridFailure("failed", "atlas_hybrid_reported_usage_exceeded_grant", result.telemetry, runtimeMs);\n',
+)
+once(
+    path,
+    '        costMicros,\n        toolRounds: 0,\n',
+    '        costMicros,\n        runtimeMs,\n        toolRounds: 0,\n',
+)
+once(
+    path,
+    '      latencyMs: totalLatency(result.telemetry),\n',
+    '      latencyMs: runtimeMs,\n',
+)
 
 helper_marker = "function failure(\n"
-helper = r'''function hybridFailure(
+helper = '''function hybridFailure(
   status: "failed" | "cancelled" | "timed_out",
   message: string,
   telemetry: readonly HybridModelTelemetryV1[],
@@ -75,14 +100,14 @@ if s.count(helper_marker) != 1:
     raise SystemExit("missing failure helper marker")
 p.write_text(s.replace(helper_marker, helper + helper_marker))
 
-test = r'''import assert from "node:assert/strict";
+test = '''import assert from "node:assert/strict";
 import test from "node:test";
 import { AtlasCloudClientV1 } from "../src/model/providers/atlas-cloud-client.js";
 import { AtlasHybridModelRouterV1 } from "../src/model/providers/atlas-hybrid-router.js";
 import { AtlasHybridSpawnExecutionBackendV1 } from "../src/model/providers/atlas-hybrid-adapters.js";
 import { LocalHuggingFaceRuntimeV1, type LocalHfRunnerV1 } from "../src/model/providers/huggingface.js";
 
-class NeverLocal  implements LocalHfRunnerV1 {
+class NeverLocal implements LocalHfRunnerV1 {
   async initialize(): Promise<void> {}
   async generate(): Promise<never> { throw new Error("local_must_not_run"); }
 }
@@ -98,11 +123,11 @@ function backend(steps: Response[]) {
   const fetchImpl = (async () => {
     await new Promise((resolve) => setTimeout(resolve, 8));
     const next = steps.shift();
-   if (!next) throw new Error("unexpected_fetch");
+    if (!next) throw new Error("unexpected_fetch");
     return next;
   }) as typeof fetch;
   const client = new AtlasCloudClientV1({ apiKey: "test-secret", fetchImpl });
-  const router = new AtlasHybridModelRouterV1( {
+  const router = new AtlasHybridModelRouterV1({
     atlasClient: client,
     dots3Model: "test/dots3",
     localRuntime: new LocalHuggingFaceRuntimeV1({ runner: new NeverLocal() }),
