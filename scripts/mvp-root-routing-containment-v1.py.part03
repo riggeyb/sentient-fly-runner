@@ -1,0 +1,39 @@
+ligible, false);
+  assert.ok(atlasEligibility.reasonCodes.includes("missing_backend_capability"));
+  assert.equal(localEligibility.eligible, true);
+  assert.equal(local.hardLimitEnforcement.costMicros, true);
+});
+
+test("production worker cognition does not expand delegated effect scope", () => {
+  const input = {
+    request: "Inspect the bounded objective.",
+    objectiveId: "scope-fixture",
+    sessionId: "scope-fixture-session",
+    mode: "collaborative",
+    privacy: "private",
+  } as const;
+  const plan = defaultDynamicCognitionPlanV1(input.request);
+  const root = productionRootContext(input, plan){
+  const [worker] = productionMissionWorkers(input, plan);
+  assert.ok(worker);
+
+  const child = productionWorkerContext(root, worker);
+  assert.deepEqual(root.delegatedScope, ["mission"]);
+  assert.deepEqual(child.receipt.delegatedScope, ["mission"]);
+  assert.equal(child.receipt.delegatedScope.includes("broad relevant investigation"), false);
+});
+
+test("planning containment recovers only operational cognition failures", () => {
+  assert.equal(isRecoverableProductionCognitionPlanningFailureV1(new Error("no eligible SpawnSentient execution target")), true);
+  assert.equal(isRecoverableProductionCognitionPlanningFailureV1(new Error("runtime_budget_exhausted")), true);
+  const abort = new Error("aborted by caller");
+  abort.name = "AbortError";
+  assert.equal(isRecoverableProductionCognitionPlanningFailureV1(abort), true);
+
+  assert.equal(isRecoverableProductionCognitionPlanningFailureV1(new Error("child scope broad relevant investigation is outside parent scope")), false);
+  assert.equal(isRecoverableProductionCognitionPlanningFailureV1(new Error("missing SpawnSentient parent root:fixture")), false);
+  assert.equal(isRecoverableProductionCognitionPlanningFailureV1(new Error("authority expansion detected")), false);
+});
+'''
+(ROOT / "test/mvp-root-routing-containment-v1.test.ts").write_text(test)
+print("patch_ready")
