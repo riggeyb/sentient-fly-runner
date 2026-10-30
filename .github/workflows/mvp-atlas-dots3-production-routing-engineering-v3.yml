@@ -72,12 +72,16 @@ jobs:
               if n != 1:
                   raise SystemExit(f"expected one target occurrence: {old}")
               s = s.replace(old, new)
-          old_pref = '      `${HUGGINGFACE_LOCAL_SPAWN_BACKEND_ID_V1}:${LOCAL_HF_MODEL_V1}@${LOCAL_HF_MODD_REVISION_V1}`,\n'
-          n = s.count(old_pref)
+          pref_lines = s.splitlines(keepends=True)
+          kept_pref = [
+              line for line in pref_lines
+              if not ("$`{HUGGINGFACE_LOCAL_SPAWN_BACKEND_ID_V1}:" in line)
+          ]
+          n = len(pref_lines) - len(kept_pref)
           print("local_preference_removed", n)
           if n != 1:
               raise SystemExit("expected one local preference row")
-          s = s.replace(old_pref, "")
+          s = "".join(kept_pref)
           p.write_text(s)
 
           p = Path("test/atlas-hybrid-router.test.ts")
