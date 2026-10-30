@@ -1,0 +1,82 @@
+axTotalChars: 16_000, maxArtifactChars: 8_000 },
+      },
+    );
+
+    if (outcome.status === "completed" && outcome.result && outcome.verification?.outcome === "accept") {
+      await repository.completeActiveWork({
+        operationId: `${requestId}:complete`,
+        workId,
+        participantId: requestId,
+        expectedRevision: claimed.record.revision,
+        currentAction: "Bounded root planning completed",
+        nextStep: "admit a non-authoritative cognition plan through existing Spawn policy",
+      });
+      const parsed = parseDynamicCognitionPlanV1(outcome.result.output, input.request);
+      if (parsed !== null) return parsed;
+    } else {
+      await repository.abandonActiveWork({
+        operationId: `${requestId}:abandon`,
+        workId,
+        participantId: requestId,
+        expectedRevision: claimed.record.revision,
+        currentAction: "Bounded root planning unavailable",
+        nextStep: "use the compatibility cognition plan without expanding budget or authority",
+      });
+    }
+    return defaultDynamicCognitionPlanV1(input.request);
+  } catch (error) {
+    if (!isRecoverableProductionCognitionPlanningFailureV1(error)) throw error;
+    if (claimed !== null && requestId !== null && workId !== null) {
+      await repository.abandonActiveWork({
+        operationId: `${requestId}:recoverable-abandon`,
+        workId,
+        participantId: requestId,
+        expectedRevision: claimed.record.revision,
+        currentAction: "Recoverable bounded root planning failure",
+        nextStep: "use the compatibility cognition plan without expanding budget or authority",
+      });
+    }
+    return defaultDynamicCognitionPlanV1(input.request);
+  }
+}
+
+export function isRecoverableProductionCognitionPlanningFailureV1(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "AbortError" || name === "TimeoutError") return true;
+
+  const value = error instanceof Error ? error.message : String(error);
+  const normalized = value.toLowerCase();
+
+  const failClosedMarkers = [
+    "scope",
+    "authority",
+    "integrity",
+    "state",
+    "ledger",
+    "lease",
+    "database",
+    "postgres",
+    "persist",
+    "revision",
+    "digest",
+    "identity",
+    "duplicate",
+    "divergent",
+    "missing spawnsentient parent",
+    "restart_retry_exhausted",
+  ];
+  if (failClosedMarkers.some((marker) => normalized.includes(marker))) return false;
+
+  return [
+    "no eligible spawnsentient execution target",
+    "selected backend unavailable",
+    "runtime_budget_exhausted",
+    "terminal_unavailable",
+    "provider_unavailable",
+    "execution_cancelled",
+    "execution_canceled_before_dispatch",
+    "execution_canceled",
+  ].some((marker) => normalized.includes(marker));
+}
+'''
+path.write_text(text[:start]
