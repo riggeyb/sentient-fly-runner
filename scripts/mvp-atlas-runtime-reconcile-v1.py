@@ -1,51 +1,78 @@
 from pathlib import Path
 
+path = Path("src/model/providers/atlas-hybrid-adapters.ts")
+text = path.read_text()
+marker = "export class AtlasHybridSpawnExecutionBackendV1"
+if text.count(marker) != 1:
+    raise SystemExit("spawn backend class marker mismatch")
+prefix, tail = text.split(marker, 1)
 
-def once(path: str, old: str, new: str) -> None:
-    p = Path(path)
-    s = p.read_text()
-    n = s.count(old)
+def once_tail(old: str, new: str, label: str) -> None:
+    global tail
+    n = tail.count(old)
     if n != 1:
-        raise SystemExit(f"{path}: expected one match, got {n}")
-    p.write_text(s.replace(old, new))
+        raise SystemExit(f"{label}: expected one match in Spawn backend tail, got {n}")
+    tail = tail.replace(old, new, 1)
 
-
-path = "src/model/providers/atlas-hybrid-adapters.ts"
-
-once(
-    path,
+once_tail(
     '    const result = await this.#router.cognition({\n',
-    '    const startedAtMs = Date.now();\n    const result = await this.#router.cognition({\n',
+    '    const startedAtMs = Date.now();\n'
+    '    const result = await this.#router.cognition({\n',
+    "spawn router call",
 )
-once(
-    path,
-    '    });\n    if (!result.ok) return failure("failed", "atlas_hybrid_terminal_unavailable");\n\n    const usage = aggregateUsage(result.telemetry);\n',
-    '    });\n    const runtimeMs = Math.max(0, Date.now() - startedAtMs);\n'
-    '    if (!result.ok) return hybridFailure("failed", "atlas_hybrid_terminal_unavailable", result.telemetry, runtimeMs);\n\n'
+once_tail(
+    '    });\n'
+    '    if (!result.ok) return failure("failed", "atlas_hybrid_terminal_unavailable");\n\n'
     '    const usage = aggregateUsage(result.telemetry);\n',
+    '    });\n'
+    '    const runtimeMs = Math.max(0, Date.now() - startedAtMs);\n'
+    '    if (!result.ok) {\n'
+    '      return hybridFailure("failed", "atlas_hybrid_terminal_unavailable", result.telemetry, runtimeMs);\n'
+    '    }\n\n'
+    '    const usage = aggregateUsage(result.telemetry);\n',
+    "terminal failure",
 )
-once(
-    path,
+once_tail(
     '      return failure("failed", "atlas_hybrid_reported_cost_exceeded_grant");\n',
-    '      return hybridFailure("failed", "atlas_hybrid_reported_cost_exceeded_grant", result.telemetry, runtimeMs);\n',
+    '      return hybridFailure(\n'
+    '        "failed",\n'
+    '        "atlas_hybrid_reported_cost_exceeded_grant",\n'
+    '        result.telemetry,\n'
+    '        runtimeMs,\n'
+    '      );\n',
+    "cost reconciliation failure",
 )
-once(
-    path,
+once_tail(
     '    ) return failure("failed", "atlas_hybrid_reported_usage_exceeded_grant");\n',
-    '    ) return hybridFailure("failed", "atlas_hybrid_reported_usage_exceeded_grant", result.telemetry, runtimeMs);\n',
+    '    ) {\n'
+    '      return hybridFailure(\n'
+    '        "failed",\n'
+    '        "atlas_hybrid_reported_usage_exceeded_grant",\n'
+    '        result.telemetry,\n'
+    '        runtimeMs,\n'
+    '      );\n'
+    '    }\n',
+    "usage reconciliation failure",
 )
-once(
-    path,
-    '        costMicros,\n        toolRounds: 0,\n',
-    '        costMicros,\n        runtimeMs,\n        toolRounds: 0,\n',
+once_tail(
+    '        costMicros,\n'
+    '        toolRounds: 0,\n',
+    '        costMicros,\n'
+    '        runtimeMs,\n'
+    '        toolRounds: 0,\n',
+    "success runtime usage",
 )
-once(
-    path,
+once_tail(
     '      latencyMs: totalLatency(result.telemetry),\n',
     '      latencyMs: runtimeMs,\n',
+    "success latency",
 )
 
+text = prefix + marker + tail
+
 helper_marker = "function failure(\n"
+if text.count(helper_marker) != 1:
+    raise SystemExit("failure helper marker mismatch")
 helper = '''function hybridFailure(
   status: "failed" | "cancelled" | "timed_out",
   message: string,
@@ -54,7 +81,9 @@ helper = '''function hybridFailure(
 ): BackendExecutionResultV1 {
   const usage = aggregateUsage(telemetry);
   const costMicros = reportedCostMicros(telemetry);
-  const attemptSummary = telemetry.map((item) => `${item.model}:${item.fallbackReason ?? "unknown"}`).join(",");
+  const attemptSummary = telemetry
+    .map((item) => `${item.model}:${item.fallbackReason ?? "unknown"}`)
+    .join(",");
   return {
     status,
     output: null,
@@ -94,29 +123,36 @@ helper = '''function hybridFailure(
 }
 
 '''
-p = Path(path)
-s = p.read_text()
-if s.count(helper_marker) != 1:
-    raise SystemExit("missing failure helper marker")
-p.write_text(s.replace(helper_marker, helper + helper_marker))
+path.write_text(text.replace(helper_marker, helper + helper_marker, 1))
 
-test = '''import assert from "node:assert/strict";
+test = r'''import assert from "node:assert/strict";
 import test from "node:test";
 import { AtlasCloudClientV1 } from "../src/model/providers/atlas-cloud-client.js";
 import { AtlasHybridModelRouterV1 } from "../src/model/providers/atlas-hybrid-router.js";
 import { AtlasHybridSpawnExecutionBackendV1 } from "../src/model/providers/atlas-hybrid-adapters.js";
-import { LocalHuggingFaceRuntimeV1, type LocalHfRunnerV1 } from "../src/model/providers/huggingface.js";
+import {
+  LocalHuggingFaceRuntimeV1,
+  type LocalHfRunnerV1,
+} from "../src/model/providers/huggingface.js";
 
 class NeverLocal implements LocalHfRunnerV1 {
   async initialize(): Promise<void> {}
-  async generate(): Promise<never> { throw new Error("local_must_not_run"); }
+  asyng generate(): Promise<never> {
+    throw new Error("local_must_not_run");
+  }
 }
 
 function response(content: string, status = 200): Response {
   const body = status >= 400
     ? { error: { message: content } }
-    : { choices: [{ message: { content }, finish_reason: "stop" }], usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 } };
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    : {
+        choices: [{ message: { content }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 },
+      };
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function backend(steps: Response[]) {
@@ -127,7 +163,7 @@ function backend(steps: Response[]) {
     return next;
   }) as typeof fetch;
   const client = new AtlasCloudClientV1({ apiKey: "test-secret", fetchImpl });
-  const router = new AtlasHybridModelRouterV1({
+  const router = new AtlasHybridModelRouterV1( {
     atlasClient: client,
     dots3Model: "test/dots3",
     localRuntime: new LocalHuggingFaceRuntimeV1({ runner: new NeverLocal() }),
@@ -145,9 +181,9 @@ function input(maxRuntimeMs = 45_000) {
       operatingContextDigest: "digest",
       effectiveGrant: {
         budgets: {
-          maxInputTokens: 4096,
+          maxInputTokens: 4_096,
           maxOutputTokens: 512,
-          maxTotalTokens: 4608,
+          maxTotalTokens: 4_608,
           maxCostMicros: 25_000,
           maxRuntimeMs,
         },
@@ -166,8 +202,8 @@ test("terminal Atlas failure reports actual runtime and preserves attempt teleme
   assert.ok((r.usage?.runtimeMs ?? 0) > 0);
   assert.ok((r.usage?.runtimeMs ?? 45_000) < 45_000);
   assert.equal(r.latencyMs, r.usage?.runtimeMs);
-  const receipt = r.providerReceipt as any;
-  assert.equal(receipt.attempts.length, 2);
+  const receipt = r.providerReceipt as { attempts?: unknown[] } | undefined;
+  assert.equal(receipt?.attempts?.length, 2);
   assert.match(r.failure?.message ?? "", /deepseek-ai\/deepseek-v3\.2:/);
   assert.match(r.failure?.message ?? "", /test\/dots3:/);
   assert.doesNotMatch(r.failure?.message ?? "", /test-secret/);
