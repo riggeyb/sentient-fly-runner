@@ -1,0 +1,74 @@
+name: Atlas Dots3 Empty Completion Diagnostic V1
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+    steps:
+      - name: Probe Dots3 response metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ATLASCLOUD_API_KEY:-}"
+          cat >"$RUNNER_TEMP/probe.mjs" <<'NODE'
+          const key=String(process.env.ATLASCLOUD_API_KEY??"").trim();
+          if(!key) throw new Error("atlas_key_missing");
+          const endpoint="https://api.atlascloud.ai/v1/chat/completions";
+          const model="dots-studio/dots-3-note-prev-free";
+          async function probe(label,max_tokens,extra={}) {
+            const started=Date.now();
+            const r=await fetch(endpoint,{
+              method:"POST",
+              headers:{"content-type":"application/json",authorization:`Bearer ${key}`},
+              body:JSON.stringify({
+                model,
+                messages:[
+                  {role:"system",content:'Return only one JSON object with a non-empty "answer" string. No markdown.'},
+                  {role:"user",content:'Set answer to "ok".'}
+                ],
+                max_tokens,
+                temperature:0,
+                ...extra
+              }),
+              signal:AbortSignal.timeout(20000)
+            });
+            let body={};
+            try { body=await r.json(); } catch {}
+            const choice=Array.isArray(body?.choices)?body.choices[0]??{}:{};
+            const msg=choice?.message&&typeof choice.message==="object"?choice.message:{};
+            const content=typeof msg.content==="string"?msg.content:"";
+            const reasoning=typeof msg.reasoning_content==="string"?msg.reasoning_content:"";
+            const usage=body?.usage&&typeof body.usage==="object"?body.usage:{};
+            const safe={
+              label,
+              httpStatus:r.status,
+              latencyMs:Date.now()-started,
+              responseIdPresent:typeof body?.id==="string"&&body.id.length>0,
+              choices:Array.isArray(body?.choices)?body.choices.length:0,
+              messageKeys:Object.keys(msg).sort().filter(k=>!["content","reasoning_content"].includes(k)),
+              contentLength:content.length,
+              reasoningContentLength:reasoning.length,
+              finishReason:typeof choice?.finish_reason==="string"?choice.finish_reason:null,
+              promptTokens:Number.isFinite(usage?.prompt_tokens)?usage.prompt_tokens:null,
+              completionTokens:Number.isFinite(usage?.completion_tokens)?usage.completion_tokens:null,
+              reasoningTokens:Number.isFinite(usage?.completion_tokens_details?.reasoning_tokens)
+                ? usage.completion_tokens_details.reasoning_tokens
+                : (Number.isFinite(usage?.reasoning_tokens)?usage.reasoning_tokens:null),
+              totalTokens:Number.isFinite(usage?.total_tokens)?usage.total_tokens:null,
+              errorCode:typeof body?.error?.code==="string"?body.error.code:null,
+              errorType:typeof body?.error?.type==="string"?body.error.type:null
+            };
+            console.log("DOTS3_PROBE="+JSON.stringify(safe));
+          }
+          await probe("current_384",384);
+          await probe("expanded_1024",1024);
+          await probe("no_thinking_384",384,{enable_thinking:false});
+          console.log("MODEL_TEXT_EXPOSED=false");
+          console.log("ATLASCLOUD_SECRET_EXPOSED=false");
+          NODE
+          node "$RUNNER_TEMP/probe.mjs"
