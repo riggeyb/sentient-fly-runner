@@ -54,19 +54,6 @@ once_tail(
     '    }\n',
     "usage reconciliation failure",
 )
-once_tail(
-    '        costMicros,\n'
-    '        toolRounds: 0,\n',
-    '        costMicros,\n'
-    '        runtimeMs,\n'
-    '        toolRounds: 0,\n',
-    "success runtime usage",
-)
-once_tail(
-    '      latencyMs: totalLatency(result.telemetry),\n',
-    '      latencyMs: runtimeMs,\n',
-    "success latency",
-)
 
 text = prefix + marker + tail
 
@@ -137,7 +124,7 @@ import {
 
 class NeverLocal implements LocalHfRunnerV1 {
   async initialize(): Promise<void> {}
-  asyng generate(): Promise<never> {
+  async generate(): Promise<never> {
     throw new Error("local_must_not_run");
   }
 }
@@ -163,7 +150,7 @@ function backend(steps: Response[]) {
     return next;
   }) as typeof fetch;
   const client = new AtlasCloudClientV1({ apiKey: "test-secret", fetchImpl });
-  const router = new AtlasHybridModelRouterV1( {
+  const router = new AtlasHybridModelRouterV1({
     atlasClient: client,
     dots3Model: "test/dots3",
     localRuntime: new LocalHuggingFaceRuntimeV1({ runner: new NeverLocal() }),
@@ -209,7 +196,7 @@ test("terminal Atlas failure reports actual runtime and preserves attempt teleme
   assert.doesNotMatch(r.failure?.message ?? "", /test-secret/);
 });
 
-test("successful Atlas execution reports actual runtime for budget reconciliation", async () => {
+test("successful Atlas execution continues reporting observed runtime for reconciliation", async () => {
   const b = backend([response('{"answer":"ok"}')]);
   const [target] = await b.describe();
   const r = await b.execute({ ...input(), target });
