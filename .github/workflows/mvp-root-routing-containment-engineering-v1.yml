@@ -56,7 +56,7 @@ jobs:
           python3 /tmp/mvp-root-routing-containment-v1.py
           cd sentient
           git diff --check
-          actual="$(git diff --name-only | sort)"
+          actual="$( { git diff --name-only; git ls-files --others --exclude-standard; } | sort)"
           expected="$(printf '%s\n' \
             src/application/production-collaboration.ts \
             src/application/production-mission-control-context.ts \
