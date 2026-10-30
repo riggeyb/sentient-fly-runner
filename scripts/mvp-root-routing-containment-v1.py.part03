@@ -13,7 +13,7 @@ test("production worker cognition does not expand delegated effect scope", () =>
     privacy: "private",
   } as const;
   const plan = defaultDynamicCognitionPlanV1(input.request);
-  const root = productionRootContext(input, plan){
+  const root = productionRootContext(input, plan);
   const [worker] = productionMissionWorkers(input, plan);
   assert.ok(worker);
 
@@ -34,6 +34,6 @@ test("planning containment recovers only operational cognition failures", () => 
   assert.equal(isRecoverableProductionCognitionPlanningFailureV1(new Error("missing SpawnSentient parent root:fixture")), false);
   assert.equal(isRecoverableProductionCognitionPlanningFailureV1(new Error("authority expansion detected")), false);
 });
-'''
+''' 
 (ROOT / "test/mvp-root-routing-containment-v1.test.ts").write_text(test)
 print("patch_ready")
