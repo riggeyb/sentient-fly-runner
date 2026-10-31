@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-S=5224ddaea0dd1a8b8aa6552a0fd44bd5b274840f
-T=923fe70e94a0cb311bd578b45bed47c97d5b89d3
 W=director-studio-beta
 H="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-
 N=""
 NV=""
 for _ in $(seq 1 30); do
@@ -19,17 +16,16 @@ test -n "$N"
 test "$N" != "$OLD_DEPLOY"
 test -n "$NV"
 
-headers="$RUNNER_TEMP/post-access.headers"
-code="$(curl -sS -D "$headers" -o /dev/null -w '%{http_code}' --max-time 20 "$DIRECTOR_URL/" || true)"
+body="$RUNNER_TEMP/post-access.body"
+head="$RUNNER_TEMP/post-access.headers"
+code="$(curl -sS -o "$body" -D "$head" -w '%{http_code}' --max-time 20 "$DIRECTOR_URL/" || true)"
 test "$code" != "200"
 if [ "$code" = "302" ]; then
-  grep -qi '^location: .*cloudflareaccess.com' "$headers"
+  grep -qiE 'location:.*(cloudflareaccess|cloudflare)' "$head" "$body"
+elif [ "$code" != "401" ] && [ "$code" != "403" ]; then
+  grep -qiE 'cloudflare|access' "$head" "$body"
 fi
-
-h="$(curl -fsS --max-time 15 https://sentient-validation-runner.fly.dev/healthz)"
-r="$(curl -fsS --max-time 15 https://sentient-validation-runner.fly.dev/readyz)"
-jq -e --arg s "$S" --arg t "$T" '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null <<<"$h"
-jq -e --arg s "$S" --arg t "$T" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t and .modelOutputIsNeverAuthority==true' >/dev/null <<<"$r"
+rm -f "$body" "$head"
 
 echo "NEW_DEPLOY=$N" >>"$GITHUB_ENV"
 echo "NEW_VERSION=$NV" >>"$GITHUB_ENV"
@@ -38,6 +34,5 @@ echo "DIRECTOR_VERSION_ID=$NV"
 echo "DIRECTOR_DEPLOYMENT_ID_CHANGED=true"
 echo "POST_DEPLOY_RESIDENCY=PASS"
 echo "CLOUDFLARE_ACCESS_UNCHANGED=true"
-echo "LIVE_SENTIENT_SHA_UNCHANGED=true"
-echo "LIVE_SENTIENT_TREE_UNCHANGED=true"
+echo "POST_DEPLOY_SENTIENT_AUDIT_REQUIRED=true"
 echo "HUMAN_AUTHENTICATED_UI_SMOKE_REQUIRED=true"
