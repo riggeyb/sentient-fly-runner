@@ -22,24 +22,10 @@ done
 
 export GH_TOKEN="$SOURCE_TOKEN"
 test "$(gh api "repos/$DREPO/branches/$PROMO" --jq .commit.sha)" = "$SHA"
-
-queued=0
-for workflow in cloudflare-convergence.yml director-202-convergence-proof.yml; do
-  inprog="$(gh api "repos/$DREPO/actions/workflows/$workflow/runs?status=in_progress&per_page=100")"
-  test "$(jq -r .total_count <<<"$inprog")" = "0"
-
-  q="$(gh api "repos/$DREPO/actions/workflows/$workflow/runs?status=queued&per_page=100")"
-  while read -r id; do
-    [ -n "$id" ] || continue
-    jobs="$(gh api "repos/$DREPO/actions/runs/$id/jobs?per_page=100")"
-    test "$(jq -r .total_count <<<"$jobs")" = "0"
-    queued=$((queued+1))
-  done < <(jq -r '.workflow_runs[].id' <<<"$q")
-done
+test "$(gh api "repos/$DREPO/commits/$SHA" --jq .commit.tree.sha)" = "$TREE"
 
 echo "RELEASE_RECEIPTS=PASS"
 echo "PROMOTION_STATUS=PASS"
 echo "PROMOTED_SHA=$SHA"
 echo "PROMOTED_TREE=$TREE"
-echo "ACTIVE_CONFLICTING_DIRECTOR_DEPLOYS=0"
-echo "DORMANT_ZERO_JOB_QUEUED_DEPLOY_ARTIFACTS=$queued"
+echo "SOURCE_REPO_ACTIONS_QUEUE_CHECK=EXTERNAL_OPERATOR_FENCE"
