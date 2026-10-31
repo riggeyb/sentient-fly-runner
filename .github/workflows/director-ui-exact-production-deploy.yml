@@ -30,12 +30,6 @@ jobs:
       CF_ACCESS_POLICY_AUD: ${{ vars.CF_ACCESS_POLICY_AUD }}
       DIRECTOR_SENTIENT_BASE_URL: ${{ vars.DIRECTOR_SENTIENT_BASE_URL }}
       DIRECTOR_SENTIENT_TOKEN: ${{ secrets.DIRECTOR_SENTIENT_TOKEN }}
-      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-      CLOUDFLARE_ACCESS_CLIENT_ID: ${{ secrets.CLOUDFLARE_ACCESS_CLIENT_ID }}
-      CLOUDFLARE_ACCESS_CLIENT_SECRET: ${{ secrets.CLOUDFLARE_ACCESS_CLIENT_SECRET }}
-      CF_ACCESS_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_SERVICE_TOKEN_ID }}
-      CF_ACCESS_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_SERVICE_TOKEN_SECRET }}
     steps:
       - name: Checkout operator controls
         uses: actions/checkout@v4
@@ -69,7 +63,7 @@ jobs:
         working-directory: director
         run: bash ../operator/scripts/director-ui-release-deploy.sh
 
-      - name: Verify production residency and shell
+      - name: Verify production residency, Access, and Sentient identity
         working-directory: director
         run: bash ../operator/scripts/director-ui-release-verify.sh
 
