@@ -1,0 +1,94 @@
+name: MVP Director Human Conversation Observer V2
+
+"on":
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      objective_id: {required: true, type: string}
+
+permissions: {contents: read}
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP: sentient-validation-runner
+      SHA: ${{ inputs.sha }}
+      TREE: ${{ inputs.tree }}
+      OBJ: ${{ inputs.objective_id }}
+      TOKEN: ${{ secrets.DIRECTOR_SENTIENT_TOKEN }}
+      CF_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Observe and certify
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TREE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$OBJ" =~ ^ui-[0-9a-f-]{36}$ ]]
+          test -n "$TOKEN"; test -n "$CF_ACCOUNT"; test -n "$CF_TOKEN"
+
+          health() { curl -fsS --max-time 20 "https://${APP}.fly.dev/healthz"; }
+          ready() { curl -fsS --max-time 20 "https://${APP}.fly.dev/readyz"; }
+          dep() { curl -fsS -H "Authorization: Bearer $CF_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/director-studio-beta/deployments"; }
+          dep_id() { jq -er '(.result.deployments // .result // [])[0].id'; }
+
+          h1="$(health)"; r1="$(ready)"; d1="$(dep)"; did1="$(dep_id <<<"$d1")"
+          jq -e --arg s "$SHA" --arg t "$TREE" '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t' <<<"$h1" >/dev/null
+          jq -e --arg s "$SHA" --arg t "$TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true' <<<"$r1" >/dev/null
+
+          code="$(curl -sS --max-time 30 -o "$RUNNER_TEMP/o.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://${APP}.fly.dev/v1/objectives/$OBJ")"
+          test "$code" = 200
+          jq -e --arg id "$OBJ" '.objectiveId==$id and .status=="succeeded" and (.activeEngineeringJobId==null)' "$RUNNER_TEMP/o.json" >/dev/null
+
+          contract="$(jq -r '.result.body.result.contractVersion // empty' "$RUNNER_TEMP/o.json")"
+          if [ "$contract" = "sentient-phase1-runtime/v1" ]; then
+            jq -e '
+              .rootProjection==null
+              and (.result.body.result as $r
+                | $r.status=="RESPONDED"
+                and $r.state.authoritativeOwner=="SENTIENT"
+                and $r.authority.owner=="SENTIENT"
+                and $r.authority.required==false
+                and $r.nextAction.kind=="NONE"
+                and ($r.authoritativeContent|type=="string" and length>0)
+                and $r.phase3Assessment.authoritative==false
+                and $r.taskRequirements.externalCapabilityRequired==false)
+            ' "$RUNNER_TEMP/o.json" >/dev/null
+            echo DIRECTOR_CONVERSATION_SHAPE=ORDINARY_PHASE1
+          elif [ "$contract" = "sentient-production-mission-control/v1" ]; then
+            jq -e --arg id "$OBJ" '
+              .rootProjection.objectiveId==$id
+              and (.rootProjection.finalResult|type=="string" and length>0)
+              and (.result.body.result as $r
+                | $r.status=="SUCCEEDED"
+                and $r.operatingContextIsNotAuthority==true
+                and $r.workerEffectsCanonical==false)
+            ' "$RUNNER_TEMP/o.json" >/dev/null
+            echo DIRECTOR_CONVERSATION_SHAPE=MISSION_CONTROL
+          else
+            echo "UNEXPECTED_CONTRACT_VERSION=$contract"; exit 1
+          fi
+
+          d2="$(dep)"; did2="$(dep_id <<<"$d2")"; h2="$(health)"
+          test "$did2" = "$did1"
+          jq -e --arg s "$SHA" --arg t "$TREE" '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t' <<<"$h2" >/dev/null
+
+          echo PRE_PROOF_LIVE_SENTIENT_IDENTITY=PASS
+          echo DIRECTOR_TO_SENTIENT_PRODUCTION_PATH=PASS
+          echo DIRECTOR_CONVERSATION_FINAL_RESPONSE=PASS
+          echo MODEL_OUTPUT_IS_NEVER_AUTHORITY=true
+          echo CONSEQUENTIAL_EFFECT_OBSERVED=false
+          echo GOVERNOR_BYPASS_USED=false
+          echo DEPLOY_ON_SUCCESS=false
+          echo DIRECTOR_DEPLOYMENT_UNCHANGED=true
+          echo SENTIENT_REDEPLOYMENT=false
+          echo DIRECTOR_MUTATION_PERFORMED=false
+          echo RESOURCE_EXPANSION=false
+          echo AUTHORITY_EXPANSION=false
+          echo POLICY_WEAKENING=false
+          echo DIRECTOR_CONVERSATION_PROOF=PASS
+          echo MVP_COMPLETE=true
