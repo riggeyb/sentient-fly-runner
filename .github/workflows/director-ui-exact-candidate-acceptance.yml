@@ -73,15 +73,15 @@ jobs:
       - name: Wrangler dry run
         run: npx wrangler deploy --dry-run
 
-      - name: Final immutable-source fence
+      - name: Final tracked-source mutation fence
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
-          git diff --quiet
-          git diff --cached --quiet
-          test -z "$(git status --porcelain --untracked-files=no)"
-          echo "SOURCE_MUTATION=false"
+          git status --short || true
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo "TRACKED_SOURCE_MUTATION=false"
           echo "PRODUCTION_DEPLOYMENT=false"
           echo "DIRECTOR_UI_ACCEPTANCE=PASS"
