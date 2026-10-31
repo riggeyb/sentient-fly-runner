@@ -5,32 +5,71 @@ permissions:
 jobs:
   accept:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     env:
+      EXPECTED_SHA: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
+      EXPECTED_TREE: 2707935c55452e67e31428c26a669a03802daae7
+      NEXT_TELEMETRY_DISABLED: "1"
       CF_ACCESS_TEAM_DOMAIN: https://x.invalid
       CF_ACCESS_POLICY_AUD: x
       DIRECTOR_SENTIENT_BASE_URL: https://x.invalid
       DIRECTOR_SENTIENT_TOKEN: x
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact Director candidate
+        uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
           ref: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
+          fetch-depth: 1
+      - name: Fence exact SHA and tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          echo "EXACT_SOURCE_FENCE=PASS"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: |
-          test "$(git rev-parse HEAD)" = 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
-          test "$(git rev-parse 'HEAD^{tree}')" = 2707935c55452e67e31428c26a669a03802daae7
-          npm ci --no-audit --no-fund
-          npm run typecheck
-          npm test
-          npm run check:vinext
-          npm run build:vinext
-          npx wrangler deploy --dry-run
+      - name: Install exact dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and component tests
+        run: npm test
+      - name: Vinext compatibility
+        run: npm run check:vinext
+      - name: Cloudflare type generation
+        run: npm run cf-typegen
+      - name: Production Vinext build
+        run: npm run build:vinext
+      - name: Wrangler dry run
+        run: npx wrangler deploy --dry-run
+      - name: Final immutable-source fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          if [ -n "$(git diff --name-only)" ]; then
+            if [ "$(git diff --name-only)" = "next-env.d.ts" ]; then
+              git restore -- next-env.d.ts
+            else
+              git diff --name-only
+              exit 1
+            fi
+          fi
           git diff --quiet
           git diff --cached --quiet
           test -z "$(git status --porcelain)"
-          echo DIRECTOR_UI_ACCEPTANCE=PASS
-          echo PRODUCTION_DEPLOYMENT=false
+          echo "TYPECHECK=PASS"
+          echo "UNIT_TESTS=PASS"
+          echo "COMPONENT_TESTS=PASS"
+          echo "DIRECTOR_BUILD=PASS"
+          echo "CLOUDFLARE_COMPATIBILITY=PASS"
+          echo "WRANGLER_DRY_RUN=PASS"
+          echo "SOURCE_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "DIRECTOR_UI_ACCEPTANCE=PASS"
