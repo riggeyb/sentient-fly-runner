@@ -1,12 +1,9 @@
-name: Director UI exact temporary preview
-
+name: Director UI exact preview
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
   actions: read
-
 jobs:
   preview:
     runs-on: ubuntu-latest
@@ -14,8 +11,9 @@ jobs:
     env:
       EXPECTED_SHA: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
       EXPECTED_TREE: 2707935c55452e67e31428c26a669a03802daae7
-      ACCEPTANCE_RUN: "41247572382"
-      ACCEPTANCE_RUNNER_SHA: 941daa540901b9a6556a2b7bc37616ed701d457d
+      ACCEPTANCE_RUN: "41247702077"
+      ACCEPTANCE_RUNNER_SHA: a2df62ff970ef4cc58b5f03e92c8dac447b26372
+      PREVIEW_NAME: director-ui-976047b6
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       CF_ACCESS_TEAM_DOMAIN: ${{ vars.CF_ACCESS_TEAM_DOMAIN }}
@@ -23,47 +21,36 @@ jobs:
       DIRECTOR_SENTIENT_BASE_URL: ${{ vars.DIRECTOR_SENTIENT_BASE_URL }}
       DIRECTOR_SENTIENT_TOKEN: ${{ secrets.DIRECTOR_SENTIENT_TOKEN }}
     steps:
-      - name: Verify successful exact acceptance receipt
+      - name: Verify accepted exact-SHA receipt
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           j="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$ACCEPTANCE_RUN")"
-          test "$(jq -r .status <<<"$j")" = "completed"
-          test "$(jq -r .conclusion <<<"$j")" = "success"
+          test "$(jq -r .status <<<"$j")" = completed
+          test "$(jq -r .conclusion <<<"$j")" = success
           test "$(jq -r .head_sha <<<"$j")" = "$ACCEPTANCE_RUNNER_SHA"
-          test "$(jq -r .path <<<"$j")" = ".github/workflows/director-ui-exact-acceptance.yml"
-          echo "ACCEPTANCE_RECEIPT=PASS"
-
-      - name: Checkout exact Director candidate
-        uses: actions/checkout@v4
+          test "$(jq -r .path <<<"$j")" = ".github/workflows/director-ui-exact-candidate-acceptance.yml"
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
           ref: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
-
-      - name: Fence exact preview source
+      - name: Fence source and bindings
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
-
-      - uses: actions/setup-node@v4
+          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_ACCESS_TEAM_DOMAIN CF_ACCESS_POLICY_AUD DIRECTOR_SENTIENT_BASE_URL DIRECTOR_SENTIENT_TOKEN; do
+            test -n "${!k:-}"
+          done
+      - uses: actions/setup-noe@v4
         with:
           node-version: "22"
-
-      - name: Require preview bindings
-        shell: bash
-        run: |
-          set -euo pipefail
-          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_ACCESS_TEAM_DOMAIN CF_ACCESS_POLICY_AUD DIRECTOR_SENTIENT_BASE_URL DIRECTOR_SENTIENT_TOKEN; do
-            test -n "${!k:-}" || { echo "MISSING_BINDING=$k"; exit 2; }
-          done
-
       - name: Build accepted source
         shell: bash
         run: |
@@ -73,41 +60,44 @@ jobs:
           if [ "$(git diff --name-only)" = "next-env.d.ts" ]; then git restore -- next-env.d.ts; fi
           git diff --quiet
           git diff --cached --quiet
-
-      - id: deploy
-        name: Deploy temporary non-production Worker
+      - id: preview
+        name: Create isolated Cloudflare Preview
         shell: bash
         run: |
           set -euo pipefail
-          f="$RUNNER_TEMP/director-secrets.env"
-          raw="$RUNNER_TEMP/director-preview.log"
+          raw="$RUNNER_TEMP/preview.log"
+          set +e
+          npx wrangler preview --name "$PREVIEW_NAME" --worker-name director-studio-beta --ignore-base-config >"$raw" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            sed -E 's#https://[^[:space:]]+#[url omitted]#g' "$raw" | grep -viE 'claim|token|secret' | head -n 100 || true
+            exit "$rc"
+          fi
+          url="$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev[^[:space:]]*' "$raw" | head -n1 | sed -E 's/[.,)]$//' || true)"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          rm -f "$raw"
+      - name: Bind isolated Preview secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          f="$RUNNER_TEMP/preview.env"
           umask 077
           printf 'CF_ACCESS_TEAM_DOMAIN=%s\nCF_ACCESS_POLICY_AUD=%s\nDIRECTOR_SENTIENT_BASE_URL=%s\nDIRECTOR_SENTIENT_TOKEN=%s\n' \
             "$CF_ACCESS_TEAM_DOMAIN" "$CF_ACCESS_POLICY_AUD" "$DIRECTOR_SENTIENT_BASE_URL" "$DIRECTOR_SENTIENT_TOKEN" > "$f"
-          npx wrangler deploy --temporary --secrets-file "$f" >"$raw" 2>&1
+          npx wrangler preview secret bulk "$f" --name "$PREVIEW_NAME" --worker-name director-studio-beta
           rm -f "$f"
-          url="$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev[^[:space:]]*' "$raw" | head -n1 | sed -E 's/[.,)]$//' || true)"
-          test -n "$url"
-          echo "preview_url=$url" >> "$GITHUB_OUTPUT"
-          echo "TEMPORARY_NON_PRODUCTION_DEPLOY=PASS"
-          echo "PRODUCTION_DEPLOYMENT=false"
-          rm -f "$raw"
-
-      - name: Verify unauthenticated objective rejection
+      - name: Verify Preview auth guard
         shell: bash
         env:
-          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
         run: |
           set -euo pipefail
-          code="$(curl -sS -o "$RUNNER_TEMP/unauth.json" -w '%{http_code}' -X POST \
-            -H 'content-type: application/json' \
-            --data '{"objective":"Director acceptance auth probe"}' \
-            "$PREVIEW_URL/api/sentient/objectives")"
+          code="$(curl -sS -o "$RUNNER_TEMP/unauth.json" -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{"objective":"Director preview auth probe"}' "$PREVIEW_URL/api/sentient/objectives")"
           echo "UNAUTH_OBJECTIVE_POST_STATUS=$code"
-          test "$code" = "401"
-          echo "APPLICATION_ACCESS_JWT_GUARD=PASS"
-
-      - name: Final preview receipt
+          test "$code" = 401
+      - name: Final exact-source receipt
         shell: bash
         run: |
           set -euo pipefail
@@ -115,6 +105,9 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
           git diff --quiet
           git diff --cached --quiet
-          echo "DIRECTOR_UI_TEMPORARY_PREVIEW=PASS"
-          echo "SOURCE_MUTATION=false"
+          echo "DIRECTOR_UI_PREVIEW=PASS"
           echo "PRODUCTION_DEPLOYMENT=false"
+      - name: Delete isolated Preview
+        if: always()
+        shell: bash
+        run: npx wrangler preview delete --name "$PREVIEW_NAME" --worker-name director-studio-beta --skip-confirmation || true
