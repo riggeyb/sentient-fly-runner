@@ -57,6 +57,9 @@ jobs:
           set -euo pipefail
           npm ci --no-audit --no-fund
           npm run build:vinext
+          tmp="$RUNNER_TEMP/wrangler-preview.json"
+          jq '.previews = {}' dist/server/wrangler.json > "$tmp"
+          mv "$tmp" dist/server/wrangler.json
           if [ "$(git diff --name-only)" = "next-env.d.ts" ]; then git restore -- next-env.d.ts; fi
           git diff --quiet
           git diff --cached --quiet
