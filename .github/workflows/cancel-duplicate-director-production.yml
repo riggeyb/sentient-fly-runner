@@ -1,0 +1,20 @@
+name: Cancel duplicate Director production run
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel duplicate run 41252868079
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/41252868079/cancel"
+          echo "CANCEL_REQUESTED=41252868079"
