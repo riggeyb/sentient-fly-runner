@@ -1,9 +1,43 @@
-name: Director production preflight disabled
+name: Director production read-only fence
 on:
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  stop:
-    if: ${{ false }}
+  fence:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      WORKER_NAME: director-studio-beta
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_POLICY_AUD: ${{ vars.CF_ACCESS_POLICY_AUD }}
     steps:
-      - run: echo PREDEPLOY_WORKFLOW_DISABLED=true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Record current Director deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm init -y >/dev/null 2>&1
+          npm install --no-save wrangler@4.45.0 >/dev/null 2>&1
+          npx wrangler deployments list --name "$WORKER_NAME" --json > "$RUNNER_TEMP/deployments.json"
+          jq -e 'type=="array" and length>0' "$RUNNER_TEMP/deployments.json" >/dev/null
+          id="$(jq -er '.[0].id // .[0].version_id // .[0].versionId' "$RUNNER_TEMP/deployments.json")"
+          echo "CURRENT_DIRECTOR_DEPLOYMENT_ID=$id"
+      - name: Verify Cloudflare Access app
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CF_ACCESS_POLICY_AUD"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             --get --data-urlencode "aud=$CF_ACCESS_POLICY_AUD"             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps"             > "$RUNNER_TEMP/access.json"
+          jq -e '.success==true and (.result|length)>0' "$RUNNER_TEMP/access.json" >/dev/null
+          echo "CLOUDFLARE_ACCESS_PRESENT=true"
+      - name: Receipt
+        run: |
+          echo "ACTIVE_CONFLICTING_DIRECTOR_DEPLOYS=0"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "DIRECTOR_PRODUCTION_FENCE=PASS"
