@@ -82,7 +82,8 @@ jobs:
           f="$RUNNER_TEMP/director-secrets.env"
           raw="$RUNNER_TEMP/director-preview.log"
           umask 077
-          printf 'CF_ACCESS_TEAM_DOMAIN=%s\nCF_ACCESS_POLICY_AUD=%s\nDIRECTOR_SENTIENT_BASE_URL=%s\nDIRECTOR_SENTIENT_TOKEN=%s\n'             "$CF_ACCESS_TEAM_DOMAIN" "$CF_ACCESS_POLICY_AUD" "$DIRECTOR_SENTIENT_BASE_URL" "$DIRECTOR_SENTIENT_TOKEN" > "$f"
+          printf 'CF_ACCESS_TEAM_DOMAIN=%s\nCF_ACCESS_POLICY_AUD=%s\nDIRECTOR_SENTIENT_BASE_URL=%s\nDIRECTOR_SENTIENT_TOKEN=%s\n' \
+            "$CF_ACCESS_TEAM_DOMAIN" "$CF_ACCESS_POLICY_AUD" "$DIRECTOR_SENTIENT_BASE_URL" "$DIRECTOR_SENTIENT_TOKEN" > "$f"
           npx wrangler deploy --temporary --secrets-file "$f" >"$raw" 2>&1
           rm -f "$f"
           url="$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev[^[:space:]]*' "$raw" | head -n1 | sed -E 's/[.,)]$//' || true)"
@@ -94,11 +95,14 @@ jobs:
 
       - name: Verify unauthenticated objective rejection
         shell: bash
-          env:
+        env:
           PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
         run: |
           set -euo pipefail
-          code="$(curl -sSS -o "$RUNNER_TEMP/unauth.json" -w '%{http_code}' -X POST             -H 'content-type: application/json'             --data '{"objective":"Director acceptance auth probe"}'             "$PREVIEW_URL/api/sentient/objectives")"
+          code="$(curl -sS -o "$RUNNER_TEMP/unauth.json" -w '%{http_code}' -X POST \
+            -H 'content-type: application/json' \
+            --data '{"objective":"Director acceptance auth probe"}' \
+            "$PREVIEW_URL/api/sentient/objectives")"
           echo "UNAUTH_OBJECTIVE_POST_STATUS=$code"
           test "$code" = "401"
           echo "APPLICATION_ACCESS_JWT_GUARD=PASS"
