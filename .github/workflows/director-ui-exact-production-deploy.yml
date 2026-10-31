@@ -1,0 +1,85 @@
+name: Director UI exact production deploy
+
+"on":
+  workflow_dispatch:
+    inputs:
+      authorization:
+        description: Exact SHA/tree release authorization
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: director-ui-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      AUTHORIZATION: ${{ inputs.authorization }}
+      RUNNER_TOKEN: ${{ github.token }}
+      SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_TEAM_DOMAIN: ${{ vars.CF_ACCESS_TEAM_DOMAIN }}
+      CF_ACCESS_POLICY_AUD: ${{ vars.CF_ACCESS_POLICY_AUD }}
+      DIRECTOR_SENTIENT_BASE_URL: ${{ vars.DIRECTOR_SENTIENT_BASE_URL }}
+      DIRECTOR_SENTIENT_TOKEN: ${{ secrets.DIRECTOR_SENTIENT_TOKEN }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      CLOUDFLARE_ACCESS_CLIENT_ID: ${{ secrets.CLOUDFLARE_ACCESS_CLIENT_ID }}
+      CLOUDFLARE_ACCESS_CLIENT_SECRET: ${{ secrets.CLOUDFLARE_ACCESS_CLIENT_SECRET }}
+      CF_ACCESS_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_SERVICE_TOKEN_ID }}
+      CF_ACCESS_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_SERVICE_TOKEN_SECRET }}
+    steps:
+      - name: Checkout operator controls
+        uses: actions/checkout@v4
+        with:
+          path: operator
+          persist-credentials: false
+
+      - name: Pre-deploy operator fence
+        run: bash operator/scripts/director-ui-release-preflight.sh
+
+      - name: Snapshot current production
+        run: bash operator/scripts/director-ui-release-snapshot.sh
+
+      - name: Checkout exact accepted Director successor
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/director-studio-beta
+          ref: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: director
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: director/package-lock.json
+
+      - name: Build and deploy exact successor once
+        working-directory: director
+        run: bash ../operator/scripts/director-ui-release-deploy.sh
+
+      - name: Verify production residency and shell
+        working-directory: director
+        run: bash ../operator/scripts/director-ui-release-verify.sh
+
+      - name: Roll back only after a changed production deployment fails a gate
+        if: failure()
+        shell: bash
+        run: |
+          if [ "${DEPLOYED:-false}" = "true" ]; then
+            cd director
+            bash ../operator/scripts/director-ui-release-rollback.sh
+          else
+            echo "ROLLBACK_REQUIRED=false"
+          fi
