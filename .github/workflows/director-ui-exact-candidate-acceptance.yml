@@ -28,7 +28,7 @@ jobs:
           ref: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Fence exact SHA tree parent and four-file scope
         shell: bash
