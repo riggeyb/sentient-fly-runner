@@ -48,7 +48,7 @@ jobs:
           for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_ACCESS_TEAM_DOMAIN CF_ACCESS_POLICY_AUD DIRECTOR_SENTIENT_BASE_URL DIRECTOR_SENTIENT_TOKEN; do
             test -n "${!k:-}"
           done
-      - uses: actions/setup-noe@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Build accepted source
