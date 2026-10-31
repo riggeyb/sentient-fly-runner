@@ -22,30 +22,24 @@ done
 
 export GH_TOKEN="$SOURCE_TOKEN"
 test "$(gh api "repos/$DREPO/branches/$PROMO" --jq .commit.sha)" = "$SHA"
-for w in cloudflare-convergence.yml director-202-convergence-proof.yml; do
-  for s in queued in_progress; do
-    gh api "repos/$DREPO/actions/workflows/$w/runs?status=$s&per_page=100" --jq '.workflow_runs[].id' |
-      while read -r id; do
-        [ -z "$id" ] || gh api -X POST "repos/$DREPO/actions/runs/$id/cancel" >/dev/null || true
-      done
-  done
-done
 
-for _ in $(seq 1 30); do
-  n=0
-  for w in cloudflare-convergence.yml director-202-convergence-proof.yml; do
-    for s in queued in_progress; do
-      c="$(gh api "repos/$DREPO/actions/workflows/$w/runs?status=$s&per_page=100" --jq .total_count)"
-      n=$((n+c))
-    done
-  done
-  [ "$n" -eq 0 ] && break
-  sleep 2
+queued=0
+for workflow in cloudflare-convergence.yml director-202-convergence-proof.yml; do
+  inprog="$(gh api "repos/$DREPO/actions/workflows/$workflow/runs?status=in_progress&per_page=100")"
+  test "$(jq -r .total_count <<<"$inprog")" = "0"
+
+  q="$(gh api "repos/$DREPO/actions/workflows/$workflow/runs?status=queued&per_page=100")"
+  while read -r id; do
+    [ -n "$id" ] || continue
+    jobs="$(gh api "repos/$DREPO/actions/runs/$id/jobs?per_page=100")"
+    test "$(jq -r .total_count <<<"$jobs")" = "0"
+    queued=$((queued+1))
+  done < <(jq -r '.workflow_runs[].id' <<<"$q")
 done
-test "$n" -eq 0
 
 echo "RELEASE_RECEIPTS=PASS"
 echo "PROMOTION_STATUS=PASS"
 echo "PROMOTED_SHA=$SHA"
 echo "PROMOTED_TREE=$TREE"
 echo "ACTIVE_CONFLICTING_DIRECTOR_DEPLOYS=0"
+echo "DORMANT_ZERO_JOB_QUEUED_DEPLOY_ARTIFACTS=$queued"
