@@ -25,9 +25,24 @@ export GH_TOKEN="$SOURCE_TOKEN"
 test "$(gh api "repos/$DREPO/branches/$PROMO" --jq .commit.sha)" = "$SHA"
 test "$(gh api "repos/$DREPO/commits/$SHA" --jq .commit.tree.sha)" = "$TREE"
 
+queued_zero_job=0
+for workflow in cloudflare-convergence.yml director-202-convergence-proof.yml; do
+  active="$(gh api "repos/$DREPO/actions/workflows/$workflow/runs?status=in_progress&per_page=100" --jq .total_count)"
+  test "$active" -eq 0
+
+  while read -r run_id; do
+    [ -n "$run_id" ] || continue
+    jobs="$(gh api "repos/$DREPO/actions/runs/$run_id/jobs?per_page=100" --jq .total_count)"
+    test "$jobs" -eq 0
+    queued_zero_job=$((queued_zero_job+1))
+  done < <(gh api "repos/$DREPO/actions/workflows/$workflow/runs?status=queued&per_page=100" --jq '.workflow_runs[].id')
+done
+
 echo "RELEASE_RECEIPTS=PASS"
 echo "PREDEPLOY_SENTIENT_AUDIT=PASS"
 echo "PROMOTION_STATUS=PASS"
 echo "PROMOTED_SHA=$SHA"
 echo "PROMOTED_TREE=$TREE"
-echo "SOURCE_REPO_ACTIONS_QUEUE_CHECK=EXTERNAL_OPERATOR_FENCE"
+echo "ACTIVE_CONFLICTING_DIRECTOR_DEPLOYS=0"
+echo "QUEUED_CONFLICTING_RUNS_WITH_JOBS=0"
+echo "QUEUED_ZERO_JOB_CONVERGENCE_ARTIFACTS=$queued_zero_job"
