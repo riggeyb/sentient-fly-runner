@@ -11,7 +11,8 @@ test "${AUTHORIZATION:-}" = "DEPLOY $SHA $TREE"
 export GH_TOKEN="$RUNNER_TOKEN"
 for spec in \
   "41247702077|.github/workflows/director-ui-exact-candidate-acceptance.yml" \
-  "41248369165|.github/workflows/director-ui-exact-preview.yml"; do
+  "41248369165|.github/workflows/director-ui-exact-preview.yml" \
+  "41248305081|.github/workflows/final-sentient-exact-live-runtime-audit.yml"; do
   id="${spec%%|*}"
   path="${spec#*|}"
   j="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
@@ -25,6 +26,7 @@ test "$(gh api "repos/$DREPO/branches/$PROMO" --jq .commit.sha)" = "$SHA"
 test "$(gh api "repos/$DREPO/commits/$SHA" --jq .commit.tree.sha)" = "$TREE"
 
 echo "RELEASE_RECEIPTS=PASS"
+echo "PREDEPLOY_SENTIENT_AUDIT=PASS"
 echo "PROMOTION_STATUS=PASS"
 echo "PROMOTED_SHA=$SHA"
 echo "PROMOTED_TREE=$TREE"
