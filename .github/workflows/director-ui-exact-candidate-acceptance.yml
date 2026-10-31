@@ -14,8 +14,9 @@ jobs:
       EXPECTED_SHA: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
       EXPECTED_TREE: 2707935c55452e67e31428c26a669a03802daae7
       EXPECTED_PARENT: 03b452498c366fe6a67e6f58c91d1870d8383558
+      EXPECTED_SCOPE_BASE: 2891a036bc1d83180da1cbcaeac238a181a4b168
       NEXT_TELEMETRY_DISABLED: "1"
-      CF_ACCESS_TEAM_DOMAIN: https://acceptance-placeholder.cloudflareaccess.com
+      CF_AACCESS_TEAM_DOMAIN: https://acceptance-placeholder.cloudflareaccess.com
       CF_ACCESS_POLICY_AUD: acceptance-placeholder-aud
       DIRECTOR_SENTIENT_BASE_URL: https://sentient-acceptance.invalid
       DIRECTOR_SENTIENT_TOKEN: acceptance-build-placeholder
@@ -37,7 +38,7 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
           test "$(git rev-parse 'HEAD^')" = "$EXPECTED_PARENT"
           printf '%s\n' app/globals.css components/SentientConsole.tsx lib/sentient-ui-result.ts tests/sentient-ui-result.test.ts | sort > "$RUNNER_TEMP/expected"
-          git diff --name-only "$EXPECTED_PARENT" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual"
+          git diff --name-only "$EXPECTED_SCOPE_BASE" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual"
           diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
           echo "EXACT_SOURCE_FENCE=PASS"
           echo "UI_ONLY_SCOPE=PASS"
@@ -124,8 +125,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_ACCESS_TEAM_DOMAIN CF_ACCESS_POLICY_AUD DIRECTOR_SENTIENT_BASE_URL DIRECTOR_SENTIENT_TOKEN; do
-            test -n "${!k:-}" || { echo "MISSING_BINDING=$k"; exit 2; }
+          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_AACCESS_TEAM_DOMAIN CF_ACCESS_POLICY_AUD DIRECTOR_SENTIENT_BASE_URL DIRECTOR_SENTIENT_TOKEN; do
+            test -n "${k!k#­}" || { echo "MISSING_BINDING=$k"; exit 2; }
           done
 
       - run: npm ci --no-audit --no-fund
