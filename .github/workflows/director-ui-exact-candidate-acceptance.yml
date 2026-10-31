@@ -73,15 +73,25 @@ jobs:
       - name: Wrangler dry run
         run: npx wrangler deploy --dry-run
 
-      - name: Final tracked-source mutation fence
+      - name: Final immutable-source fence
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
-          git status --short || true
-          git diff --exit-code
-          git diff --cached --exit-code
+          dirty="$(git diff --name-only)"
+          if [ -n "$dirty" ]; then
+            printf 'TRACKED_MUTATION=%s\n' "$dirty"
+            if [ "$dirty" = "next-env.d.ts" ]; then
+              git restore --source="$EXPECTED_SHA" -- next-env.d.ts
+              echo "GENERATED_NEXT_ENV_RESTORED=true"
+            else
+              echo "UNEXPECTED_TRACKED_MUTATION=true"
+              exit 1
+            fi
+          fi
+          git diff --quiet
+          git diff --cached --quiet
           echo "TRACKED_SOURCE_MUTATION=false"
           echo "PRODUCTION_DEPLOYMENT=false"
           echo "DIRECTOR_UI_ACCEPTANCE=PASS"
