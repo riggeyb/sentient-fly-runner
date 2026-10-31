@@ -53,17 +53,18 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
-          if [ -n "$(git diff --name-only)" ]; then
-            if [ "$(git diff --name-only)" = "next-env.d.ts" ]; then
+          dirty="$(git diff --name-only)"
+          if [ -n "$dirty" ]; then
+            if [ "$dirty" = "next-env.d.ts" ]; then
               git restore -- next-env.d.ts
+              echo "GENERATED_NEXT_ENV_RESTORED=true"
             else
-              git diff --name-only
+              echo "UNEXPECTED_TRACKED_MUTATION=$dirty"
               exit 1
             fi
           fi
           git diff --quiet
           git diff --cached --quiet
-          test -z "$(git status --porcelain)"
           echo "TYPECHECK=PASS"
           echo "UNIT_TESTS=PASS"
           echo "COMPONENT_TESTS=PASS"
