@@ -1,43 +1,184 @@
-name: Director production read-only fence
+name: Director release serialization fence
+
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+  actions: read
+
 jobs:
   fence:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
-      WORKER_NAME: director-studio-beta
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TARGET_REPO: riggeyb/director-studio-beta
+      BASE_BRANCH: sentient-ui-activation-v1
+      CANDIDATE_BRANCH: fix/objective-answer-text-extraction
+      EXPECTED_BASE_SHA: 2891a036bc1d83180da1cbcaeac238a181a4b168
+      EXPECTED_SHA: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
+      EXPECTED_TREE: 2707935c55452e67e31428c26a669a03802daae7
+      ACCEPTANCE_RUN: "41247702077"
+      ACCEPTANCE_RUNNER_SHA: a2df62ff970ef4cc58b5f03e92c8dac447b26372
+      PREVIEW_RUN: "41248369165"
+      PREVIEW_RUNNER_SHA: b91cdf1c141201961a30f41afee366533c99dd94
+      SENTIENT_SHA: 5224ddaea0dd1a8b8aa6552a0fd44bd5b274840f
+      SENTIENT_TREE: 923fe70e94a0cb311bd578b45bed47c97d5b89d3
+      SENTIENT_APP: sentient-validation-runner
+      CANONICAL_URL: https://director-studio-beta.burke-steffan.workers.dev
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      CF_ACCESS_POLICY_AUD: ${{ vars.CF_ACCESS_POLICY_AUD }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      SOURCE_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+
     steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+      - name: Verify immutable acceptance and preview receipts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          a="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$ACCEPTANCE_RUN")"
+          test "$(jq -r .status <<<"$a")" = completed
+          test "$(jq -r .conclusion <<<"$a")" = success
+          test "$(jq -r .head_sha <<<"$a")" = "$ACCEPTANCE_RUNNER_SHA"
+          test "$(jq -r .path <<<"$a")" = ".github/workflows/director-ui-exact-candidate-acceptance.yml"
+
+          p="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$PREVIEW_RUN")"
+          test "$(jq -r .status <<<"$p")" = completed
+          test "$(jq -r .conclusion <<<"$p")" = success
+          test "$(jq -r .head_sha <<<"$p")" = "$PREVIEW_RUNNER_SHA"
+          test "$(jq -r .path <<<"$p")" = ".github/workflows/director-ui-exact-preview.yml"
+
+          echo "EXACT_ACCEPTANCE_RECEIPT=PASS"
+          echo "EXACT_PREVIEW_RECEIPT=PASS"
+
+      - name: Fence Director branch identities
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.SOURCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          base="$(gh api "repos/$TARGET_REPO/git/ref/heads/$BASE_BRANCH" --jq .object.sha)"
+          cand="$(gh api "repos/$TARGET_REPO/git/ref/heads/$CANDIDATE_BRANCH" --jq .object.sha)"
+          tree="$(gh api "repos/$TARGET_REPO/git/commits/$EXPECTED_SHA" --jq .tree.sha)"
+          test "$base" = "$EXPECTED_BASE_SHA"
+          test "$cand" = "$EXPECTED_SHA"
+          test "$tree" = "$EXPECTED_TREE"
+          echo "DIRECTOR_BASE_IDENTITY=PASS"
+          echo "DIRECTOR_CANDIDATE_IDENTITY=PASS"
+
+      - name: Disable source-repo production mutators
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.SOURCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          workflows=(
+            cloudflare-convergence.yml
+            director-202-convergence-proof.yml
+            bounded-npm-direct-dependency-patch.yml
+          )
+          for wf in "${workflows[@]}"; do
+            gh api -X PUT "repos/$TARGET_REPO/actions/workflows/$wf/disable" >/dev/null
+            state="$(gh api "repos/$TARGET_REPO/actions/workflows/$wf" --jq .state)"
+            test "$state" = disabled_manually
+            echo "DISABLED_SOURCE_WORKFLOW=$wf"
+          done
+          echo "SOURCE_REPO_SELF_DEPLOY_DISABLED=true"
+          echo "SOURCE_REPO_BRANCH_MUTATOR_DISABLED=true"
+
+      - name: Cancel stale production-branch mutator and deploy runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.SOURCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          paths='[".github/workflows/cloudflare-convergence.yml",".github/workflows/director-202-convergence-proof.yml",".github/workflows/bounded-npm-direct-dependency-patch.yml"]'
+
+          collect() {
+            local status="$1"
+            gh api --paginate -H "Accept: application/vnd.github+json"               "repos/$TARGET_REPO/actions/runs?branch=$BASE_BRANCH&status=$status&per_page=100"               --jq ".workflow_runs[] | select(.path as \$p | $paths | index(\$p)) | .id"
+          }
+
+          mapfile -t ids < <({ collect queued; collect in_progress; } | sort -u)
+          printf 'STALE_CONFLICT_COUNT_BEFORE=%s\n' "${#ids[@]}"
+          for id in "${ids[@]}"; do
+            test -n "$id"
+            meta="$(gh api "repos/$TARGET_REPO/actions/runs/$id")"
+            path="$(jq -r .path <<<"$meta")"
+            branch="$(jq -r .head_branch <<<"$meta")"
+            status="$(jq -r .status <<<"$meta")"
+            test "$branch" = "$BASE_BRANCH"
+            case "$path" in
+              .github/workflows/cloudflare-convergence.yml|.github/workflows/director-202-convergence-proof.yml|.github/workflows/bounded-npm-direct-dependency-patch.yml) ;;
+              *) echo "REFUSING_UNEXPECTED_PATH=$path"; exit 1 ;;
+            esac
+            case "$status" in queued|in_progress) ;; *) continue ;; esac
+            echo "CANCELLING_RUN=$id PATH=$path STATUS=$status"
+            gh api -X POST "repos/$TARGET_REPO/actions/runs/$id/cancel" >/dev/null
+          done
+
+          for _ in $(seq 1 30); do
+            mapfile -t remaining < <({ collect queued; collect in_progress; } | sort -u)
+            if [ "${#remaining[@]}" -eq 0 ]; then break; fi
+            sleep 2
+          done
+          mapfile -t remaining < <({ collect queued; collect in_progress; } | sort -u)
+          test "${#remaining[@]}" -eq 0
+          echo "ACTIVE_CONFLICTING_DIRECTOR_DEPLOYS=0"
+          echo "ACTIVE_CONFLICTING_DIRECTOR_BRANCH_MUTATORS=0"
+
       - name: Record current Director deployment
         shell: bash
         run: |
           set -euo pipefail
-          npm init -y >/dev/null 2>&1
-          npm install --no-save wrangler@4.45.0 >/dev/null 2>&1
-          npx wrangler deployments list --name "$WORKER_NAME" --json > "$RUNNER_TEMP/deployments.json"
-          jq -e 'type=="array" and length>0' "$RUNNER_TEMP/deployments.json" >/dev/null
-          id="$(jq -er '.[0].id // .[0].version_id // .[0].versionId' "$RUNNER_TEMP/deployments.json")"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          j="$(curl -fsS --max-time 30 -H "Authorization: Bear $CLOUDFLARE_API_TOKEN" -H "Accept: application/json" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/director-studio-beta/deployments")"
+          jq -e '.success==true' <<<"$j" >/dev/null
+          id="$(jq -er '(.result.deployments // .result // [])[0].id' <<<"$j")"
+          test -n "$id"
           echo "CURRENT_DIRECTOR_DEPLOYMENT_ID=$id"
-      - name: Verify Cloudflare Access app
+
+      - name: Verify canonical Cloudflare Access protection
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test -n "$CF_ACCESS_POLICY_AUD"
-          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             --get --data-urlencode "aud=$CF_ACCESS_POLICY_AUD"             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps"             > "$RUNNER_TEMP/access.json"
-          jq -e '.success==true and (.result|length)>0' "$RUNNER_TEMP/access.json" >/dev/null
+          headers="$RUNNER_TEMP/access.headers"
+          body="$RUNNER_TEMP/access.body"
+          code="$(curl -sS -D "$headers" -o "$body" -w '%{http_code}' --max-time 20 "$CANONICAL_URL/" || true)"
+          echo "CANONICAL_UNAUTH_STATUS=$code"
+          case "$code" in
+            302) grep -qi '^location: .*cloudflareaccess.com' "$headers" ;;
+            401|403) ;;
+            *) echo "UNEXPECTED_UNAUTH_STATUS=$code"; exit 1 ;;
+          esac
           echo "CLOUDFLARE_ACCESS_PRESENT=true"
-      - name: Receipt
+
+      - name: Verify live Sentient identity unchanged
+        shell: bash
         run: |
-          echo "ACTIVE_CONFLICTING_DIRECTOR_DEPLOYS=0"
+          set -euo pipefail
+          health=""
+          ready=""
+          for _ in $(seq 1 15); do
+            health="$(curl -fsS --max-time 8 "https://${SENTIENT_APP}.fly.dev/healthz" || true)"
+            ready="$(curl -fsS --max-time 8 "https://${SENTIENT_APP}.fly.dev/readyz" || true)"
+            if jq -e --arg s "$SENTIENT_SHA" --arg t "$SENTIENT_TREE" '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null 2>&1 <<<"$ehealth" &&               jq -e --arg s "$SENTIENT_SHA" --arg t "$SENTIENT_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true' >/dev/null 2>&1 <<<"$ready"; then
+              break
+            fi
+            sleep 2
+          done
+          jq -e --arg s "$SENTIENT_SHA" --arg t "$SENTIENT_TREE" '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t' >/dev/null <<<"$health"
+          jq -e --arg s "$SENTIENT_SHA" --arg t "$SENTIENT_TREE" '.ready==true and .identity.source.sha==$s and .identity.source.tree==$t and .authorityOwner=="SENTIENT_RUNTIME" and .modelOutputIsNeverAuthority==true' >/dev/null <<<"$ready"
+          echo "CURRENT_SENTIENT_SHA=$SENTIENT_SHA"
+          echo "CURRENT_SENTIENT_TREE=$SENTIENT_TREE"
+          echo "SENTIENT_PREDEPLOY_IDENTITY=PASS"
+
+      - name: Final serialization receipt
+        run: |
+          echo "DIRECTOR_RELEASE_SERIALIZED=true"
+          echo "DIRECTOR_SOURCE_MUTATION=false"
           echo "PRODUCTION_DEPLOYMENT=false"
-          echo "DIRECTOR_PRODUCTION_FENCE=PASS"
+          echo "DIRECTOR_RELEASE_SERIALIZATION_FENCE=PASS"
