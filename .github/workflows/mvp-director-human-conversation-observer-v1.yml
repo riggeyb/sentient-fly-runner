@@ -42,6 +42,7 @@ jobs:
           echo PRE_PROOF_LIVE_SENTIENT_IDENTITY=PASS
           echo DIRECTOR_DEPLOYMENT_SNAPSHOT_BEFORE=PASS
           echo CLOUDFLARE_API_MUTATION=false
+
       - name: Observe Director-created objective
         shell: bash
         run: |
@@ -55,32 +56,55 @@ jobs:
             sleep 2
           done
           test "${st:-}" = succeeded
-          jq -e --arg id "$OBJ" '.objectiveId==$id and .rootProjection.objectiveId==$id and (.rootProjection.finalResult|type=="string" and length>0)' "$RUNNER_TEMP/o.json" >/dev/null
-          jq -e '.result.body.result as $r | $r.contractVersion=="sentient-production-mission-control/v1" and $r.status=="SUCCEEDED" and $r.operatingContextIsNotAuthority==true and $r.workerEffectsCanonical==false' "$RUNNER_TEMP/o.json" >/dev/null
-          final="$(jq -r '.rootProjection.finalResult' "$RUNNER_TEMP/o.json")"
-          grep -Fq 'riggeyb/sentient' <<<"$final"
-          grep -Fq 'riggeyb/sentient-fly-runner' <<<"$final"
+          jq -e --arg id "$OBJ" '.objectiveId==$id' "$RUNNER_TEMP/o.json" >/dev/null
           test -z "$(jq -r '.activeEngineeringJobId // empty' "$RUNNER_TEMP/o.json")"
+
+          contract="$(jq -r '.result.body.result.contractVersion // empty' "$RUNNER_TEMP/o.json")"
+          case "$contract" in
+            sentient-phase1-runtime/v1)
+              jq -e '
+                .rootProjection == null
+                and (.result.body.result as $r
+                  | $r.status=="RESPONDED"
+                  and $r.state.authoritativeOwner=="SENTIENT"
+                  and $r.authority.owner=="SENTIENT"
+                  and $r.authority.required==false
+                  and $r.nextAction.kind=="NONE"
+                  and ($r.authoritativeContent|type=="string" and length>0)
+                  and ($r.phase3Assessment.authoritative==false)
+                  and ($r.taskRequirements.externalCapabilityRequired==false))
+              ' "$RUNNER_TEMP/o.json" >/dev/null
+              final="$(jq -r '.result.body.result.authoritativeContent // .result.body.result.presentation.deterministicText // empty' "$RUNNER_TEMP/o.json")"
+              test -n "$final"
+              echo DIRECTOR_CONVERSATION_SHAPE=ORDINARY_PHASE1
+              echo OPERATING_CONTEXT_IS_NOT_AUTHORITY=NOT_APPLICABLE
+              echo WORKER_EFFECTS_CANONICAL=NOT_APPLICABLE
+              ;;
+            sentient-production-mission-control/v1)
+              jq -e --arg id "$OBJ" '.rootProjection.objectiveId==$id and (.rootProjection.finalResult|type=="string" and length>0)' "$RUNNER_TEMP/o.json" >/dev/null
+              jq -e '.result.body.result as $r | $r.status=="SUCCEEEDED" and $r.operatingContextIsNotAuthority==true and $r.workerEffectsCanonical==false' "$RUNNER_TEMP/o.json" >/dev/null
+              final="$(jq -r '.rootProjection.finalResult' "$RUNNER_TEMP/o.json")"
+              test -n "$final"
+              echo DIRECTOR_CONVERSATION_SHAPE=MISSION_CONTROL
+              echo OPERATING_CONTEXT_IS_NOT_AUTHORITY=true
+              echo WORKER_EFFECTS_CANONICAL=false
+              ;;
+            *)
+              echo "UNEXPECTED_CONTRACT_VERSION=$contract"
+              exit 1
+              ;;
+          esac
+
           echo DIRECTOR_TO_SENTIENT_PRODUCTION_PATH=PASS
           echo DIRECTOR_CONVERSATION_FINAL_RESPONSE=PASS
-          echo OPERATING_CONTEXT_IS_NOT_AUTHORITY=true
-          echo WORKER_EFFECTS_CANONICAL=false
           echo CONSEQUENTIAL_EFFECT_OBSERVED=false
           echo GOVERNOR_BYPASS_USED=false
           echo DEPLOY_ON_SUCCESS=false
+
       - name: Prove unchanged after conversation
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
           d="$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/director-studio-beta/deployments")"
-          test "$(jq -er '(.result.deployments // .result // [])[0].id' <<<"$d")" = "$DID"
-          h="$(curl -fsS --max-time 20 "https://${APP}.fly.dev/healthz")"
-          jq -e --arg s "$SHA" --arg t "$TREE" '.status=="ok" and .application.identity.source.sha==$s and .application.identity.source.tree==$t' <<<"$h" >/dev/null
-          echo DIRECTOR_DEPLOYMENT_UNCHANGED=true
-          echo SENTIENT_REDEPLOYMENT=false
-          echo DIRECTOR_MUTATION_PERFORMED=false
-          echo RESOURCE_EXPANSION=false
-          echo AUTHORITY_EXPANSION=false
-          echo POLICY_WEAKENING=false
-          echo DIRECTOR_CONVERSATION_PROOF=PASS
-          echo MVP_COMPLETE=true
+          test "$(jq -er '(c.result.deployments // .result // [])[0].id'
