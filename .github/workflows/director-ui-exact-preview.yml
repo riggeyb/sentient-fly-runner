@@ -97,9 +97,16 @@ jobs:
           PREVIEW_URL: ${{ steps.preview.outputs.url }}
         run: |
           set -euo pipefail
-          code="$(curl -sS -o "$RUNNER_TEMP/unauth.json" -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{"objective":"Director preview auth probe"}' "$PREVIEW_URL/api/sentient/objectives")"
+          headers="$RUNNER_TEMP/unauth.headers"
+          code="$(curl -sS -D "$headers" -o "$RUNNER_TEMP/unauth.json" -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{"objective":"Director preview auth probe"}' "$PREVIEW_URL/api/sentient/objectives")"
           echo "UNAUTH_OBJECTIVE_POST_STATUS=$code"
-          test "$code" = 401
+          if [ "$code" = 302 ]; then
+            grep -qi '^location: .*cloudflareaccess.com' "$headers"
+            echo "CLOUDFLARE_ACCESS_REDIRECT=PASS"
+          else
+            test "$code" = 401
+            echo "APPLICATION_ACCESS_JWT_GUARD=PASS"
+          fi
       - name: Final exact-source receipt
         shell: bash
         run: |
