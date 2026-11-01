@@ -35,8 +35,8 @@ if [[ "${1-}" == "--binding-preflight-only" ]]; then
   exit 0
 fi
 
-S=976047b626cced9ed9c84b53ca7a8d44f8c93c6b
-T=2707935c55452e67e31428c26a669a03802daae7
+S=a6eca55db67fc03fbaf996dc1c06570593f9145f
+T=cd3d49ce5be866b2fd7c0212066ab2c30dea9207
 test "$(git rev-parse HEAD)" = "$S"
 test "$(git rev-parse 'HEAD^{tree}')" = "$T"
 before="$(sha256sum package-lock.json | awk '{print $1}')"
