@@ -187,8 +187,7 @@ jobs:
             let firstRepository;
             let secondRepository;
             let reopenedRepository;
-            const readCanonicalSnapshot = async (repository) =>
-              repository.withSnapshotTransaction((snapshot) => structuredClone(snapshot));
+            const readCanonicalSnapshot = async (repository) => repository.snapshot();
             const findGeneration = (snapshot) => {
               const candidate = snapshot?.generation ?? snapshot?.stateGeneration ?? snapshot?.snapshot?.generation;
               if (!Number.isSafeInteger(candidate)) throw new Error("Canonical snapshot does not expose an integer generation");
@@ -207,6 +206,8 @@ jobs:
             try {
               firstRepository = createRepository();
               secondRepository = createRepository();
+              await firstRepository.initialize();
+              await secondRepository.initialize();
               const firstId = `narrow-read-task-a-${suffix}`;
               const secondId = `narrow-read-task-b-${suffix}`;
               const firstService = new StateService(firstRepository, { idFactory: () => firstId });
@@ -215,10 +216,10 @@ jobs:
                 if (typeof service.createTask !== "function") throw new Error("DefaultSentientStateService does not expose createTask()");
                 const description = `operator-owned concurrency probe ${label}`;
                 return service.createTask({
+                  kind: "task",
                   title: description,
-                  name: description,
-                  description,
-                  objective: description
+                  status: "pending",
+                  provenance: { actor: "system" }
                 });
               };
 
@@ -258,6 +259,7 @@ jobs:
               await closeRepository(firstRepository);
               await closeRepository(secondRepository);
               reopenedRepository = createRepository();
+              await reopenedRepository.initialize();
               const afterReopen = await readCanonicalSnapshot(reopenedRepository);
               if (JSON.stringify(afterReopen) !== JSON.stringify(beforeRollback) ||
                   findGeneration(afterReopen) !== afterGeneration) {
