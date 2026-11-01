@@ -1,6 +1,11 @@
 name: Director release binding preflight test
 
 on:
+  pull_request:
+    paths:
+      - scripts/director-ui-release-deploy.sh
+      - scripts/test-director-ui-release-binding-preflight.sh
+      - .github/workflows/director-release-binding-preflight-test.yml
   workflow_dispatch:
 
 permissions:
