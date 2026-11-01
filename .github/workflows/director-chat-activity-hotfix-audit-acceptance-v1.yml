@@ -1,0 +1,97 @@
+name: Director Chat Activity Hotfix Audit Acceptance V1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      EXPECTED_SHA: 280bbe94e9c4e701862d1248717117ec1f285fa0
+      EXPECTED_TREE: 04ae5c92f868c2cfa4e2546098acd5e9a8f6d998
+      EXPECTED_PARENT: 049eee5633f3e041fa9841d319dd9d5d2d407c83
+      EXPECTED_SCOPE_BASE: f4b838491f533bf4dc3f2e6bea6a22fdb216ce97
+      NEXT_TELEMETRY_DISABLED: "1"
+      CF_ACCESS_TEAM_DOMAIN: https://acceptance-placeholder.cloudflareaccess.com
+      CF_ACCESS_POLICY_AUD: acceptance-placeholder-aud
+      DIRECTOR_SENTIENT_BASE_URL: https://sentient-acceptance.invalid
+      DIRECTOR_SENTIENT_TOKEN: acceptance-build-placeholder
+    steps:
+      - name: Checkout exact Director audit successor
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/director-studio-beta
+          ref: 280bbe94e9c4e701862d1248717117ec1f285fa0
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Fence exact SHA tree parent and three-file scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse 'HEAD^')" = "$EXPECTED_PARENT"
+          printf '%s\n' components/SentientConsole.tsx lib/sentient-chat-lifecycle.ts tests/sentient-chat-lifecycle.test.ts | sort > "$RUNNER_TEMP/expected"
+          git diff --name-only "$EXPECTED_SCOPE_BASE" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+          echo "EXACT_SOURCE_FENCE=PASS"
+          echo "THREE_FILE_SCOPE=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install exact lock without regeneration
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$(sha256sum package-lock.json | awk '{print $1}')"
+          npm ci --no-audit --no-fund
+          after="$(sha256sum package-lock.json | awk '{print $1}')"
+          test "$before" = "$after"
+          echo "PACKAGE_LOCK_REGENERATED=false"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and component tests
+        run: npm test
+
+      - name: Vinext compatibility
+        run: npm run check:vinext
+
+      - name: Production build
+        run: npm run build:vinext
+
+      - name: Wrangler dry run
+        run: npx wrangler deploy --dry-run
+
+      - name: Final immutable-source fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          dirty="$(git diff --name-only)"
+          if [ -n "$dirty" ]; then
+            printf 'TRACKED_MUTATION=%s\n' "$dirty"
+            if [ "$dirty" = "next-env.d.ts" ]; then
+              git restore --source="$EXPECTED_SHA" -- next-env.d.ts
+              echo "GENERATED_NEXT_ENV_RESTORED=true"
+            else
+              echo "UNEXPECTED_TRACKED_MUTATION=true"
+              exit 1
+            fi
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "DIRECTOR_CHAT_ACTIVITY_AUDIT_ACCEPTANCE=PASS"
