@@ -43,7 +43,8 @@ chmod +x "$TMP/gh"
 
 run_guard() {
   local fixture="$1"
-  PATH="$TMP:$PATH" FIXTURE="$fixture" CALL_LOG="$CALL_LOG"     bash "$SCRIPT" --conflict-preflight-only
+  PATH="$TMP:$PATH" FIXTURE="$fixture" CALL_LOG="$CALL_LOG" \
+    bash "$SCRIPT" --conflict-preflight-only
 }
 
 expect_block() {
@@ -65,16 +66,20 @@ expect_block() {
 }
 
 jobs="$(
-  PATH="$TMP:$PATH" FIXTURE=queued_zero CALL_LOG="$CALL_LOG"     gh api "repos/riggeyb/director-studio-beta/actions/runs/40591948243/jobs?per_page=100"       --jq '.total_count'
+  PATH="$TMP:$PATH" FIXTURE=queued_zero CALL_LOG="$CALL_LOG" \
+    gh api "repos/riggeyb/director-studio-beta/actions/runs/40591948243/jobs?per_page=100" \
+      --jq '.total_count'
 )"
 test "$jobs" = "0"
 expect_block queued_zero 40591948243 QUEUED_ZERO_JOB_PRODUCTION_RUN_BLOCKS
 
 jobs="$(
-  PATH="$TMP:$PATH" FIXTURE=queued_with_job CALL_LOG="$CALL_LOG"     gh api "repos/riggeyb/director-studio-beta/actions/runs/50000000001/jobs?per_page=100"       --jq .total_count'
+  PATH="$TMP:$PATH" FIXTURE=queued_with_job CALL_LOG="$CALL_LOG" \
+    gh api "repos/riggeyb/director-studio-beta/actions/runs/50000000001/jobs?per_page=100" \
+      --jq '.total_count'
 )"
 test "$jobs" = "1"
-expect_block queued_with_job 5000000001 QUEUED_WITH_JOB_PRODUCTION_RUN_BLOCKS
+expect_block queued_with_job 50000000001 QUEUED_WITH_JOB_PRODUCTION_RUN_BLOCKS
 
 expect_block in_progress 50000000002 IN_PROGRESS_PRODUCTION_RUN_BLOCKS
 
@@ -87,11 +92,17 @@ if grep -q '^CONFLICTING_RUN_IDS=' <<<"$out"; then
 fi
 echo "NO_ACTIVE_OR_QUEUED_PRODUCTION_RUNS_PASSES=PASS"
 
+if grep -q '/jobs' "$SCRIPT"; then
+  echo "JOB_COUNT_STILL_USED_BY_PRODUCTION_GUARD=true"
+  exit 1
+fi
+echo "QUEUED_JOB_COUNT_NOT_USED_FOR_DECISION=true"
+
 if grep -Eq '/cancel|-X POST' "$CALL_LOG"; then
   echo "CONFLICTING_RUN_AUTO_CANCELLED=true"
   exit 1
 fi
-if grep -Eq '/cancel|gh api[[:space:]]+-X[[:space:]]+0POST' "$SCRIPT"; then
+if grep -Eq '/cancel|gh api[[:space:]]+-X[[:space:]]+POST' "$SCRIPT"; then
   echo "PREFLIGHT_CONTAINS_AUTO_CANCEL=true"
   exit 1
 fi
