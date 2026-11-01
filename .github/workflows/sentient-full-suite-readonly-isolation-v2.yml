@@ -46,7 +46,7 @@ jobs:
           repository: riggeyb/sentient
           ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: true
+          persist-credentials: false
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -66,6 +66,8 @@ jobs:
           const fs = require("node:fs");
           const path = require("node:path");
           const { spawnSync } = require("node:child_process");
+          const { pathToFileURL } = require("node:url");
+          (async () => {
 
           const receiptPath = "/tmp/receipt.json";
           const logDir = "/tmp/exact-candidate";
@@ -165,6 +167,123 @@ jobs:
               .sort()
               .map((name) => path.join(directory, name));
           };
+          const blobAt = (revision, file) => {
+            const result = spawnSync("git", ["rev-parse", `${revision}:${file}`], { encoding: "utf8" });
+            return result.status === 0 ? result.stdout.trim() : null;
+          };
+          const runStateConcurrencyAndRecoveryTest = async () => {
+            const repositoryModule = await import(pathToFileURL(path.resolve("dist/src/state/postgres-state-repository.js")).href);
+            const serviceModule = await import(pathToFileURL(path.resolve("dist/src/state/service.js")).href);
+            const Repository = repositoryModule.PostgresStateRepository;
+            const StateService = serviceModule.DefaultSentientStateService;
+            if (!Repository || !StateService) throw new Error("Built candidate does not export the required Postgres state APIs");
+
+            const { randomUUID } = require("node:crypto");
+            const suffix = randomUUID().replace(/-/g, "");
+            const tableName = `sentient_narrow_read_${suffix}`;
+            const stateKey = `narrow-read-${suffix}`;
+            const databaseUrl = process.env.SENTIENT_TEST_DATABASE_URL;
+            const createRepository = () => new Repository({ connectionString: databaseUrl, tableName, stateKey });
+            let firstRepository;
+            let secondRepository;
+            let reopenedRepository;
+            const readCanonicalSnapshot = async (repository) =>
+              repository.withSnapshotTransaction((snapshot) => structuredClone(snapshot));
+            const findGeneration = (snapshot) => {
+              const candidate = snapshot?.generation ?? snapshot?.stateGeneration ?? snapshot?.snapshot?.generation;
+              if (!Number.isSafeInteger(candidate)) throw new Error("Canonical snapshot does not expose an integer generation");
+              return candidate;
+            };
+            const hasRecord = (value, id) => {
+              if (!value || typeof value !== "object") return false;
+              if (value.id === id) return true;
+              return Object.entries(value).some(([key, child]) => key === id || hasRecord(child, id));
+            };
+            const closeRepository = async (repository) => {
+              if (typeof repository.close !== "function") throw new Error("PostgresStateRepository does not expose close()");
+              await repository.close();
+            };
+
+            try {
+              firstRepository = createRepository();
+              secondRepository = createRepository();
+              const firstId = `narrow-read-task-a-${suffix}`;
+              const secondId = `narrow-read-task-b-${suffix}`;
+              const firstService = new StateService(firstRepository, { idFactory: () => firstId });
+              const secondService = new StateService(secondRepository, { idFactory: () => secondId });
+              const createTask = (service, label) => {
+                if (typeof service.createTask !== "function") throw new Error("DefaultSentientStateService does not expose createTask()");
+                const description = `operator-owned concurrency probe ${label}`;
+                return service.createTask({
+                  title: description,
+                  name: description,
+                  description,
+                  objective: description
+                });
+              };
+
+              const before = await readCanonicalSnapshot(firstRepository);
+              const beforeGeneration = findGeneration(before);
+              const writes = await Promise.allSettled([
+                createTask(firstService, "A"),
+                createTask(secondService, "B")
+              ]);
+              if (writes.some((result) => result.status !== "fulfilled")) {
+                throw new Error(`Concurrent writes failed: ${writes.map((result) => result.status).join(",")}`);
+              }
+              const afterWrites = await readCanonicalSnapshot(firstRepository);
+              const afterGeneration = findGeneration(afterWrites);
+              if (afterGeneration !== beforeGeneration + 2 ||
+                  !hasRecord(afterWrites, firstId) || !hasRecord(afterWrites, secondId)) {
+                throw new Error("Concurrent writes did not preserve both records with exactly two generation advances");
+              }
+
+              const beforeRollback = await readCanonicalSnapshot(firstRepository);
+              const rollbackMarker = `rollback-${suffix}`;
+              let injectedFailureObserved = false;
+              try {
+                await firstRepository.withSnapshotTransaction((snapshot) => {
+                  snapshot.__operatorRollbackProbe = rollbackMarker;
+                  throw new Error(rollbackMarker);
+                });
+              } catch (error) {
+                injectedFailureObserved = String(error.message ?? error).includes(rollbackMarker);
+              }
+              if (!injectedFailureObserved) throw new Error("Injected transaction failure was not observed");
+              const afterRollback = await readCanonicalSnapshot(secondRepository);
+              if (JSON.stringify(afterRollback) !== JSON.stringify(beforeRollback)) {
+                throw new Error("Injected failing transaction exposed a committed snapshot change");
+              }
+
+              await closeRepository(firstRepository);
+              await closeRepository(secondRepository);
+              reopenedRepository = createRepository();
+              const afterReopen = await readCanonicalSnapshot(reopenedRepository);
+              if (JSON.stringify(afterReopen) !== JSON.stringify(beforeRollback) ||
+                  findGeneration(afterReopen) !== afterGeneration) {
+                throw new Error("Canonical generation or records changed after repository reopen");
+              }
+              return {
+                status: "PASS",
+                tableName,
+                stateKey,
+                concurrentWrites: "PASS",
+                recordsPresent: [firstId, secondId],
+                generationBefore: beforeGeneration,
+                generationAfter: afterGeneration,
+                generationDelta: afterGeneration - beforeGeneration,
+                injectedRollback: "PASS",
+                reopenComparison: "PASS",
+                claim: "rollback/restart safety for the unchanged transaction implementation"
+              };
+            } finally {
+              for (const repository of [firstRepository, secondRepository, reopenedRepository]) {
+                if (repository && typeof repository.close === "function") {
+                  try { await repository.close(); } catch {}
+                }
+              }
+            }
+          };
 
           saveReceipt();
           try {
@@ -176,11 +295,9 @@ jobs:
               throw new Error("Dispatch identity does not match the pinned candidate");
             }
 
-            const fetchedBase = run("FETCH_ISOLATED_BASE", "git", ["fetch", "--no-tags", "origin", ISOLATED_BASE_SHA]);
-            spawnSync("git", ["config", "--local", "--unset-all", "http.https://github.com/.extraheader"]);
-            if (fetchedBase.code !== 0) throw new Error("Could not independently fetch isolated base");
-
             const head = gitValue(["rev-parse", "HEAD"]);
+            const baseObject = spawnSync("git", ["cat-file", "-e", `${ISOLATED_BASE_SHA}^{commit}`]);
+            if (baseObject.status !== 0) throw new Error("Isolated base commit is not present in the checkout");
             const candidateTree = gitValue(["rev-parse", `${EXPECTED_SHA}^{tree}`]);
             const baseCommit = gitValue(["rev-parse", `${ISOLATED_BASE_SHA}^{commit}`]);
             const baseTree = gitValue(["rev-parse", `${ISOLATED_BASE_SHA}^{tree}`]);
@@ -204,6 +321,29 @@ jobs:
             const diffCheck = run("SOURCE_DIFF_CHECK", "git", ["diff", "--check", ISOLATED_BASE_SHA, EXPECTED_SHA]);
             if (diffCheck.code !== 0) throw new Error("Source diff whitespace check failed");
             receipt.sourceScope = "PASS";
+
+            const transactionFiles = [
+              "src/state/postgres-state-repository.ts",
+              "src/state/migration.ts",
+              "src/state/state-integrity.ts"
+            ];
+            receipt.transactionImplementationBlobs = {};
+            for (const file of transactionFiles) {
+              const baseBlob = blobAt(ISOLATED_BASE_SHA, file);
+              const candidateBlob = blobAt(EXPECTED_SHA, file);
+              receipt.transactionImplementationBlobs[file] = {
+                base: baseBlob,
+                candidate: candidateBlob,
+                identical: baseBlob !== null && baseBlob === candidateBlob
+              };
+            }
+            if (!receipt.transactionImplementationBlobs["src/state/postgres-state-repository.ts"].identical) {
+              throw new Error("The PostgresStateRepository transaction implementation blob differs or is absent");
+            }
+            const optionalTransactionBlobs = transactionFiles.slice(1).map((file) => receipt.transactionImplementationBlobs[file]);
+            receipt.invariants.TRANSACTION_IMPLEMENTATION_OUTSIDE_SCOPE =
+              optionalTransactionBlobs.every((blob) => blob.base === null && blob.candidate === null || blob.identical)
+                ? "PASS" : "BLOCKED";
 
             if (gitValue(["status", "--porcelain", "--untracked-files=no"]) !== "") {
               throw new Error("Candidate checkout was not clean before install");
@@ -271,7 +411,39 @@ jobs:
             const fullSuite = run("NPM_TEST", "npm", ["test"]);
             receipt.tests.push({ name: "NPM_TEST", file: "npm test", exitCode: fullSuite.code, ...testCounts(fullSuite.output) });
 
-            const namedRecovery = filesIn("dist/test", /.*(?:recovery|restart).*\.test\.js$/i);
+            try {
+              receipt.blackBox = await runStateConcurrencyAndRecoveryTest();
+              receipt.tests.push({
+                name: "CANONICAL_POSTGRES_CONCURRENCY_ROLLBACK_REOPEN",
+                file: "operator-owned black-box test against dist/src/state",
+                exitCode: 0,
+                tests: 1,
+                passed: 1,
+                failed: 0,
+                skipped: 0
+              });
+            } catch (error) {
+              failed = true;
+              receipt.blackBox = {
+                status: "BLOCKED",
+                error: String(error.message ?? error),
+                claim: "rollback/restart safety for the unchanged transaction implementation"
+              };
+              receipt.tests.push({
+                name: "CANONICAL_POSTGRES_CONCURRENCY_ROLLBACK_REOPEN",
+                file: "operator-owned black-box test against dist/src/state",
+                exitCode: 1,
+                tests: 1,
+                passed: 0,
+                failed: 1,
+                skipped: 0
+              });
+            }
+
+            const namedRecovery = [
+              ...filesIn("dist/test", /.*(?:recovery|restart).*\.test\.js$/i),
+              ...filesIn("dist/test", /^permanent-continuation-multiprocess\.test\.js$/i)
+            ];
             for (const file of namedRecovery) runTest("CURRENT_LINEAGE_RECOVERY", file);
             const namedConcurrency = filesIn("dist/test", /.*(?:concurr|writer).*\.test\.js$/i);
             for (const file of namedConcurrency) runTest("CURRENT_LINEAGE_CONCURRENCY", file);
@@ -284,7 +456,7 @@ jobs:
               afterSha === EXPECTED_SHA &&
               afterTree === EXPECTED_TREE &&
               trackedStatus === "" &&
-              gitValue(["diff", "--cached", "--quiet"]) === "";
+              spawnSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).stdout.trim() === "";
             receipt.postTestIdentity = { sha: afterSha, tree: afterTree };
             if (!receipt.trackedTreeCleanAfterTests) failed = true;
 
@@ -295,10 +467,15 @@ jobs:
               receipt.tests.some((test) => test.file === file && test.exitCode === 0));
             receipt.invariants = {
               GENERATION_FENCING: receipt.sourceScope === "PASS" &&
-                passed("MVP1_STATE_V2_LIFECYCLE") && passed("ACTIVE_WORK_EXPIRY_FENCING") ? "PASS" : "BLOCKED",
-              CONCURRENT_WRITER_SAFETY: "BLOCKED",
-              TRANSACTION_IMPLEMENTATION_OUTSIDE_SCOPE: "BLOCKED",
-              CRASH_RECOVERY: recoveryPresent ? "PASS" : "BLOCKED",
+                passed("MVP1_STATE_V2_LIFECYCLE") && passed("ACTIVE_WORK_EXPIRY_FENCING") &&
+                receipt.blackBox?.generationDelta === 2 ? "PASS" : "BLOCKED",
+              CONCURRENT_WRITER_SAFETY: receipt.blackBox?.status === "PASS" &&
+                receipt.invariants.TRANSACTION_IMPLEMENTATION_OUTSIDE_SCOPE === "PASS" ? "PASS" : "BLOCKED",
+              TRANSACTION_IMPLEMENTATION_OUTSIDE_SCOPE: receipt.invariants.TRANSACTION_IMPLEMENTATION_OUTSIDE_SCOPE,
+              CRASH_RECOVERY: receipt.blackBox?.injectedRollback === "PASS" &&
+                receipt.blackBox?.reopenComparison === "PASS" &&
+                receipt.invariants.TRANSACTION_IMPLEMENTATION_OUTSIDE_SCOPE === "PASS" &&
+                recoveryPresent ? "PASS" : "BLOCKED",
               STATE_EQUIVALENCE: receipt.sourceScope === "PASS" &&
                 passed("MVP1_STATE_V2_LIFECYCLE") && passed("MVP1_STATE_V2") ? "PASS" : "BLOCKED",
               EVIDENCE_INTEGRITY: receipt.sourceScope === "PASS" &&
@@ -307,11 +484,12 @@ jobs:
                 passed("ACTION_FABRIC_AUTHORITY_REUSE") ? "PASS" : "BLOCKED"
             };
             receipt.evidenceNotes.CONCURRENT_WRITER_SAFETY = concurrencyPresent
-              ? "Concurrency/writer-named tests passed, but the transaction implementation location is not independently identified outside the allowed source scope."
-              : "No concurrency/writer-named test was found in the current-lineage compiled test directory.";
-            receipt.evidenceNotes.CRASH_RECOVERY = recoveryPresent
-              ? "Current-lineage recovery/restart-named tests passed."
-              : "No current-lineage recovery/restart-named test was found and passed.";
+              ? "The canonical Postgres black-box race passed; additional concurrency/writer-named tests passed."
+              : "The canonical Postgres black-box race is required; any additionally discovered concurrency/writer tests are recorded above.";
+            receipt.evidenceNotes.CRASH_RECOVERY = recoveryPresent &&
+              receipt.blackBox?.injectedRollback === "PASS" && receipt.blackBox?.reopenComparison === "PASS"
+              ? "Rollback/restart safety for the unchanged transaction implementation passed with current-lineage recovery/restart tests."
+              : "Required rollback/reopen or current-lineage restart evidence was unavailable or failed.";
             if (Object.values(receipt.invariants).some((value) => value !== "PASS")) failed = true;
           } catch (error) {
             failed = true;
@@ -331,6 +509,10 @@ jobs:
           console.log(`RECEIPT=${receiptPath}`);
           console.log(`OVERALL_EXIT=${receipt.overallExitCode}`);
           process.exitCode = receipt.overallExitCode;
+          })().catch((error) => {
+            console.error(`ACCEPTANCE_RUNNER_FAILED=${error.message ?? error}`);
+            process.exitCode = 1;
+          });
           NODE
 
       - name: Upload machine-readable acceptance receipt
@@ -339,5 +521,5 @@ jobs:
         with:
           name: sentient-narrow-read-exact-${{ inputs.sha }}
           path: /tmp/receipt.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
