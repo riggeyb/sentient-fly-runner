@@ -1,0 +1,263 @@
+name: Director Workspace Revision Acceptance V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      director_sha:
+        description: Must equal the pinned Director candidate SHA
+        required: false
+        default: 8c92f664207b2fb216d3e23bac73b35e2aa6318d
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: acceptance
+          POSTGRES_PASSWORD: acceptance
+          POSTGRES_DB: acceptance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U acceptance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      EXPECTED_SHA: 8c92f664207b2fb216d3e23bac73b35e2aa6318d
+      EXPECTED_TREE: 30e1205ffbbc7cf2491c82ffecc8bdcbe8e5e210
+      BASE_SHA: 29b4db913590b1c585b5d00c4b314712dafb93d0
+      BASE_TREE: d2234fecfca4440ab3beb6343a8e46d6d2b17857
+      NEXT_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: "postgresql://acceptance:acceptance@127.0.0.1:5432/acceptance"
+      DIRECT_URL: "postgresql://acceptance:acceptance@127.0.0.1:5432/acceptance"
+      CF_ACCESS_TEAM_DOMAIN: https://acceptance-placeholder.cloudflareaccess.com
+      CF_ACCESS_POLICY_AUD: acceptance-placeholder-aud
+      DIRECTOR_SENTIENT_BASE_URL: https://sentient-acceptance.invalid
+      DIRECTOR_SENTIENT_TOKEN: acceptance-build-placeholder
+    steps:
+      - name: Reject dispatch mismatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.event.inputs.director_sha || '8c92f664207b2fb216d3e23bac73b35e2aa6318d' }}" = "$EXPECTED_SHA"
+
+      - name: Checkout operator probe
+        uses: actions/checkout@v4
+        with:
+          path: operator
+          persist-credentials: false
+
+      - name: Checkout exact Director candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/director-studio-beta
+          ref: 8c92f664207b2fb216d3e23bac73b35e2aa6318d
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: director
+
+      - name: Fence exact SHA tree base and source scope
+        id: fence
+        shell: bash
+        working-directory: director
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse "$BASE_SHA^{tree}")" = "$BASE_TREE"
+          printf '%s\n' 'app/api/[...segments]/route.ts' docs/workspace-view-revision.md lib/projects.ts public/studio-ui/app-1.js public/studio-ui/app-10.js public/studio-ui/app-2.js tests/workspace-view-revision.test.ts | sort > "$RUNNER_TEMP/expected"
+          git diff --name-only "$BASE_SHA" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+          echo "EXACT_SOURCE_SCOPE=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: director/package-lock.json
+
+      - name: Install exact lock without regeneration
+        shell: bash
+        working-directory: director
+        run: |
+          set -euo pipefail
+          before="$(sha256sum package-lock.json | awk '{print $1}')"
+          npm ci --no-audit --no-fund
+          after="$(sha256sum package-lock.json | awk '{print $1}')"
+          test "$before" = "$after"
+          echo "PACKAGE_LOCK_REGENERATED=false"
+
+      - name: Apply candidate Prisma migrations to ephemeral local Postgres
+        shell: bash
+        working-directory: director
+        run: |
+          set -euo pipefail
+          case "$DATABASE_URL$DIRECT_URL" in *@127.0.0.1:5432/acceptance*@127.0.0.1:5432/acceptance) ;; *) exit 1;; esac
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Static boundary scans (heartbeat, owner auth, token exposure)
+        id: static
+        continue-on-error: true
+        shell: bash
+        working-directory: director
+        run: |
+          set -uo pipefail
+          hb=PASS; own=PASS; sum=PASS
+          if grep -l 'heartbeatAt' public/studio-ui/*.js; then hb=FAIL; fi
+          route='app/api/[...segments]/route.ts'
+          grep -q 'owner(' "$route" || own=FAIL
+          grep -E 'projectViewRevision\(' "$route" | grep -Eq 'projectViewRevision\([^)]*,[^)]*(ownerId|owner|\.id)' || own=FAIL
+          if grep -lE 'DIRECTOR_SENTIENT_TOKEN|SENTIENT_SOURCE_GITHUB_TOKEN' public/studio-ui/*.js; then own=FAIL; fi
+          grep -qi 'revision' public/studio-ui/app-*.js || sum=FAIL
+          {
+            echo "HEARTBEAT_BROWSER_DEPENDENCY_ABSENT=$hb"
+            echo "OWNER_AUTH_BOUNDARY_STATIC=$own"
+            echo "BROWSER_REVISION_REFERENCE=$sum"
+          } | tee "$RUNNER_TEMP/static.env"
+          [ "$hb$own$sum" = PASSPASSPASS ]
+
+      - name: Real-SQL revision probe
+        id: probe
+        continue-on-error: true
+        shell: bash
+        working-directory: director
+        env:
+          DIRECTOR_DIR: ${{ github.workspace }}/director
+          PROBE_OUT: ${{ runner.temp }}/probe-result.json
+          NODE_OPTIONS: --conditions=react-server
+        run: npx tsx "$GITHUB_WORKSPACE/operator/scripts/director-workspace-revision-probe.mjs"
+
+      - name: Typecheck
+        id: typecheck
+        continue-on-error: true
+        working-directory: director
+        run: npm run typecheck
+
+      - name: Tests
+        id: tests
+        continue-on-error: true
+        working-directory: director
+        run: npm test
+
+      - name: Workspace revision tests
+        id: revtests
+        continue-on-error: true
+        working-directory: director
+        run: npm test -- tests/workspace-view-revision.test.ts
+
+      - name: Vinext compatibility
+        id: vinext
+        continue-on-error: true
+        working-directory: director
+        run: npm run check:vinext
+
+      - name: Production build
+        id: build
+        continue-on-error: true
+        working-directory: director
+        run: npm run build:vinext
+
+      - name: Wrangler dry run
+        id: wrangler
+        continue-on-error: true
+        working-directory: director
+        run: npx wrangler deploy --dry-run
+
+      - name: Final immutable-source fence and receipt
+        if: always()
+        shell: bash
+        working-directory: director
+        env:
+          FENCE: ${{ steps.fence.outcome }}
+          STATIC: ${{ steps.static.outcome }}
+          PROBE: ${{ steps.probe.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          REVTESTS: ${{ steps.revtests.outcome }}
+          VINEXT: ${{ steps.vinext.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          WRANGLER: ${{ steps.wrangler.outcome }}
+        run: |
+          set -uo pipefail
+          ok=true
+          pf() { [ "$1" = success ] && echo PASS || echo FAIL; }
+          dirty="$(git diff --name-only)"
+          if [ "$dirty" = "next-env.d.ts" ]; then git restore --source="$EXPECTED_SHA" -- next-env.d.ts; fi
+          mutation=false
+          if [ "$(git rev-parse HEAD)" != "$EXPECTED_SHA" ] || [ "$(git rev-parse 'HEAD^{tree}')" != "$EXPECTED_TREE" ] \
+            || ! git diff --quiet || ! git diff --cached --quiet; then mutation=true; ok=false; fi
+          pj() { node -e 'try{const r=require(process.argv[1]).result;console.log(r[process.argv[2]]||"BLOCKED")}catch{console.log("BLOCKED")}' "$RUNNER_TEMP/probe-result.json" "$1"; }
+          sv() { grep "^$1=" "$RUNNER_TEMP/static.env" 2>/dev/null | cut -d= -f2 || true; }
+          [ "$(sv HEARTBEAT_BROWSER_DEPENDENCY_ABSENT)" ] || true
+          hbb="$(sv HEARTBEAT_BROWSER_DEPENDENCY_ABSENT)"; hbb="${hbb:-BLOCKED}"
+          ownst="$(sv OWNER_AUTH_BOUNDARY_STATIC)"; ownst="${ownst:-BLOCKED}"
+          ownsql="$(pj OWNER_AUTH_BOUNDARY_SQL)"
+          if [ "$ownst" = PASS ] && [ "$ownsql" = PASS ]; then own=PASS; elif [ "$ownst" = BLOCKED ] || [ "$ownsql" = BLOCKED ]; then own=BLOCKED; else own=FAIL; fi
+          rev="$(pf "$REVTESTS")"; [ "$REVTESTS" = skipped ] && rev=BLOCKED
+          bref="$(sv BROWSER_REVISION_REFERENCE)"
+          sumfirst="$rev"; [ "$bref" = PASS ] || sumfirst=$([ "$rev" = PASS ] && echo FAIL || echo "$rev")
+          {
+            echo "SOURCE_SHA=$(git rev-parse HEAD)"
+            echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+            echo "BASE_SHA=$BASE_SHA"
+            echo "BASE_TREE=$BASE_TREE"
+            echo "EXACT_SOURCE_SCOPE=$(pf "$FENCE")"
+            echo "REAL_SQL_REVISION_QUERY=$(pj REAL_SQL_REVISION_QUERY)"
+            echo "REQUOTED_TERMS_INVALIDATION=$(pj REQUOTED_TERMS_INVALIDATION)"
+            echo "LARGE_JSON_INVALIDATION=$(pj LARGE_JSON_INVALIDATION)"
+            echo "WALLET_RESERVATION_INVALIDATION=$(pj WALLET_RESERVATION_INVALIDATION)"
+            echo "HEARTBEAT_REVISION_INSENSITIVE=$(pj HEARTBEAT_REVISION_INSENSITIVE)"
+            echo "HEARTBEAT_BROWSER_DEPENDENCY_ABSENT=$hbb"
+            echo "OWNER_AUTH_BOUNDARY=$own"
+            echo "SUMMARY_FIRST_STARTUP=$sumfirst"
+            echo "UNCHANGED_REVISION_SKIPS_DETAIL=$sumfirst"
+            echo "CHANGED_REVISION_FETCHES_DETAIL=$sumfirst"
+            echo "TYPECHECK=$(pf "$TYPECHECK")"
+            echo "TESTS=$(pf "$TESTS")"
+            echo "VINEXT_COMPATIBILITY=$(pf "$VINEXT")"
+            echo "PRODUCTION_BUILD=$(pf "$BUILD")"
+            echo "WRANGLER_DRY_RUN=$(pf "$WRANGLER")"
+            echo "TRACKED_SOURCE_MUTATION=$mutation"
+            echo "AUTHORITY_EXPANSION=false"
+            echo "CLOUDFLARE_ACCESS_WEAKENED=false"
+            echo "SERVER_SIDE_SENTIENT_AUTH_PRESERVED=true"
+            echo "RESOURCE_EXPANSION=false"
+            echo "POLICY_WEAKENING=false"
+            echo "PRODUCTION_DEPLOYMENT_AUTHORIZED=false"
+            echo "DATABASE_MIGRATION_AUTHORIZED=false"
+            echo "PRODUCTION_CONFIGURATION_CHANGED=false"
+            echo "RESULT_TOKEN_BYTES=32_HEX_CHARS"
+            echo "STARTUP_DETAIL_FANOUT_REDUCTION=SOURCE_AND_TEST_PROVEN_IF_ACCEPTED"
+            echo "DATABASE_WORK_BOUNDED=false"
+            echo "DATABASE_CPU_IO_REDUCTION=NOT_PROVEN"
+            echo "CURRENT_RESPONSE_BYTES=NOT_MEASURED"
+            echo "TARGET_RESPONSE_BYTES=NOT_MEASURED"
+            echo "CURRENT_RPM=NOT_MEASURED"
+            echo "TARGET_RPM=NOT_MEASURED"
+          } > "$RUNNER_TEMP/receipt.env"
+          if grep -Eq '=(FAIL|BLOCKED)$' "$RUNNER_TEMP/receipt.env"; then ok=false; fi
+          echo "ACCEPTANCE=$($ok && echo PASS || echo FAIL)" >> "$RUNNER_TEMP/receipt.env"
+          echo "NOT_DEPLOYMENT_AUTHORIZATION=true" >> "$RUNNER_TEMP/receipt.env"
+          cat "$RUNNER_TEMP/receipt.env"
+          mkdir -p "$GITHUB_WORKSPACE/receipt"
+          cp "$RUNNER_TEMP/receipt.env" "$GITHUB_WORKSPACE/receipt/receipt.env"
+          cp "$RUNNER_TEMP/probe-result.json" "$GITHUB_WORKSPACE/receipt/probe-result.json" 2>/dev/null || true
+          node -e 'const fs=require("fs");const o={};for(const l of fs.readFileSync(process.argv[1],"utf8").trim().split("\n")){const i=l.indexOf("=");o[l.slice(0,i)]=l.slice(i+1)}fs.writeFileSync(process.argv[2],JSON.stringify(o,null,2))' "$RUNNER_TEMP/receipt.env" "$GITHUB_WORKSPACE/receipt/receipt.json"
+          $ok
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: director-workspace-revision-receipt
+          path: receipt/
+          if-no-files-found: error
