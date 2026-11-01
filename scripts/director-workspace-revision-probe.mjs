@@ -63,35 +63,33 @@ const has = (name, field) => Boolean(models[name]?.fields.some((f) => f.name ===
 const field = (name, f) => models[name].fields.find((x) => x.name === f);
 const jsonVal = (f, tag) => (f.type === "Json" ? { probe: tag } : tag);
 
-let projectId, ownerId, project, mod, revision;
+let projectId, ownerId, mod, revision;
 
 try {
-  const projectsPath = ["lib/projects.ts", "lib/projects.js"].map((p) => path.join(dir, p));
-  mod = await import(pathToFileURL(projectsPath[0]).href);
+  mod = await import(pathToFileURL(path.join(dir, "lib/projects.ts")).href);
   if (typeof mod.projectViewRevision !== "function" || typeof mod.projectView !== "function") {
     throw new Error("projectViewRevision/projectView not exported by lib/projects.ts");
   }
+  for (const m of ["DirectorProject", "DirectorOrder", "DirectorJob", "DirectorCreditReservation"]) {
+    if (!models[m]) throw new Error(`exact schema model ${m} missing`);
+  }
   revision = () => mod.projectViewRevision(projectId, ownerId);
 
-  const ownerModel = ["User", "Owner", "Account"].find((n) => models[n]);
-  if (!ownerModel) throw new Error("no User/Owner/Account model");
+  // Ownership is the scalar DirectorProject.ownerId; there is no owner table.
   ownerId = uid();
-  const owner = await create(ownerModel, { id: ownerId, ...(has(ownerModel, "email") ? { email: `${ownerId}@example.invalid` } : {}) });
-  ownerId = owner.id;
   projectId = uid();
+  const ids = { projectId, ownerId };
   const fk = (m) => {
     const o = {};
-    for (const n of ["ownerId", "userId", "createdById"]) if (has(m, n)) o[n] = ownerId;
-    if (has(m, "projectId")) o.projectId = projectId;
+    for (const n of ["ownerId", "projectId", "orderId", "jobId"]) if (has(m, n) && ids[n]) o[n] = ids[n];
     return o;
   };
-  project = await create("Project", { id: projectId, ...fk("Project") });
-  projectId = project.id;
-  const order = await create("DirectorOrder", { ...fk("DirectorOrder") });
-  const job = has("DirectorJob", "heartbeatAt")
-    ? await create("DirectorJob", { ...fk("DirectorJob"), ...(has("DirectorJob", "orderId") ? { orderId: order.id } : {}) })
-    : null;
-  var seeded = { order, job };
+  await create("DirectorProject", { id: projectId, ownerId });
+  const order = await create("DirectorOrder", fk("DirectorOrder"));
+  ids.orderId = order.id;
+  const job = await create("DirectorJob", fk("DirectorJob"));
+  ids.jobId = job.id;
+  const reservation = await create("DirectorCreditReservation", fk("DirectorCreditReservation"));
 
   const t1 = await revision();
   if (typeof t1 !== "string" || !HEX32.test(t1)) throw new Error(`token not 32 hex: ${String(t1)}`);
@@ -102,67 +100,44 @@ try {
 
   // Requote: change latest order terms only
   try {
-    if (!has("DirectorOrder", "terms")) throw new Error("DirectorOrder.terms missing");
-    const f = field("DirectorOrder", "terms");
-    const latest = await delegate("DirectorOrder").findFirst({
-      where: fk("DirectorOrder"),
-      orderBy: has("DirectorOrder", "createdAt") ? { createdAt: "desc" } : undefined,
-    });
     const tag = `requote-${uid()}`;
-    const terms = jsonVal(f, tag);
-    await delegate("DirectorOrder").update({ where: { id: latest.id }, data: { terms } });
+    const base = await revision();
+    await prisma.directorOrder.update({ where: { id: order.id }, data: { terms: jsonVal(field("DirectorOrder", "terms"), tag) } });
     const t2 = await revision();
-    const view2 = await mod.projectView(projectId, ownerId);
-    const exposed = JSON.stringify(view2).includes(tag);
-    mark("REQUOTED_TERMS_INVALIDATION", t2 !== t1 && exposed, `tokenChanged=${t2 !== t1} termsExposed=${exposed}`);
+    const exposed = JSON.stringify(await mod.projectView(projectId, ownerId)).includes(tag);
+    mark("REQUOTED_TERMS_INVALIDATION", t2 !== base && exposed, `tokenChanged=${t2 !== base} termsExposed=${exposed}`);
   } catch (e) { block("REQUOTED_TERMS_INVALIDATION", e); }
 
-  // Large JSON rendered field
+  // Large JSON rendered field: DirectorJob.planningState
   try {
-    const before = await revision();
-    let target;
-    if (has("Project", "planningState") && field("Project", "planningState").type === "Json") {
-      target = { model: "Project", where: { id: projectId }, f: "planningState" };
-    } else {
-      const m = Object.keys(models).find((n) => /Review/.test(n) && has(n, "projectId") && has(n, "payload"));
-      if (!m) throw new Error("no planningState/review payload JSON field located");
-      const row = await create(m, fk(m));
-      target = { model: m, where: { id: row.id }, f: "payload" };
-      await revision();
-    }
     const base = await revision();
-    await delegate(target.model).update({ where: target.where, data: { [target.f]: { big: "x".repeat(20000), n: uid() } } });
+    const tag = uid();
+    await prisma.directorJob.update({ where: { id: job.id }, data: { planningState: { big: "x".repeat(20000), tag } } });
     const after = await revision();
-    mark("LARGE_JSON_INVALIDATION", after !== base, `field=${target.model}.${target.f} before=${before.slice(0, 8)}`);
+    const exposed = JSON.stringify(await mod.projectView(projectId, ownerId)).includes(tag);
+    mark("LARGE_JSON_INVALIDATION", after !== base && exposed, `tokenChanged=${after !== base} planningStateExposed=${exposed}`);
   } catch (e) { block("LARGE_JSON_INVALIDATION", e); }
 
-  // Wallet / reservation
+  // Wallet / reservation metadata
   try {
-    const m = Object.keys(models).find((n) => /Reservation/.test(n) && has(n, "projectId"));
-    if (!m) throw new Error("no project reservation model found");
-    const row = await create(m, fk(m));
     const base = await revision();
-    const data = has(m, "metadata") ? { metadata: { probe: uid() } } : has(m, "amountCents") ? { amountCents: 12345 } : null;
-    if (!data) throw new Error(`no mutable metadata/amountCents on ${m}`);
-    await delegate(m).update({ where: { id: row.id }, data });
+    await prisma.directorCreditReservation.update({ where: { id: reservation.id }, data: { metadata: { probe: uid() } } });
     const after = await revision();
-    mark("WALLET_RESERVATION_INVALIDATION", after !== base, `model=${m}`);
+    mark("WALLET_RESERVATION_INVALIDATION", after !== base, `tokenChanged=${after !== base}`);
   } catch (e) { block("WALLET_RESERVATION_INVALIDATION", e); }
 
   // Heartbeat only
   try {
-    if (!seeded.job) throw new Error("DirectorJob.heartbeatAt not available");
     const base = await revision();
-    await delegate("DirectorJob").update({ where: { id: seeded.job.id }, data: { heartbeatAt: new Date(Date.now() + 60000) } });
+    await prisma.directorJob.update({ where: { id: job.id }, data: { heartbeatAt: new Date(Date.now() + 60000) } });
     const after = await revision();
     mark("HEARTBEAT_REVISION_INSENSITIVE", after === base, `unchanged=${after === base}`);
   } catch (e) { block("HEARTBEAT_REVISION_INSENSITIVE", e); }
 
-  // Wrong owner
+  // Wrong owner: a different random ownerId string
   try {
-    const other = await create(ownerModel, { id: uid(), ...(has(ownerModel, "email") ? { email: `${uid()}@example.invalid` } : {}) });
     let leaked;
-    try { leaked = await mod.projectViewRevision(projectId, other.id); } catch { leaked = null; }
+    try { leaked = await mod.projectViewRevision(projectId, uid()); } catch { leaked = null; }
     mark("OWNER_AUTH_BOUNDARY_SQL", !(typeof leaked === "string" && HEX32.test(leaked)), "wrong owner receives no token");
   } catch (e) { block("OWNER_AUTH_BOUNDARY_SQL", e); }
 } catch (e) {
