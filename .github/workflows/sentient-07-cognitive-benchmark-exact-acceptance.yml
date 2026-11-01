@@ -1,0 +1,289 @@
+name: SENTIENT-07 Cognitive Benchmark Exact-SHA Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Initialize fail-closed receipt
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/cognitive-acceptance"
+          cat >"$RUNNER_TEMP/cognitive-acceptance/receipt.env" <<'EOF'
+          SOURCE_SHA=58e390f69bedb24716d5c1b58cf8cf2df2bd7715
+          SOURCE_TREE=95d1e718a4e48e9f74f5caeeb4ed5ea00c965bba
+          BASE_SHA=67b5f7f6bbac14dbf991e444947912deba2bdc3e
+          BASE_TREE=b98721a024b70f7490c9cebc6ae150d3a17c5dd0
+          EXACT_SOURCE_SCOPE=FAIL
+          PRODUCTION_ROUTING_BLOBS_UNCHANGED=FAIL
+          EFFECTIVE_CAPABILITY_IDENTITY=FAIL
+          EXECUTION_TIME_FRESHNESS=FAIL
+          DEPRECATION_FAIL_CLOSED=FAIL
+          PROFILE_CHANGE_FAIL_CLOSED=FAIL
+          TARGET_EXCLUSION_VISIBLE=FAIL
+          REASONING_LEVELS_NOT_INFERRED=FAIL
+          NEGATIVE_AUTHORITY_CONTROL=FAIL
+          EVIDENCE_PROVENANCE=FAIL
+          WALL_CLOCK_DETERMINISM=FAIL
+          SYNTHETIC_RESULTS_NOT_MODEL_RANKING=FAIL
+          TYPECHECK=FAIL
+          TESTS=FAIL
+          LAB_TESTS=FAIL
+          TRACKED_SOURCE_MUTATION=unknown
+          MODEL_ROUTING_POLICY_CHANGED=unknown
+          MODEL_OUTPUT_IS_NEVER_AUTHORITY=unknown
+          SENTIENT_IS_AUTHORITATIVE=unknown
+          GOVERNOR_GOVERNS_EFFECTS=unknown
+          NO_HIDDEN_CHAIN_OF_THOUGHT_CAPTURE=unknown
+          AUTHORITY_EXPANSION=unknown
+          RESOURCE_EXPANSION=unknown
+          POLICY_WEAKENING=unknown
+          PRODUCTION_DEPLOYMENT_AUTHORIZED=false
+          PROVIDER_ACCOUNT_MUTATION_AUTHORIZED=false
+          EOF
+
+      - name: Checkout exact private Sentient candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: 58e390f69bedb24716d5c1b58cf8cf2df2bd7715
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: sentient
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify source, build, typecheck, and fixture tests
+        working-directory: sentient
+        shell: bash
+        run: |
+          set +e
+          receipt="$RUNNER_TEMP/cognitive-acceptance/receipt.env"
+          failed=0
+          source_sha=58e390f69bedb24716d5c1b58cf8cf2df2bd7715
+          source_tree=95d1e718a4e48e9f74f5caeeb4ed5ea00c965bba
+          base_sha=67b5f7f6bbac14dbf991e444947912deba2bdc3e
+          base_tree=b98721a024b70f7490c9cebc6ae150d3a17c5dd0
+
+          set_receipt() {
+            key="$1"
+            value="$2"
+            if grep -q "^${key}=" "$receipt"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$receipt"
+            else
+              echo "${key}=${value}" >>"$receipt"
+            fi
+          }
+
+          check() {
+            key="$1"
+            shift
+            if "$@"; then
+              set_receipt "$key" PASS
+              echo "$key=PASS"
+            else
+              set_receipt "$key" FAIL
+              echo "$key=FAIL"
+              failed=1
+            fi
+          }
+
+          verify_source() {
+            test "$(git rev-parse HEAD)" = "$source_sha" &&
+              test "$(git rev-parse 'HEAD^{tree}')" = "$source_tree" &&
+              test "$(git rev-parse "${base_sha}^{tree}")" = "$base_tree" &&
+              git merge-base --is-ancestor "$base_sha" "$source_sha"
+          }
+
+          verify_scope() {
+            actual="$(git diff --no-renames --name-only "$base_sha" "$source_sha" | LC_ALL=C sort)"
+            expected="$(printf '%s\n' \
+              README.md \
+              src/lab/cognitive-benchmark.ts \
+              src/lab/index.ts \
+              test/lab/cognitive-benchmark.test.ts | LC_ALL=C sort)"
+            test "$actual" = "$expected"
+          }
+
+          verify_production_blobs() {
+            for path in \
+              src/runtime/sentient-runtime.ts \
+              src/model/model-adapter.ts \
+              src/application/production-collaboration.ts; do
+              test "$(git rev-parse "$base_sha:$path")" = \
+                "$(git rev-parse "$source_sha:$path")" || return 1
+            done
+          }
+
+          check SOURCE_IDENTITY verify_source
+          check EXACT_SOURCE_SCOPE verify_scope
+          if [ "$(grep '^EXACT_SOURCE_SCOPE=' "$receipt" | tail -1 | cut -d= -f2)" = PASS ]; then
+            set_receipt EXACT_SOURCE_SCOPE \
+              "PASS:README.md,src/lab/cognitive-benchmark.ts,src/lab/index.ts,test/lab/cognitive-benchmark.test.ts"
+          fi
+          check PRODUCTION_ROUTING_BLOBS_UNCHANGED verify_production_blobs
+
+          if [ "$failed" -eq 0 ]; then
+            run_step() {
+              key="$1"
+              shift
+              echo "::group::$key"
+              "$@"
+              status=$?
+              echo "::endgroup::"
+              if [ "$status" -eq 0 ]; then
+                set_receipt "$key" PASS
+                echo "$key=PASS"
+                return 0
+              fi
+              set_receipt "$key" FAIL
+              echo "$key=FAIL (exit $status)"
+              failed=1
+              return "$status"
+            }
+
+            if run_step NPM_CI npm ci && run_step BUILD npm run build; then
+              if node -e "process.exit(require('./package.json').scripts?.typecheck ? 0 : 1)"; then
+                run_step TYPECHECK npm run typecheck
+              else
+                run_step TYPECHECK ./node_modules/.bin/tsc --noEmit
+              fi
+              typecheck_status=$?
+              if [ "$typecheck_status" -eq 0 ]; then
+                set_receipt TYPECHECK PASS
+                run_step TESTS env -i PATH="$PATH" HOME="$HOME" CI=true NODE_ENV=test node --test \
+                  dist/test/lab/cognitive-benchmark.test.js
+                focused_status=$?
+                run_step LAB_TESTS env -i PATH="$PATH" HOME="$HOME" CI=true NODE_ENV=test bash -c '
+                  set -euo pipefail
+                  focused=dist/test/lab/cognitive-benchmark.test.js
+                  test -f "$focused"
+                  mapfile -t tests < <(
+                    find dist -type f -name "*.test.js" |
+                      grep -Ei "/lab/|benchmark|model[-_]?adapter|adapter.*model" |
+                      sort
+                  )
+                  ((${#tests[@]} > 1))
+                  node --test "${tests[@]}"
+                '
+                related_status=$?
+                if [ "$focused_status" -ne 0 ] || [ "$related_status" -ne 0 ]; then
+                  failed=1
+                fi
+              else
+                set_receipt TYPECHECK FAIL
+              fi
+            fi
+          fi
+
+          gate_output="$(python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path("src/lab/cognitive-benchmark.ts").read_text().lower()
+          tests = Path("test/lab/cognitive-benchmark.test.ts").read_text().lower()
+          readme = Path("README.md").read_text().lower()
+
+          def tested(*terms):
+              return all(term in tests for term in terms)
+
+          def implemented(*terms):
+              return all(term in source for term in terms)
+
+          def emit(key, ok):
+              print(f"{key}={'PASS' if ok else 'FAIL'}")
+              if not ok:
+                  raise SystemExit(1)
+
+          gates = [
+              ("EFFECTIVE_CAPABILITY_IDENTITY",
+                  tested("requiredmodelcapabilities", "reasoning_effort", "digest", "identity")
+                  and implemented("requiredmodelcapabilities", "reasoning_effort", "digest")),
+              ("EXECUTION_TIME_FRESHNESS", tested("stale", "execution") and ("fresh" in source or "stale" in source)),
+              ("DEPRECATION_FAIL_CLOSED", tested("deprecat", "execution") and "deprecat" in source),
+              ("PROFILE_CHANGE_FAIL_CLOSED",
+                  tested("profile", "digest")
+                  and bool(re.search(r"profile.{0,80}(drift|change|mismatch)", tests))
+                  and "profile" in source and "digest" in source),
+              ("TARGET_EXCLUSION_VISIBLE",
+                  tested("status", "reason") and ("unsupported" in tests or "blocked" in tests)
+                  and ("status" in source or "reason" in source)),
+              ("REASONING_LEVELS_NOT_INFERRED",
+                  tested("reasoning", "low", "high") and ("profile" in tests or "evidence" in tests)
+                  and "reasoning" in source and "profile" in source),
+              ("NEGATIVE_AUTHORITY_CONTROL",
+                  tested("self-authoriz", "verif") and ("proposal" in tests or "consequential" in tests)
+                  and "verif" in source),
+              ("EVIDENCE_PROVENANCE", all(term in tests for term in (
+                  "fixture", "source", "execution", "digest", "profile", "eligibility", "verifier",
+                  "token", "latency", "cost", "response", "hidden", "persist",
+              )) and all(term in source for term in ("digest", "profile", "eligibility"))),
+              ("WALL_CLOCK_DETERMINISM",
+                  ("asof" in tests or "clock" in tests)
+                  and ("asof" in source or "clock" in source)),
+              ("SYNTHETIC_RESULTS_NOT_MODEL_RANKING",
+                  ("fixture-runtime" in readme or "fixture runtime" in readme)
+                  and "harness validation" in readme
+                  and "live" in readme and "comparative" in readme
+                  and "separat" in readme and "run" in readme),
+          ]
+          for gate, result in gates:
+              emit(gate, result)
+          PY
+          )"
+          gate_status=$?
+          while IFS='=' read -r key value; do
+            [ -n "$key" ] && set_receipt "$key" "$value"
+          done <<<"$gate_output"
+          if [ "$gate_status" -ne 0 ]; then
+            failed=1
+          fi
+
+          set_receipt PRODUCTION_DEPLOYMENT_AUTHORIZED false
+          set_receipt PROVIDER_ACCOUNT_MUTATION_AUTHORIZED false
+
+          if verify_source && verify_scope && verify_production_blobs; then
+            set_receipt MODEL_ROUTING_POLICY_CHANGED false
+            set_receipt AUTHORITY_EXPANSION false
+            set_receipt RESOURCE_EXPANSION false
+            set_receipt POLICY_WEAKENING false
+            set_receipt SENTIENT_IS_AUTHORITATIVE true
+            set_receipt GOVERNOR_GOVERNS_EFFECTS true
+            if grep -q '^NEGATIVE_AUTHORITY_CONTROL=PASS$' "$receipt"; then
+              set_receipt MODEL_OUTPUT_IS_NEVER_AUTHORITY true
+            fi
+            if grep -q '^EVIDENCE_PROVENANCE=PASS$' "$receipt"; then
+              set_receipt NO_HIDDEN_CHAIN_OF_THOUGHT_CAPTURE true
+            fi
+          fi
+
+          if verify_source && verify_scope && verify_production_blobs &&
+            test -z "$(git status --porcelain --untracked-files=no)"; then
+            set_receipt TRACKED_SOURCE_MUTATION false
+          else
+            set_receipt TRACKED_SOURCE_MUTATION true
+            failed=1
+          fi
+
+          echo "OVERALL_EXIT=$failed" >>"$receipt"
+          cat "$receipt"
+          exit "$failed"
+
+      - name: Upload acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentient-07-cognitive-benchmark-58e390f
+          path: ${{ runner.temp }}/cognitive-acceptance/receipt.env
+          if-no-files-found: error
+          retention-days: 30
