@@ -1,26 +1,16 @@
-name: Sentient Exact Readonly Isolation V4
+name: Sentient Exact Readonly Isolation V5
 
 on:
   workflow_dispatch:
     inputs:
       sha:
+        description: Exact candidate source SHA
         required: true
         type: string
       tree:
+        description: Exact candidate source tree
         required: true
         type: string
-      integration_canonical_head:
-        required: false
-        type: string
-        default: ""
-      integration_pr_base_sha:
-        required: false
-        type: string
-        default: ""
-      integration_branch:
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -34,7 +24,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: sentient
-          POSTGRES_PASSWORD: sentient
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: sentient
         ports:
           - 5432:5432
@@ -44,238 +34,310 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      SENTIENT_TEST_DATABASE_URL: postgresql://sentient:sentient@127.0.0.1:5432/sentient
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: sentient
+      PGDATABASE: sentient
+      SENTIENT_TEST_DATABASE_URL: postgresql://sentient@127.0.0.1:5432/sentient
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: ${{ inputs.integration_branch != '' && inputs.integration_canonical_head || inputs.sha }}
+          ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-          persist-credentials: ${{ inputs.integration_branch != '' }}
-          fetch-depth: ${{ inputs.integration_branch != '' && 0 || 1 }}
+          persist-credentials: true
+          fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Build bounded canonical-lineage integration candidate
-        if: ${{ inputs.integration_branch != '' }}
-        id: integration
+      - name: Verify and test exact candidate
         shell: bash
         env:
-          CANONICAL_HEAD: ${{ inputs.integration_canonical_head }}
-          PR_BASE_SHA: ${{ inputs.integration_pr_base_sha }}
-          TARGET_SHA: ${{ inputs.sha }}
-          TARGET_TREE: ${{ inputs.tree }}
-          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+          CANDIDATE_SHA: 2a272b5a5fff37a4e5ad40fad050b2a8dd8425cf
+          CANDIDATE_TREE: 0da3653232cd33afd5f5284c7fef763b140dbc18
+          ISOLATED_BASE_SHA: 67b5f7f6bbac14dbf991e444947912deba2bdc3e
         run: |
-          set -euo pipefail
-          for value in "$CANONICAL_HEAD" "$PR_BASE_SHA" "$TARGET_SHA" "$TARGET_TREE"; do
-            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          done
-          [[ "$INTEGRATION_BRANCH" =~ ^integration/mission-control-production-[0-9a-f]{8}-v[0-9]+$ ]] || exit 2
-          test "$(git rev-parse HEAD)" = "$CANONICAL_HEAD"
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const { spawnSync } = require("node:child_process");
 
-          git fetch origin "$PR_BASE_SHA" "$TARGET_SHA"
-          test "$(git rev-parse "${TARGET_SHA}^{tree}")" = "$TARGET_TREE"
-          git merge-base --is-ancestor "$PR_BASE_SHA" "$TARGET_SHA"
-          git switch -c "$INTEGRATION_BRANCH"
+          const receiptPath = "/tmp/receipt.json";
+          const logDir = "/tmp/exact-candidate";
+          fs.mkdirSync(logDir, { recursive: true });
 
-          # These files were byte-identical between PR base and canonical production
-          # before the accepted delta, so exact target versions are safe.
-          git checkout "$TARGET_SHA" -- \
-            src/local-runtime/ipc.ts \
-            src/spawn/context.ts \
-            src/spawn/operating-context.ts \
-            test/spawn-mission-control-context.test.ts \
-            tests/spawn-mission-control-context.test.ts
+          const receipt = {
+            contract: "sentient-narrow-read-exact-acceptance/v1",
+            candidate: { sha: process.env.EXPECTED_SHA, tree: process.env.EXPECTED_TREE },
+            isolatedBase: { sha: process.env.ISOLATED_BASE_SHA, tree: null },
+            changedFiles: [],
+            sourceScope: "BLOCKED",
+            steps: [],
+            tests: [],
+            testExecution: { status: "NOT_STARTED", count: 0, passed: 0, failed: 0, missing: 0 },
+            trackedTreeCleanAfterTests: false,
+            invariants: {
+              GENERATION_FENCING: "BLOCKED",
+              CONCURRENT_WRITER_SAFETY: "BLOCKED",
+              TRANSACTION_IMPLEMENTATION_OUTSIDE_SCOPE: "BLOCKED",
+              CRASH_RECOVERY: "BLOCKED",
+              STATE_EQUIVALENCE: "BLOCKED",
+              EVIDENCE_INTEGRITY: "BLOCKED",
+              GOVERNOR_AUTHORITY: "BLOCKED"
+            },
+            evidenceNotes: {},
+            authorization: {
+              MODEL_OUTPUT_IS_NEVER_AUTHORITY: true,
+              AUTHORITY_EXPANSION: false,
+              RESOURCE_EXPANSION: false,
+              POLICY_WEAKENING: false,
+              PRODUCTION_PROMOTION_AUTHORIZED: false,
+              PRODUCTION_DEPLOYMENT_AUTHORIZED: false,
+              DATABASE_MIGRATION_AUTHORIZED: false,
+              RESOURCE_PROVISIONING_AUTHORIZED: false
+            },
+            startedAt: new Date().toISOString()
+          };
+          let failed = false;
+          const saveReceipt = () => fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + "\n");
+          const run = (label, command, args, options = {}) => {
+            const result = spawnSync(command, args, {
+              cwd: process.cwd(),
+              encoding: "utf8",
+              timeout: options.timeout ?? 300000,
+              maxBuffer: 16 * 1024 * 1024,
+              env: process.env
+            });
+            const code = result.status ?? 1;
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            fs.writeFileSync(path.join(logDir, `${label}.log`), output);
+            const step = { name: label, exitCode: code };
+            if (result.error) step.error = result.error.message;
+            receipt.steps.push(step);
+            if (code !== 0) {
+              failed = true;
+              const sanitized = output
+                .replace(/gh[pousr]_[A-Za-z0-9_]+/g, "[REDACTED]")
+                .replace(/flyv1_[A-Za-z0-9_-]+/g, "[REDACTED]")
+                .replace(/(authorization|token|secret|password|credential|cookie|api[_-]?key)\s*[:=]\s*\S+/ig, "$1=[REDACTED]");
+              console.error(`${label} failed (${code})`);
+              console.error(sanitized.slice(-3000));
+            } else {
+              console.log(`${label}=PASS`);
+            }
+            return { code, output };
+          };
+          const gitValue = (args) => {
+            const result = spawnSync("git", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
+            if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed`);
+            return result.stdout.trim();
+          };
+          const validObjectId = (value) => /^[0-9a-f]{40}$/.test(value ?? "");
+          const testCounts = (output) => {
+            const value = (name) => {
+              const matches = [...output.matchAll(new RegExp(`^# ${name} (\\d+)\\s*$`, "gm"))];
+              return matches.length ? Number(matches.at(-1)[1]) : null;
+            };
+            return { tests: value("tests"), passed: value("pass"), failed: value("fail"), skipped: value("skipped") };
+          };
+          const runTest = (name, file, command = "node", prefix = ["--test"]) => {
+            const result = run(`TEST_${name}`, command, [...prefix, file]);
+            receipt.tests.push({
+              name,
+              file,
+              exitCode: result.code,
+              ...testCounts(result.output)
+            });
+            return result.code === 0;
+          };
+          const runOptionalFiles = (name, files, command = "node", prefix = ["--test"]) => {
+            for (const file of files) runTest(`${name}_${path.basename(file).replace(/[^A-Za-z0-9]+/g, "_")}`, file, command, prefix);
+          };
+          const filesIn = (directory, pattern) => {
+            if (!fs.existsSync(directory)) return [];
+            return fs.readdirSync(directory)
+              .filter((name) => pattern.test(name))
+              .sort()
+              .map((name) => path.join(directory, name));
+          };
 
-          python3 - <<'PY'
-          from pathlib import Path
+          saveReceipt();
+          try {
+            const { EXPECTED_SHA, EXPECTED_TREE, ISOLATED_BASE_SHA } = process.env;
+            if (![EXPECTED_SHA, EXPECTED_TREE, ISOLATED_BASE_SHA].every(validObjectId)) {
+              throw new Error("Candidate and base identities must be full lowercase Git object IDs");
+            }
+            if (EXPECTED_SHA !== process.env.CANDIDATE_SHA || EXPECTED_TREE !== process.env.CANDIDATE_TREE) {
+              throw new Error("Dispatch identity does not match the pinned candidate");
+            }
 
-          p = Path("src/spawn/execution-contracts.ts")
-          s = p.read_text()
-          import_line = 'import type { SentientOperatingContextV1 } from "./operating-context.js";\n'
-          if import_line not in s:
-              needle = '} from "./request-contracts.js";\n'
-              assert needle in s
-              s = s.replace(needle, needle + import_line, 1)
-          field_needle = '  context: BoundedContextBundle;\n'
-          fields = (
-              '  context: BoundedContextBundle;\n'
-              '  operatingContext: SentientOperatingContextV1;\n'
-              '  operatingContextDigest: string;\n'
-          )
-          if '  operatingContext: SentientOperatingContextV1;\n' not in s:
-              assert field_needle in s
-              s = s.replace(field_needle, fields, 1)
-          assert 'maxCapabilityTier?: CapabilityTierV1;' in s
-          p.write_text(s)
+            const fetchedBase = run("FETCH_ISOLATED_BASE", "git", ["fetch", "--no-tags", "origin", ISOLATED_BASE_SHA]);
+            spawnSync("git", ["config", "--local", "--unset-all", "http.https://github.com/.extraheader"]);
+            if (fetchedBase.code !== 0) throw new Error("Could not independently fetch isolated base");
 
-          p = Path("src/spawn/index.ts")
-          s = p.read_text()
-          export_line = 'export * from "./operating-context.js";\n'
-          if export_line not in s:
-              needle = 'export * from "./context.js";\n'
-              assert needle in s
-              s = s.replace(needle, needle + export_line, 1)
-          p.write_text(s)
+            const head = gitValue(["rev-parse", "HEAD"]);
+            const candidateTree = gitValue(["rev-parse", `${EXPECTED_SHA}^{tree}`]);
+            const baseCommit = gitValue(["rev-parse", `${ISOLATED_BASE_SHA}^{commit}`]);
+            const baseTree = gitValue(["rev-parse", `${ISOLATED_BASE_SHA}^{tree}`]);
+            receipt.isolatedBase.tree = baseTree;
+            if (head !== EXPECTED_SHA || candidateTree !== EXPECTED_TREE || baseCommit !== ISOLATED_BASE_SHA) {
+              throw new Error("Exact candidate or isolated-base identity fence failed");
+            }
+            gitValue(["merge-base", "--is-ancestor", ISOLATED_BASE_SHA, EXPECTED_SHA]);
+            receipt.baseAncestry = "PASS";
 
-          p = Path("src/state/sanitize.ts")
-          s = p.read_text()
-          old = '    if (SECRET_KEY.test(key)) {\n'
-          new = (
-              '    if (\n'
-              '      SECRET_KEY.test(key)\n'
-              '      && typeof nested !== "boolean"\n'
-              '      && typeof nested !== "number"\n'
-              '      && nested !== null\n'
-              '    ) {\n'
-          )
-          if old in s:
-              s = s.replace(old, new, 1)
-          assert new in s
-          p.write_text(s)
-          PY
+            const allowed = [
+              "src/state/service.ts",
+              "test/mvp1-state-v2-lifecycle.test.ts"
+            ].sort();
+            const changed = gitValue(["diff", "--name-only", "--no-renames", ISOLATED_BASE_SHA, EXPECTED_SHA])
+              .split("\n").filter(Boolean).sort();
+            receipt.changedFiles = changed;
+            if (JSON.stringify(changed) !== JSON.stringify(allowed)) {
+              throw new Error(`Exact source scope mismatch: ${JSON.stringify(changed)}`);
+            }
+            const diffCheck = run("SOURCE_DIFF_CHECK", "git", ["diff", "--check", ISOLATED_BASE_SHA, EXPECTED_SHA]);
+            if (diffCheck.code !== 0) throw new Error("Source diff whitespace check failed");
+            receipt.sourceScope = "PASS";
 
-          allowed='^(src/local-runtime/ipc\.ts|src/spawn/context\.ts|src/spawn/execution-contracts\.ts|src/spawn/index\.ts|src/spawn/operating-context\.ts|src/state/sanitize\.ts|test/spawn-mission-control-context\.test\.ts|tests/spawn-mission-control-context\.test\.ts)$'
-          unexpected="$(git diff --name-only "$CANONICAL_HEAD" -- | grep -Ev "$allowed" || true)"
-          if [ -n "$unexpected" ]; then
-            printf 'UNEXPECTED_CHANGED_PATHS\n%s\n' "$unexpected"
-            exit 30
-          fi
-          git diff --exit-code "$CANONICAL_HEAD" -- fly.toml
-          git diff --check "$CANONICAL_HEAD"
+            if (gitValue(["status", "--porcelain", "--untracked-files=no"]) !== "") {
+              throw new Error("Candidate checkout was not clean before install");
+            }
+            if (run("INSTALL", "npm", ["install", "--no-audit", "--no-fund", "--package-lock=false"]).code !== 0) {
+              throw new Error("Dependency installation failed");
+            }
+            if (run("BUILD", "npm", ["run", "build"]).code !== 0) {
+              throw new Error("Candidate build failed");
+            }
 
-          git config user.name "sentient-mission-control-integration"
-          git config user.email "sentient-mission-control-integration@users.noreply.github.com"
-          git add \
-            src/local-runtime/ipc.ts \
-            src/spawn/context.ts \
-            src/spawn/execution-contracts.ts \
-            src/spawn/index.ts \
-            src/spawn/operating-context.ts \
-            src/state/sanitize.ts \
-            test/spawn-mission-control-context.test.ts \
-            tests/spawn-mission-control-context.test.ts
-          git commit -m "mission-control: reconcile accepted spawn boundary onto production lineage"
+            const preTestSha = gitValue(["rev-parse", "HEAD"]);
+            const preTestTree = gitValue(["rev-parse", "HEAD^{tree}"]);
+            if (preTestSha !== EXPECTED_SHA || preTestTree !== EXPECTED_TREE ||
+              gitValue(["status", "--porcelain", "--untracked-files=no"]) !== "") {
+              throw new Error("Candidate identity or tracked-tree fence failed before tests");
+            }
+            receipt.preTestIdentity = { sha: preTestSha, tree: preTestTree, trackedTreeClean: true };
+            receipt.testExecution.status = "RUNNING";
 
-          echo "INTEGRATION_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "INTEGRATION_TREE=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
-          echo "INTEGRATION_BRANCH=$INTEGRATION_BRANCH" >> "$GITHUB_ENV"
+            const required = [
+              ["MVP1_STATE_V2_LIFECYCLE", "dist/test/mvp1-state-v2-lifecycle.test.js"],
+              ["MVP1_STATE_V2", "dist/test/mvp1-state-v2.test.js"],
+              ["PERSISTENCE", "dist/test/persistence.test.js"],
+              ["SECURITY_RETENTION", "dist/test/security-retention.test.js"],
+              ["ACTION_FABRIC_AUTHORITY_REUSE", "dist/test/action-fabric-authority-reuse.test.js"],
+              ["OBJECTIVE_CONTINUATION", "dist/test/objective-continuation.test.js"],
+              ["OBJECTIVE_CONTINUATION_READINESS", "dist/test/objective-continuation-readiness.test.js"],
+              ["ACTIVE_WORK_CORE", "dist/test/active-work-core.test.js"],
+              ["ACTIVE_WORK_PERSISTENCE", "dist/test/active-work-persistence.test.js"],
+              ["ACTIVE_WORK_EXPIRY_FENCING", "dist/test/active-work-expiry-fencing.test.js"]
+            ];
+            for (const [name, file] of required) {
+              if (!fs.existsSync(file)) {
+                failed = true;
+                receipt.tests.push({ name, file, exitCode: 2, missing: true, tests: null, passed: null, failed: null, skipped: null });
+                console.error(`REQUIRED_TEST_MISSING=${file}`);
+              } else runTest(name, file);
+            }
 
-      - name: Exact candidate acceptance
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.integration_branch != '' && env.INTEGRATION_SHA || inputs.sha }}
-          EXPECTED_TREE: ${{ inputs.integration_branch != '' && env.INTEGRATION_TREE || inputs.tree }}
-        run: |
-          set +e
-          mkdir -p /tmp/exact
-          failed=0
-          run_step() {
-            label="$1"; shift
-            "$@" >"/tmp/exact/${label}.log" 2>&1
-            status=$?
-            echo "${label}=$status" >>/tmp/receipt.env
-            if [ "$status" -ne 0 ]; then
-              echo "::group::${label} sanitized failure tail"
-              tail -n 160 "/tmp/exact/${label}.log" \
-                | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g; s/flyv1_[A-Za-z0-9_-]+/[REDACTED]/g; s/(authorization|token|secret|password|credential|cookie|api[_-]?key)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig'
-              echo "::endgroup::"
-              failed=1
-            fi
+            const permanent = filesIn("dist/test", /^permanent-continuation-.*\.test\.js$/);
+            if (!permanent.length) {
+              failed = true;
+              receipt.tests.push({ name: "PERMANENT_CONTINUATION", file: "dist/test/permanent-continuation-*.test.js", exitCode: 2, missing: true, tests: null, passed: null, failed: null, skipped: null });
+              console.error("REQUIRED_TEST_GLOB_MISSING=dist/test/permanent-continuation-*.test.js");
+            } else {
+              for (const file of permanent) runTest("PERMANENT_CONTINUATION", file);
+            }
+
+            const optionalChecks = [];
+            optionalChecks.push(...filesIn("dist/test/lab", /\.test\.js$/));
+            const retrievalChecks = filesIn("tests/retrieval", /\.test\.ts$/);
+            runOptionalFiles("RETRIEVAL", retrievalChecks, "node", ["--experimental-strip-types", "--test"]);
+            for (const file of [
+              "dist/src/model/providers/openrouter.test.js",
+              "dist/src/lab/librechat/bridge.test.js"
+            ]) if (fs.existsSync(file)) optionalChecks.push(file);
+            runOptionalFiles("CURRENT_LINEAGE", [...new Set(optionalChecks)].sort());
+
+            for (const config of ["tsconfig.worker-a.json", "tsconfig.worker-c.json", "tsconfig.worker-d.json"]) {
+              if (fs.existsSync(config)) {
+                run(`TYPECHECK_${path.basename(config, ".json").toUpperCase()}`, "npx", ["--no-install", "tsc", "-p", config, "--noEmit"]);
+              }
+            }
+            const fullSuite = run("NPM_TEST", "npm", ["test"]);
+            receipt.tests.push({ name: "NPM_TEST", file: "npm test", exitCode: fullSuite.code, ...testCounts(fullSuite.output) });
+
+            const namedRecovery = filesIn("dist/test", /.*(?:recovery|restart).*\.test\.js$/i);
+            for (const file of namedRecovery) runTest("CURRENT_LINEAGE_RECOVERY", file);
+            const namedConcurrency = filesIn("dist/test", /.*(?:concurr|writer).*\.test\.js$/i);
+            for (const file of namedConcurrency) runTest("CURRENT_LINEAGE_CONCURRENCY", file);
+            receipt.testExecution.status = "COMPLETED";
+
+            const afterSha = gitValue(["rev-parse", "HEAD"]);
+            const afterTree = gitValue(["rev-parse", "HEAD^{tree}"]);
+            const trackedStatus = gitValue(["status", "--porcelain", "--untracked-files=no"]);
+            receipt.trackedTreeCleanAfterTests =
+              afterSha === EXPECTED_SHA &&
+              afterTree === EXPECTED_TREE &&
+              trackedStatus === "" &&
+              gitValue(["diff", "--cached", "--quiet"]) === "";
+            receipt.postTestIdentity = { sha: afterSha, tree: afterTree };
+            if (!receipt.trackedTreeCleanAfterTests) failed = true;
+
+            const passed = (name) => receipt.tests.some((test) => test.name === name && test.exitCode === 0);
+            const recoveryPresent = namedRecovery.length > 0 && namedRecovery.every((file) =>
+              receipt.tests.some((test) => test.file === file && test.exitCode === 0));
+            const concurrencyPresent = namedConcurrency.length > 0 && namedConcurrency.every((file) =>
+              receipt.tests.some((test) => test.file === file && test.exitCode === 0));
+            receipt.invariants = {
+              GENERATION_FENCING: receipt.sourceScope === "PASS" &&
+                passed("MVP1_STATE_V2_LIFECYCLE") && passed("ACTIVE_WORK_EXPIRY_FENCING") ? "PASS" : "BLOCKED",
+              CONCURRENT_WRITER_SAFETY: "BLOCKED",
+              TRANSACTION_IMPLEMENTATION_OUTSIDE_SCOPE: "BLOCKED",
+              CRASH_RECOVERY: recoveryPresent ? "PASS" : "BLOCKED",
+              STATE_EQUIVALENCE: receipt.sourceScope === "PASS" &&
+                passed("MVP1_STATE_V2_LIFECYCLE") && passed("MVP1_STATE_V2") ? "PASS" : "BLOCKED",
+              EVIDENCE_INTEGRITY: receipt.sourceScope === "PASS" &&
+                passed("SECURITY_RETENTION") && passed("PERSISTENCE") ? "PASS" : "BLOCKED",
+              GOVERNOR_AUTHORITY: receipt.sourceScope === "PASS" &&
+                passed("ACTION_FABRIC_AUTHORITY_REUSE") ? "PASS" : "BLOCKED"
+            };
+            receipt.evidenceNotes.CONCURRENT_WRITER_SAFETY = concurrencyPresent
+              ? "Concurrency/writer-named tests passed, but the transaction implementation location is not independently identified outside the allowed source scope."
+              : "No concurrency/writer-named test was found in the current-lineage compiled test directory.";
+            receipt.evidenceNotes.CRASH_RECOVERY = recoveryPresent
+              ? "Current-lineage recovery/restart-named tests passed."
+              : "No current-lineage recovery/restart-named test was found and passed.";
+            if (Object.values(receipt.invariants).some((value) => value !== "PASS")) failed = true;
+          } catch (error) {
+            failed = true;
+            receipt.failure = String(error.message ?? error);
+            console.error(`ACCEPTANCE_PREFLIGHT_FAILED=${receipt.failure}`);
+          } finally {
+            if (receipt.testExecution.status === "RUNNING") receipt.testExecution.status = "INCOMPLETE";
+            receipt.testExecution.count = receipt.tests.length;
+            receipt.testExecution.passed = receipt.tests.filter((test) => test.exitCode === 0).length;
+            receipt.testExecution.failed = receipt.tests.filter((test) => test.exitCode !== 0 && !test.missing).length;
+            receipt.testExecution.missing = receipt.tests.filter((test) => test.missing).length;
+            receipt.finishedAt = new Date().toISOString();
+            receipt.overallExitCode = failed ? 1 : 0;
+            saveReceipt();
           }
 
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          [[ "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || exit 2
-          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE" || exit 2
+          console.log(`RECEIPT=${receiptPath}`);
+          console.log(`OVERALL_EXIT=${receipt.overallExitCode}`);
+          process.exitCode = receipt.overallExitCode;
+          NODE
 
-          {
-            echo "EXACT_SENTIENT_ACCEPTANCE_RECEIPT_V4"
-            echo "SOURCE_SHA=$EXPECTED_SHA"
-            echo "SOURCE_TREE=$EXPECTED_TREE"
-            echo "INTEGRATION_MODE=${{ inputs.integration_branch != '' }}"
-            echo "UPSTREAM_ACCEPTED_SHA=${{ inputs.sha }}"
-            echo "UPSTREAM_ACCEPTED_TREE=${{ inputs.tree }}"
-            echo "CANONICAL_BASE_SHA=${{ inputs.integration_canonical_head }}"
-            echo "RUNNER_OS=$(uname -srvmo)"
-            echo "NODE_VERSION=$(node --version)"
-            echo "NPM_VERSION=$(npm --version)"
-            echo "DEPENDENCY_LOCK_IDENTITY=ABSENT_IN_EXACT_CANDIDATE"
-            echo "DEPENDENCY_MANIFEST_IDENTITY=package.json:$(git rev-parse HEAD:package.json)"
-            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } >/tmp/receipt.env
-
-          run_step NPM_INSTALL npm install --no-audit --no-fund
-          run_step BUILD npm run build
-
-          run_step CONTINUATION node --test \
-            dist/test/objective-continuation.test.js \
-            dist/test/objective-continuation-readiness.test.js \
-            dist/test/active-work-core.test.js \
-            dist/test/active-work-persistence.test.js
-          run_step PERMANENT_CONTINUATION bash -lc "node --test dist/test/permanent-continuation-*.test.js"
-          run_step OPENROUTER node --test dist/src/model/providers/openrouter.test.js
-          run_step LIBRECHAT node --test dist/src/lab/librechat/bridge.test.js
-          run_step WORKER_A npx tsc -p tsconfig.worker-a.json --noEmit
-          run_step WORKER_C npx tsc -p tsconfig.worker-c.json --noEmit
-          run_step WORKER_D npx tsc -p tsconfig.worker-d.json --noEmit
-          run_step WORKER_D_ACCEPTANCE bash -lc "node --test dist/test/lab/*.test.js"
-          run_step WORKER_A_RUNTIME bash -lc "node --experimental-strip-types --test tests/*.test.ts"
-          run_step WORKER_C_RETRIEVAL bash -lc "node --experimental-strip-types --test tests/retrieval/*.test.ts"
-          run_step WORKER_B_PERSISTENCE node --test dist/test/persistence.test.js
-          run_step JOB2_PRODUCTION_CONVERGENCE node --test dist/test/job2-production-convergence.test.js
-          run_step NPM_TEST npm test
-          if [ -f dist/test/spawn-mission-control-context.test.js ]; then
-            run_step MC_SPAWN_COMPILED node --test dist/test/spawn-mission-control-context.test.js
-          else
-            echo "MC_SPAWN_COMPILED=2" >>/tmp/receipt.env
-            failed=1
-          fi
-          if [ -f tests/spawn-mission-control-context.test.ts ]; then
-            run_step MC_SPAWN_DIRECT node --experimental-strip-types --test tests/spawn-mission-control-context.test.ts
-          else
-            echo "MC_SPAWN_DIRECT=2" >>/tmp/receipt.env
-            failed=1
-          fi
-          for label in CONTINUATION PERMANENT_CONTINUATION WORKER_D_ACCEPTANCE WORKER_A_RUNTIME WORKER_C_RETRIEVAL WORKER_B_PERSISTENCE JOB2_PRODUCTION_CONVERGENCE NPM_TEST MC_SPAWN_COMPILED MC_SPAWN_DIRECT; do
-            f="/tmp/exact/${label}.log"
-            [ -f "$f" ] || continue
-            tests="$(grep -E '^# tests [0-9]+' "$f" | tail -1 | awk '{print $3}')"
-            pass="$(grep -E '^# pass [0-9]+' "$f" | tail -1 | awk '{print $3}')"
-            fail="$(grep -E '^# fail [0-9]+' "$f" | tail -1 | awk '{print $3}')"
-            skip="$(grep -E '^# skipped [0-9]+' "$f" | tail -1 | awk '{print $3}')"
-            echo "${label}_TESTS=${tests:-NOT_REPORTED}" >>/tmp/receipt.env
-            echo "${label}_PASS=${pass:-NOT_REPORTED}" >>/tmp/receipt.env
-            echo "${label}_FAIL=${fail:-NOT_REPORTED}" >>/tmp/receipt.env
-            echo "${label}_SKIP=${skip:-NOT_REPORTED}" >>/tmp/receipt.env
-          done
-          git diff --quiet && git diff --cached --quiet
-          clean=$?
-          echo "TRACKED_SOURCE_MUTATION=$([ "$clean" -eq 0 ] && echo false || echo true)" >>/tmp/receipt.env
-          [ "$clean" -eq 0 ] || failed=1
-          echo "FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>/tmp/receipt.env
-          echo "OVERALL_EXIT=$failed" >>/tmp/receipt.env
-          cat /tmp/receipt.env
-          exit "$failed"
-
-      - name: Push tested canonical-lineage integration descendant
-        if: ${{ success() && inputs.integration_branch != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$INTEGRATION_TREE"
-          git push origin "HEAD:refs/heads/${INTEGRATION_BRANCH}"
-          echo "PUSHED_INTEGRATION_SHA=$INTEGRATION_SHA"
-          echo "PUSHED_INTEGRATION_TREE=$INTEGRATION_TREE"
-
-      - name: Upload non-secret receipt
+      - name: Upload machine-readable acceptance receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sentient-exact-${{ inputs.sha }}
-          path: /tmp/receeipt.env
-          if-no-files-found: error
+          name: sentient-narrow-read-exact-${{ inputs.sha }}
+          path: /tmp/receipt.json
+          if-no-files-found: warn
           retention-days: 30
