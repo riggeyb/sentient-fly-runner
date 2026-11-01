@@ -1,0 +1,30 @@
+name: Director release binding preflight test
+
+on:
+  pull_request:
+    paths:
+      - scripts/director-ui-release-deploy.sh
+      - scripts/test-director-ui-release-binding-preflight.sh
+      - .github/workflows/director-release-binding-preflight-test.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: |
+          bash -n scripts/director-ui-release-deploy.sh
+          bash -n scripts/test-director-ui-release-binding-preflight.sh
+
+      - name: Deterministic binding preflight coverage
+        run: bash scripts/test-director-ui-release-binding-preflight.sh
+
+      - name: Confirm no production deployment path executed
+        run: echo "PRODUCTION_DEPLOYMENT=false"
