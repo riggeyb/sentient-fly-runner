@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SHA=976047b626cced9ed9c84b53ca7a8d44f8c93c6b
-TREE=2707935c55452e67e31428c26a669a03802daae7
+SHA=a6eca55db67fc03fbaf996dc1c06570593f9145f
+TREE=cd3d49ce5be866b2fd7c0212066ab2c30dea9207
 DREPO=riggeyb/director-studio-beta
-PROMO=release/director-ui-976047b6
+PROMO=release/director-hotfix-a6eca55d
 
 test "${AUTHORIZATION:-}" = "DEPLOY $SHA $TREE"
 
 export GH_TOKEN="$RUNNER_TOKEN"
 for spec in \
-  "41247702077|.github/workflows/director-ui-exact-candidate-acceptance.yml" \
-  "41248369165|.github/workflows/director-ui-exact-preview.yml" \
+  "41306921145|.github/workflows/director-chat-activity-hotfix-audit-acceptance-v1.yml" \
   "41248305081|.github/workflows/final-sentient-exact-live-runtime-audit.yml"; do
   id="${spec%%|*}"
   path="${spec#*|}"
