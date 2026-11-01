@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      EXPECTED_SHA: 280bbe94e9c4e701862d1248717117ec1f285fa0
-      EXPECTED_TREE: 04ae5c92f868c2cfa4e2546098acd5e9a8f6d998
-      EXPECTED_PARENT: 049eee5633f3e041fa9841d319dd9d5d2d407c83
+      EXPECTED_SHA: a6eca55db67fc03fbaf996dc1c06570593f9145f
+      EXPECTED_TREE: cd3d49ce5be866b2fd7c0212066ab2c30dea9207
+      EXPECTED_PARENT: 0b6d09de26b8ecc78876fbfcf1d6929a0274b70e
       EXPECTED_SCOPE_BASE: f4b838491f533bf4dc3f2e6bea6a22fdb216ce97
       NEXT_TELEMETRY_DISABLED: "1"
       CF_ACCESS_TEAM_DOMAIN: https://acceptance-placeholder.cloudflareaccess.com
@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
-          ref: 280bbe94e9c4e701862d1248717117ec1f285fa0
+          ref: a6eca55db67fc03fbaf996dc1c06570593f9145f
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
