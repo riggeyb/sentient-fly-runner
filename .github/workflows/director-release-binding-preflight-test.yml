@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - scripts/director-ui-release-deploy.sh
+      - scripts/director-ui-release-preflight.sh
       - scripts/test-director-ui-release-binding-preflight.sh
+      - scripts/test-director-ui-release-pins.sh
+      - .github/workflows/director-ui-exact-production-deploy.yml
       - .github/workflows/director-release-binding-preflight-test.yml
   workflow_dispatch:
 
@@ -21,10 +24,15 @@ jobs:
       - name: Shell syntax
         run: |
           bash -n scripts/director-ui-release-deploy.sh
+          bash -n scripts/director-ui-release-preflight.sh
           bash -n scripts/test-director-ui-release-binding-preflight.sh
+          bash -n scripts/test-director-ui-release-pins.sh
 
       - name: Deterministic binding preflight coverage
         run: bash scripts/test-director-ui-release-binding-preflight.sh
+
+      - name: Exact Director hotfix pin coverage
+        run: bash scripts/test-director-ui-release-pins.sh
 
       - name: Confirm no production deployment path executed
         run: echo "PRODUCTION_DEPLOYMENT=false"
