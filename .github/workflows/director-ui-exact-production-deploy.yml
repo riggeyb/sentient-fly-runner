@@ -53,7 +53,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: riggeyb/director-studio-beta
-          ref: 976047b626cced9ed9c84b53ca7a8d44f8c93c6b
+          ref: a6eca55db67fc03fbaf996dc1c06570593f9145f
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
