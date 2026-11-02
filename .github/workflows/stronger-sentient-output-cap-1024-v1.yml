@@ -1,13 +1,34 @@
-name: Stronger Sentient Output Cap 1024 Experiment v1
+name: Stronger Sentient Targeted Causal Experiment v1
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target_task_ids:
+        description: "Comma-separated frozen corpus task IDs"
+        required: false
+        default: "cog-v1-02,cog-v1-03,cog-v1-14"
+        type: string
+      target_max_output_tokens:
+        description: "Per-task output token ceiling"
+        required: false
+        default: "512"
+        type: string
+      target_complexity:
+        description: "Complexity signal in [0,1]"
+        required: false
+        default: "0"
+        type: string
+      target_campaign:
+        description: "Measurement campaign label"
+        required: false
+        default: "STRONGER_SENTIENT_COGNITION_LOW_512_V1"
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: stronger-sentient-output-cap-1024-v1
+  group: stronger-sentient-targeted-causal-v1
   cancel-in-progress: false
 
 env:
@@ -15,8 +36,10 @@ env:
   SOURCE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
   CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
   CORPUS_DIGEST: sha256:611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
-  HARNESS_BLOB: 8fedb3b06f996c7b732e449a607ffa3cfa546c2e
+  BASELINE_HARNESS_BLOB: 8fedb3b06f996c7b732e449a607ffa3cfa546c2e
+  TARGET_ADAPTER_BLOB: d6ae6b622d339328c72c7434ea22b58c773765b3
   MAX_PROVIDER_CALLS: "8"
+  TARGET_OUTPUT_FILE: stronger-sentient-targeted-causal-v1.json
 
 jobs:
   measure:
@@ -34,8 +57,9 @@ jobs:
           git remote add origin https://github.com/riggeyb/sentient-fly-runner.git
           git -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
-          test "$(git hash-object scripts/stronger-sentient-baseline-measurement.mjs)" = "$HARNESS_BLOB"
-          echo "BASELINE_HARNESS=PASS"
+          test "$(git hash-object scripts/stronger-sentient-baseline-measurement.mjs)" = "$BASELINE_HARNESS_BLOB"
+          test "$(git hash-object scripts/stronger-sentient-output-cap-1024-experiment.mjs)" = "$TARGET_ADAPTER_BLOB"
+          echo "MEASUREMEMENT_HARNESSS=PASS"
 
       - name: Checkout exact accepted Sentient baseline
         shell: bash
@@ -83,17 +107,23 @@ jobs:
         working-directory: sentient
         run: npm run build
 
-      - name: Run bounded output-cap causal experiment
+      - name: Run bounded targeted causal experiment
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           CORPUS_PATH: ./corpus-v1.json
+          MAX_PROVIDER_CALLS: ${{ env.MAX_PROVIDER_CALLS }}
+          TARGET_TASK_IDS: ${{ inputs.target_task_ids }}
+          TARGET_MAX_OUTPUT_TOKENS: ${{ inputs.target_max_output_tokens }}
+          TARGET_COMPLEXITY: ${{ inputs.target_complexity }}
+          TARGET_CAMPAIGN: ${{ inputs.target_campaign }}
+          TARGET_OUTPUT_FILE: ${{ env.TARGET_OUTPUT_FILE }}
         run: node scripts/stronger-sentient-output-cap-1024-experiment.mjs
 
       - name: Upload measurement receipt
         uses: actions/upload-artifact@v4
         with:
-          name: stronger-sentient-output-cap-1024-v1
-          path: stronger-sentient-output-cap-1024-v1.json
+          name: stronger-sentient-targeted-causal-v1
+          path: ${{ env.TARGET_OUTPUT_FILE }}
           if-no-files-found: error
           retention-days: 30
 
