@@ -11,6 +11,10 @@ const KEY = process.env.ATLASCLOUD_API_KEY?.trim();
 if (!KEY) throw new Error("ATLASCLOUD_API_KEY_MISSING");
 const MAX_CALLS = 15;
 const WALL_MS = 6 * 60_000;
+const MIN_START_INTERVAL_MS = Number(process.env.MIN_START_INTERVAL_MS ?? 750);
+if (!Number.isInteger(MIN_START_INTERVAL_MS) || MIN_START_INTERVAL_MS < 250 || MIN_START_INTERVAL_MS > 5000) {
+  throw new Error("min_start_interval_invalid");
+}
 const startedAt = Date.now();
 let calls = 0;
 let count429 = 0;
@@ -38,7 +42,7 @@ const caps = {
   image_input: false,
   server_side_tools: false,
 };
-const admission = new AtlasAdmissionController();
+const admission = new AtlasAdmissionController({ minStartIntervalMs: MIN_START_INTERVAL_MS });
 const adapter = new AtlasCloudAdapter({
   apiKey: KEY,
   fetchImpl: measuredFetch,
@@ -109,6 +113,7 @@ const report = {
   schemaVersion: "stronger-sentient-admission-burst/v1",
   sourceSha: "c05ebe9ffed7254bb749cee1c72a965f970def7c",
   sourceTree: "00296d7129fa8ab7f3254943a57df444591ad1ab",
+  minStartIntervalMs: MIN_START_INTERVAL_MS,
   providerCalls: calls,
   http429Count: count429,
   atlas429Rate: calls ? count429 / calls : null,
@@ -121,6 +126,7 @@ const report = {
   productionDeployment: false,
 };
 fs.writeFileSync("stronger-sentient-admission-burst-v1.json", JSON.stringify(report,null,2)+"\n");
+console.log(`MIN_START_INTERVAL_MS=${MIN_START_INTERVAL_MS}`);
 console.log(`PROVIDER_CALLS=${calls}`);
 console.log(`ATLAS_429_COUNT=${count429}`);
 console.log(`ATLAS_429_RATE=${report.atlas429Rate}`);
