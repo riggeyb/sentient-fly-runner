@@ -11,9 +11,18 @@ on:
         description: Exact expected riggeyb/sentient tree SHA
         required: true
         type: string
+      mode:
+        description: safe or output_headroom
+        required: false
+        default: safe
+        type: string
 
 permissions:
   contents: read
+
+env:
+  CORPUS_SOURCE_SHA: "9c037505f65663ae6b7e8990ae969639572860d9"
+  CORPUS_DIGEST: "611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51"
 
 jobs:
   probe:
@@ -24,10 +33,12 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.sha }}
           SOURCE_TREE: ${{ inputs.tree }}
+          MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SORCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+          test "$MODE" = "safe" || test "$MODE" = "output_headroom"
 
       - uses: actions/checkout@v4
         with:
@@ -59,9 +70,68 @@ jobs:
           node-version: "22"
 
       - name: Safe DeepSeek provider probe
+        if: ${{ inputs.mode == 'safe' }}
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
         run: node scripts/atlas-deepseek-safe-probe.mjs
 
+      - name: Checkout frozen corpus
+        if: ${{ inputs.mode == 'output_headroom' }}
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.CORPUS_SOURCE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: corpus-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify frozen corpus
+        if: ${{ inputs.mode == 'output_headroom' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')"
+          test "$actual" = "$CORPUS_DIGEST"
+
+      - name: Build exact accepted baseline
+        if: ${{ inputs.mode == 'output_headroom' }}
+        working-directory: sentient
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Bounded DeepSeek output-headroom control
+        if: ${{ inputs.mode == 'output_headroom' }}
+        env:
+          BASELINE_SHA: ${{ inputs.sha }}
+          BASELINE_TREE: ${{ inputs.tree }}
+          CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
+          EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-output-headroom-v1.json
+          ATLAS_CLOUD_API_KEY: ${{ secrets.ATLAS_CLOUD_API_KEY }}
+          ATLAS_API_KEY: ${{ secrets.ATLAS_API_KEY }}
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: node scripts/stronger-sentient-output-headroom-v1.mjs
+
+      - name: Verify baseline immutability
+        if: ${{ inputs.mode == 'output_headroom' }}
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.sha }}"
+          test "$(git show -s --format=%T HEAD)" = "${{ inputs.tree }}"
+          git diff --exit-code
+          git diff --cached --exit-code
+
+      - name: Upload output-headroom receipt
+        if: ${{ inputs.mode == 'output_headroom' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-output-headroom-v1
+          path: ${{ runner.temp }}/stronger-sentient-output-headroom-v1.json
+          retention-days: 14
+
       - name: Deployment guard
-        run: echo "DEPLOYMENT_PERFORMED=false"
+        run: |
+          echo "DEPLOYMENT_PERFORMED=false"
+          echo "PRODUCTION_CONFIGURATION_CHANGE=false"
