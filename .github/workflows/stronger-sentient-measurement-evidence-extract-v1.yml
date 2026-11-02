@@ -1,0 +1,39 @@
+name: Stronger Sentient Measurement Evidence Extract v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Completed measurement run ID"
+        required: true
+        type: string
+      artifact_name:
+        description: "Measurement artifact name"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download existing measurement artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT_NAME" --dir evidence
+          test -f evidence/stronger-sentient-measurement.json
+          echo "EVIDENCE_EXTRACTION_PROVIDER_CALLS=0"
+          echo "EVIDENCE_JSON_BEGIN"
+          cat evidence/stronger-sentient-measurement.json
+          echo "EVIDENCE_JSON_END"
+          echo "PRODUCTION_DEPLOYMENT=false"
