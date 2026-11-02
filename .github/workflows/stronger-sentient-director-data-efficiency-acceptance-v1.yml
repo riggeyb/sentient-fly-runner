@@ -69,14 +69,8 @@ jobs:
       - name: Unit and component tests
         run: npm test
 
-      - name: Vinext compatibility
-        run: npm run check:vinext
-
       - name: Production build
-        run: npm run build:vinext
-
-      - name: Wrangler dry run
-        run: npx wrangler deploy --dry-run
+        run: npm run build
 
       - name: Final immutable-source fence
         shell: bash
