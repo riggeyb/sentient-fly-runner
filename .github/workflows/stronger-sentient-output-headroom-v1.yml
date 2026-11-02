@@ -87,11 +87,9 @@ jobs:
         env:
           LIVE_ATLAS: "true"
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
-          BASELINE_TREE : ${{ env.BASELINE_TREE }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-output-headroom-v1.json
-          ATLAS_CLOUD_API_KEY: ${{ secrets.ATLAS_CLOUD_API_KEY }}
-          ATLAS_API_KEY: ${{ secrets.ATLAS_API_KEY }}
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
         run: node scripts/stronger-sentient-output-headroom-v1.mjs
 
