@@ -1,0 +1,135 @@
+name: Stronger Sentient Atlas Response Shape v1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stronger-sentient-atlas-response-shape-v1
+  cancel-in-progress: false
+
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+    steps:
+      - name: Guard bounded diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ATLASCLOUD_API_KEY:-}"
+          echo "MAX_PROVIDER_CALLS=3"
+          echo "CONTENT_LOGGING=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "PRODUCTION_CONFIGURATION_CHANGE=false"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Probe safe response shapes
+        shell: bash
+        run: |
+          cat > /tmp/shape-probe.mjs <<'NODE'
+          import { writeFile } from "node:fs/promises";
+
+          const key = process.env.ATLASCLOUD_API_KEY;
+          const endpoint = "https://api.atlascloud.ai/v1/chat/completions";
+          const rows = [];
+          let calls = 0;
+
+          function safeShape(raw, status, headers, requestedModel) {
+            const choice = Array.isArray(raw?.choices) ? raw.choices[0] : null;
+            const message = choice && typeof choice.message === "object" ? choice.message : null;
+            const content = message?.content;
+            const blocks = Array.isArray(content) ? content.map(x => x && typeof x === "object" ? x.type ?? null : typeof x) : [];
+            const usage = raw?.usage && typeof raw.usage === "object" ? raw.usage : {};
+            const details = usage?.completion_tokens_details && typeof usage.completion_tokens_details === "object"
+              ? usage.completion_tokens_details : {};
+            return {
+              requestedModel,
+              status,
+              requestIdPresent: Boolean(headers.get("x-request-id") || headers.get("request-id")),
+              responseModel: typeof raw?.model === "string" ? raw.model : null,
+              finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : null,
+              messageKeys: message ? Object.keys(message).sort() : [],
+              contentType: Array.isArray(content) ? "array" : content === null ? "null" : typeof content,
+              contentLength: typeof content === "string" ? content.length : null,
+              contentBlockTypes: blocks,
+              reasoningFieldPresent: Boolean(message && (
+                Object.prototype.hasOwnProperty.call(message, "reasoning") ||
+                Object.prototype.hasOwnProperty.call(message, "reasoning_content") ||
+                Object.prototype.hasOwnProperty.call(message, "reasoning_details")
+              )),
+              promptTokens: Number.isFinite(usage?.prompt_tokens) ? usage.prompt_tokens : null,
+              completionTokens: Number.isFinite(usage?.completion_tokens) ? usage.completion_tokens : null,
+              reasoningTokens: Number.isFinite(details?.reasoning_tokens) ? details.reasoning_tokens :
+                Number.isFinite(usage?.reasoning_tokens) ? usage.reasoning_tokens : null,
+              errorCode: typeof raw?.error?.code === "string" ? raw.error.code : null,
+              errorType: typeof raw?.error?.type === "string" ? raw.error.type : null
+            };
+          }
+
+          async function call(model, reasoningEffort) {
+            if (++calls > 3) throw new Error("provider_call_ceiling");
+            const body = {
+              model,
+              max_tokens: 384,
+              messages: [
+                { role: "system", content: "Return one compact JSON object only. Do not call tools." },
+                { role: "user", content: 'Return exactly {"ok":true}.' }
+              ]
+            };
+            if (reasoningEffort) body.reasoning = { effort: reasoningEffort, exclude: true };
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${key}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(30000)
+            });
+            let raw = {};
+            try { raw = await response.json(); } catch {}
+            const row = safeShape(raw, response.status, response.headers, model);
+            rows.push(row);
+            return row;
+          }
+
+          await call("dots-studio/dots-3-note-prev-free", null);
+          await new Promise(r => setTimeout(r, 1500));
+          let deep = await call("deepseek-ai/deepseek-v3.2", "medium");
+          if (deep.status === 429 && calls < 3) {
+            await new Promise(r => setTimeout(r, 3000));
+            await call("deepseek-ai/deepseek-v3.2", "medium");
+          }
+
+          const report = {
+            schemaVersion: "stronger-sentient-atlas-response-shape/v1",
+            baselineSha: process.env.BASELINE_SHA,
+            baselineTree: process.env.BASELINE_TREE,
+            providerCalls: calls,
+            rows,
+            contentLogged: false,
+            productionDeployment: false,
+            productionConfigurationChange: false
+          };
+          await writeFile("/tmp/atlas-response-shape.json", JSON.stringify(report, null, 2) + "\n");
+          console.log(JSON.stringify(report));
+          NODE
+          node /tmp/shape-probe.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-atlas-response-shape-v1
+          path: /tmp/atlas-response-shape.json
+          retention-days: 14
