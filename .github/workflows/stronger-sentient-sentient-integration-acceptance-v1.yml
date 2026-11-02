@@ -12,8 +12,8 @@ concurrency:
 
 env:
   BASE_SHA: 67b5f7f6bbac14dbf991e444947912deba2bdc3e
-  EXPECTED_SHA: 4cb18665bf61aa1dce860f063ada043ce489ca2a
-  EXPECTED_TREE: 36eb436ad6cb8e9e5e947af9ea58e21e37fc5638
+  EXPECTED_SHA: 35c40ca54cbfbd42ddd80d65e4c5246dc4db5fb1
+  EXPECTED_TREE: aea4723bc5a5478c28f4423348f71b5631249a4c
   NODE_VERSION: "22"
 
 jobs:
@@ -63,6 +63,7 @@ jobs:
           test/lab/cognitive-policy-context.test.ts
           test/lab/cognitive-runtime-hard-ceilings.test.ts
           test/lab/cognitive-runtime-wiring.test.ts
+          test/lab/integrated-lab-v0.test.ts
           test/mvp1-state-v2-lifecycle.test.ts
           SCOPE
           sed -i 's/^          //' "$RUNNER_TEMP/expected.txt"
