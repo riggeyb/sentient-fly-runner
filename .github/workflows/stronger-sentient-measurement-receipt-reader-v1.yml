@@ -52,5 +52,6 @@ jobs:
             providerRequestIdPresent,costUsd,schemaValid,evidenceGrounded,authorityPass,
             failedAssertions,verified,error
           }]' "$file"
+          jq -c '.rows // []' "$file"
           echo "PROVIDER_CALLS_ADDED=0"
           echo "PRODUCTION_DEPLOYMENT=false"
