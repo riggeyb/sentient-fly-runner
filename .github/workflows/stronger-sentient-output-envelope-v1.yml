@@ -59,9 +59,9 @@ jobs:
           test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           actual="$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')"
           test "$actual" = "$CORPUS_DIGEST"
-          case "$OUTPUT_CAPZ" in
+          case "$OUTPUT_CAP" in
             512|1024|2048|4096) ;;
-            *) echo "unsupported bounded output cap: $OUTPUT_CAPZ" >&2; exit 2 ;;
+            *) echo "unsupported bounded output cap: $OUTPUT_CAP" >&2; exit 2 ;;
           esac
 
       - uses: actions/setup-node@v4
