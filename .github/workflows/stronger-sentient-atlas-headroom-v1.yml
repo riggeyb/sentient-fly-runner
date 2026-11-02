@@ -1,0 +1,107 @@
+name: Stronger Sentient Atlas Headroom v1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stronger-sentient-atlas-headroom-v1
+  cancel-in-progress: false
+
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+    steps:
+      - name: Guard bounded diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ATLASCLOUD_API_KEY:-}"
+          echo "MAX_PROVIDER_CALLS=5"
+          echo "CONTENT_LOGGING=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "PRODUCTION_CONFIGURATION_CHANGE=false"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Probe DeepSeek output headroom
+        shell: bash
+        run: |
+          cat > /tmp/headroom.mjs <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          const key = process.env.ATLASCLOUD_API_KEY;
+          const endpoint = "https://api.atlascloud.ai/v1/chat/completions";
+          const rows = [];
+          let calls = 0;
+          const cases = [
+            { maxTokens: 384, effort: "low" },
+            { maxTokens: 1024, effort: "low" },
+            { maxTokens: 2048, effort: "low" },
+            { maxTokens: 1024, effort: "medium" },
+            { maxTokens: 2048, effort: "medium" }
+          ];
+          async function one(c) {
+            if (++calls > 5) throw new Error("provider_call_ceiling");
+            const body = {
+              model: "deepseek-ai/deepseek-v3.2",
+              max_tokens: c.maxTokens,
+              messages: [
+                { role: "system", content: "Return one compact JSON object only. Do not call tools." },
+                { role: "user", content: 'Return exactly {"ok":true}.' }
+              ],
+              reasoning: { effort: c.effort, exclude: true }
+            };
+            const t0 = Date.now();
+            const r = await fetch(endpoint, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(30000)
+            });
+            let raw = {};
+            try { raw = await r.json(); } catch {}
+            const choice = Array.isArray(raw?.choices) ? raw.choices[0] : null;
+            const msg = choice && typeof choice.message === "object" ? choice.message : null;
+            const content = typeof msg?.content === "string" ? msg.content : null;
+            const usage = raw?.usage && typeof raw.usage === "object" ? raw.usage : {};
+            const details = usage?.completion_tokens_details && typeof usage.completion_tokens_details === "object" ? usage.completion_tokens_details : {};
+            rows.push({
+              maxTokens: c.maxTokens,
+              effort: c.effort,
+              status: r.status,
+              latencyMs: Date.now() - t0,
+              requestIdPresent: Boolean(r.headers.get("x-request-id") || r.headers.get("request-id")),
+              finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : null,
+              contentType: msg?.content === null ? "null" : Array.isArray(msg?.content) ? "array" : typeof msg?.content,
+              contentLength: content === null ? null : content.length,
+              matchesExpected: content === '{"ok":true}' || content === '{"ok": true}',
+              completionTokens: Number.isFinite(usage?.completion_tokens) ? usage.completion_tokens : null,
+              reasoningTokens: Number.isFinite(details?.reasoning_tokens) ? details.reasoning_tokens : Number.isFinite(usage?.reasoning_tokens) ? usage.reasoning_tokens : null
+            });
+          }
+          for (let i = 0; i < cases.length; i++) {
+            if (i) await new Promise(r => setTimeout(r, 5000));
+            await one(cases[i]);
+          }
+          const report = { schemaVersion: "stronger-sentient-atlas-headroom/v1", baselineSha: process.env.BASELINE_SHA, baselineTree: process.env.BASELINE_TREE, providerCalls: calls, rows, contentLogged: false, productionDeployment: false, productionConfigurationChange: false };
+          await writeFile("/tmp/atlas-headroom.json", JSON.stringify(report, null, 2) + "\n");
+          console.log(JSON.stringify(report));
+          NODE
+          node /tmp/headroom.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-atlas-headroom-v1
+          path: /tmp/atlas-headroom.json
+          retention-days: 14
