@@ -84,8 +84,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install locked dependencies
-        run: npm ci
+      - name: Install dependencies using repository no-lockfile pattern
+        run: npm install --no-audit --no-fund --package-lock=false
 
       - name: Build TypeScript
         run: npm run build
