@@ -1,0 +1,81 @@
+name: Stronger Sentient Measurement v1
+on:
+  workflow_dispatch:
+    inputs:
+      run_live_atlas:
+        description: Use existing Atlas secret if available
+        required: false
+        default: true
+        type: boolean
+      max_provider_calls:
+        description: Hard maximum Atlas HTTP attempts
+        required: false
+        default: "24"
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: stronger-sentient-measurement-v1
+  cancel-in-progress: false
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+  CORPUS_SOURCE_SHA: 3ca3c9dce1144518eda339bb170f8edc9372620f
+  CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUN_LIVE_ATLAS: ${{ inputs.run_live_atlas }}
+      MAX_PROVIDER_CALLS: ${{ inputs.max_provider_calls }}
+      BASELINE_SHA: ${{ env.BASELINE_SHA }}
+      BASELINE_TREE: ${{ env.BASELINE_TREE }}
+      CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
+      MEASUREMENT_OUT: ${{ runner.temp }}/stronger-sentient-measurement.json
+      ATLAS_CLOUD_API_KEY: ${{ secrets.ATLAS_CLOUD_API_KEY }}
+      ATLAS_API_KEY: ${{ secrets.ATLAS_API_KEY }}
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.BASELINE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.CORPUS_SOURCE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: corpus-source
+          persist-credentials: false
+      - name: Verify frozen identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          actual="$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')"
+          test "$actual" = "$CORPUS_DIGEST"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build exact baseline
+        working-directory: sentient
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+      - name: Run bounded measurement
+        run: node .github/measurement/stronger-sentient-measure-v1.mjs
+      - name: Verify baseline immutability
+        run: |
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-measurement-v1
+          path: ${{ env.MEASUREMENT_OUT }}
+          retention-days: 14
