@@ -32,10 +32,40 @@ jobs:
           path: receipt
           run-id: ${{ inputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Print receipt
+      - name: Print compact receipt summary
         shell: bash
         run: |
           set -euo pipefail
-          cat "receipt/${{ inputs.file_name }}"
+          file="receipt/${{ inputs.file_name }}"
+          jq -c '{
+            schemaVersion,
+            campaign,
+            sourceSha,
+            sourceTree,
+            corpusDigest,
+            neutralSignalProfile,
+            tasksExpected,
+            tasksMeasured,
+            providerCalls,
+            maxProviderCalls,
+            http429Count,
+            atlas429Rate,
+            retryCount,
+            retryRate,
+            fallbackTaskCount,
+            fallbackRate,
+            queueWaitP50Ms,
+            queueWaitP95Ms,
+            providerLatencyP50Ms,
+            providerLatencyP95Ms,
+            inputTokens,
+            outputTokens,
+            reasoningTokens,
+            reportedCostUsd,
+            verifiedTaskSuccessRate,
+            evidenceGroundingRate,
+            schemaValidityRate,
+            deploymentPerformed
+          }' "$file"
           echo "PROVIDER_CALLS_ADDED=0"
           echo "PRODUCTION_DEPLOYMENT=false"
