@@ -27,6 +27,7 @@ jobs:
         with:
           repository: riggeyb/sentient
           ref: ${{ env.EXPECTED_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
 
