@@ -73,9 +73,9 @@ jobs:
           retention-days: 14
       - name: Guard
         run: |
-          echo "MAX_PROVIDER_CALLS=10"
+          echo "MAX_PROVIDER_CALLS=9"
           echo "PROVIDER_RETRIES=0"
-          echo "DATASET=frozen-corpus-cog-v1-03-readonly-tool"
+          echo "DATASET=frozen-corpus-tool-use-action-budget-v1"
           echo "TOOL_EFFECT=READ_ONLY_FIXTURE"
           echo "CONSEQUENTIAL_TOOL_EFFECTS=false"
           echo "PRODUCTION_DEPLOYMENT=false"
