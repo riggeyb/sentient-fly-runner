@@ -14,14 +14,14 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
 
 jobs:
   extract:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Download existing measurement artifact
+      - name: Persist existing measurement artifact as durable evidence
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -31,9 +31,11 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT_NAME" --dir evidence
-          test -f evidence/stronger-sentient-measurement.json
+          file="evidence/stronger-sentient-measurement.json"
+          test -f "$file"
+          path="measurement-evidence/stronger-sentient-v2-run-${RUN_ID}.json"
+          encoded="$(base64 -w0 "$file")"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path"             -f message="measure: persist Stronger Sentient v2 evidence run $RUN_ID"             -f content="$encoded"             -f branch=main >/dev/null
           echo "EVIDENCE_EXTRACTION_PROVIDER_CALLS=0"
-          echo "EVIDENCE_JSON_BEGIN"
-          cat evidence/stronger-sentient-measurement.json
-          echo "EVIDENCE_JSON_END"
+          echo "EVIDENCE_PATH=$path"
           echo "PRODUCTION_DEPLOYMENT=false"
