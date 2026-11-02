@@ -1,0 +1,1835 @@
+{
+  "schemaVersion": "stronger-sentient-measurement/v2",
+  "baseline": {
+    "sha": "c05ebe9ffed7254bb749cee1c72a965f970def7c",
+    "tree": "00296d7129fa8ab7f3254943a57df444591ad1ab",
+    "acceptanceRun": 41483844842
+  },
+  "corpus": {
+    "sha": "9c037505f65663ae6b7e8990ae969639572860d9",
+    "digest": "sha256:611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51",
+    "doctrineDigest": "sha256:ec2a36ce9ebc6a735e11593da32988083616a43f1eedddc2467b0d80affa4389",
+    "tasks": 15,
+    "supersededAssertions": [
+      "dots3Blocked=true",
+      "dots3Started=false"
+    ]
+  },
+  "envelope": {
+    "maxProviderCalls": 40,
+    "maxWallClockMs": 240000,
+    "maxProviderRetriesPerAttempt": 1,
+    "maxMonetaryCost": null
+  },
+  "local": {
+    "budgets": {
+      "baseline": {
+        "evidence": 0.36,
+        "cognition": 0.35,
+        "action": 0.27,
+        "verification": 0.35
+      },
+      "highUncertainty": {
+        "evidence": 1,
+        "cognition": 0.47,
+        "action": 0.27,
+        "verification": 0.43
+      },
+      "highComplexity": {
+        "evidence": 0.36,
+        "cognition": 0.83,
+        "action": 0.27,
+        "verification": 0.35
+      },
+      "highTool": {
+        "evidence": 0.36,
+        "cognition": 0.35,
+        "action": 0.75,
+        "verification": 0.35
+      },
+      "highConsequence": {
+        "evidence": 0.36,
+        "cognition": 0.35,
+        "action": 0.27,
+        "verification": 0.87
+      }
+    },
+    "failures": {
+      "evidence_deficit": {
+        "allocation": {
+          "evidence": 0.56,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "retrieve_more"
+      },
+      "inference_deficit": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.55,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "deepen_cognition"
+      },
+      "action_deficit": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.47,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "permit_more_action"
+      },
+      "schema_deficit": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "constrained_regeneration"
+      },
+      "verification_deficit": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.55
+        },
+        "hardStop": false,
+        "strategy": "strengthen_verification"
+      },
+      "provider_failure": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "provider_recovery"
+      },
+      "deadline_pressure": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "deadline_recovery"
+      },
+      "policy_rejection": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": true,
+        "strategy": "stop_policy"
+      },
+      "unknown": {
+        "allocation": {
+          "evidence": 0.41,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.4
+        },
+        "hardStop": false,
+        "strategy": "conservative_continue"
+      }
+    },
+    "context": {
+      "0.2": {
+        "artifacts": 2,
+        "chars": 46,
+        "digest": "sha256:72f62fc6696cfe51bcc75036fbae1132a434ec4b21e7e9b8e16aacad5491741d",
+        "bounds": {
+          "maxArtifacts": 2,
+          "maxTotalChars": 461,
+          "maxArtifactChars": 1024
+        }
+      },
+      "0.6": {
+        "artifacts": 3,
+        "chars": 67,
+        "digest": "sha256:6fc74280b87ef412f66764af31db70f90a52f26d3a616d2bb1874289143d54d2",
+        "bounds": {
+          "maxArtifacts": 3,
+          "maxTotalChars": 1254,
+          "maxArtifactChars": 1024
+        }
+      },
+      "0.9": {
+        "artifacts": 4,
+        "chars": 86,
+        "digest": "sha256:4a397b1221db0449283c97c2504ff3c36be6638c3402cfa8770983c6a0809a08",
+        "bounds": {
+          "maxArtifacts": 4,
+          "maxTotalChars": 1850,
+          "maxArtifactChars": 1024
+        }
+      }
+    },
+    "admission": [
+      {
+        "n": 1,
+        "maxInFlight": 1,
+        "minStartSpacingMs": null,
+        "queueWaitP50": 0,
+        "queueWaitP95": 0,
+        "starts": [
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 0
+          }
+        ]
+      },
+      {
+        "n": 2,
+        "maxInFlight": 2,
+        "minStartSpacingMs": 751,
+        "queueWaitP50": 0,
+        "queueWaitP95": 751,
+        "starts": [
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 0
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 751
+          }
+        ]
+      },
+      {
+        "n": 4,
+        "maxInFlight": 2,
+        "minStartSpacingMs": 750,
+        "queueWaitP50": 751,
+        "queueWaitP95": 2252,
+        "starts": [
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 0
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 751
+          },
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 1502
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 2252
+          }
+        ]
+      },
+      {
+        "n": 8,
+        "maxInFlight": 2,
+        "minStartSpacingMs": 750,
+        "queueWaitP50": 2253,
+        "queueWaitP95": 5258,
+        "starts": [
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 0
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 751
+          },
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 1501
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 2253
+          },
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 3004
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 3756
+          },
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 4507
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 5258
+          }
+        ]
+      }
+    ]
+  },
+  "live": {
+    "available": true,
+    "providerCalls": 38,
+    "http": [
+      {
+        "ordinal": 1,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 394,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 2,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 185,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 3,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 4887,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 4,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 10234,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 5,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 9747,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 6,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 619,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 7,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 305,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 8,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 5736,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 9,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 210,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 10,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 203,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 11,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 5569,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 12,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 9618,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 13,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 306,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 14,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 654,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 15,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 6006,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 16,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 217,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 17,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 10629,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 18,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 178,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 19,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 11108,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 20,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 10269,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 21,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 322,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 22,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 940,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 23,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 5136,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 24,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 10450,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 25,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 5039,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 26,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 201,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 27,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 10016,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 28,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 182,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 29,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 206,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 30,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 6635,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 31,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 185,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 32,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 190,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 33,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 5410,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 34,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 10333,
+        "requestIdPresent": true,
+        "reasoningEffort": "medium"
+      },
+      {
+        "ordinal": 35,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 329,
+        "requestIdPresent": true,
+        "reasoningEffort": "low"
+      },
+      {
+        "ordinal": 36,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 429,
+        "latencyMs": 193,
+        "requestIdPresent": true,
+        "reasoningEffort": "low"
+      },
+      {
+        "ordinal": 37,
+        "model": "dots-studio/dots-3-note-prev-free",
+        "status": 200,
+        "latencyMs": 9505,
+        "requestIdPresent": true,
+        "reasoningEffort": null
+      },
+      {
+        "ordinal": 38,
+        "model": "deepseek-ai/deepseek-v3.2",
+        "status": 200,
+        "latencyMs": 10394,
+        "requestIdPresent": true,
+        "reasoningEffort": "high"
+      }
+    ],
+    "baselineTasks": [
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-01",
+        "taskClass": "objective_decomposition",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+        "fallbackCount": 1,
+        "fallbackReason": "rate_limit",
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:90b800dade1f5e59261beffa882d25ed712d0db1090635f9450f2f49f0c7e4ce",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 6392,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": false,
+            "queueWaitMs": 37,
+            "providerLatencyMs": 185,
+            "retryCount": 1,
+            "inputTokens": null,
+            "outputTokens": null,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": "rate_limit",
+            "reasoningEffort": "medium"
+          },
+          {
+            "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+            "ok": true,
+            "queueWaitMs": 565,
+            "providerLatencyMs": 4887,
+            "retryCount": 0,
+            "inputTokens": 346,
+            "outputTokens": 384,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": null
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "phases_ordered",
+              "ok": false
+            },
+            {
+              "assertion": "productionDeployment=false",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-02",
+        "taskClass": "architecture_reasoning",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:9f294da3b29582259d45a1f46a608a537f849934a20edcc59cb558e82ddf70fa",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 10236,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": true,
+            "queueWaitMs": 0,
+            "providerLatencyMs": 10234,
+            "retryCount": 0,
+            "inputTokens": 269,
+            "outputTokens": 384,
+            "reasoningTokens": 384,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": "medium"
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "failureClass=EVIDENCE_DEFICIT",
+              "ok": false
+            },
+            {
+              "assertion": "increase=EVIDENCE_BUDGET",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-03",
+        "taskClass": "repository_reasoning",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:a112e8151300c0f19e9c381e8435d2a691e7b84d67a4c0fb8d0618fb2d5fadb0",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 9749,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": true,
+            "queueWaitMs": 0,
+            "providerLatencyMs": 9747,
+            "retryCount": 0,
+            "inputTokens": 263,
+            "outputTokens": 384,
+            "reasoningTokens": 384,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": "medium"
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "primaryModel=deepseek-ai/deepseek-v3.2",
+              "ok": false
+            },
+            {
+              "assertion": "sourceBound=true",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-04",
+        "taskClass": "bug_diagnosis",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+        "fallbackCount": 1,
+        "fallbackReason": "rate_limit",
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:dae31c9e303165a857a693e65d521bd52af837cfb6cb92463121ef0e3fdd2a8a",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 7357,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": false,
+            "queueWaitMs": 0,
+            "providerLatencyMs": 305,
+            "retryCount": 1,
+            "inputTokens": null,
+            "outputTokens": null,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": "rate_limit",
+            "reasoningEffort": "medium"
+          },
+          {
+            "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+            "ok": true,
+            "queueWaitMs": 445,
+            "providerLatencyMs": 5736,
+            "retryCount": 0,
+            "inputTokens": 337,
+            "outputTokens": 384,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": null
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "recommendedClass=AtlasAdmissionController",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-05",
+        "taskClass": "coding",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+        "fallbackCount": 1,
+        "fallbackReason": "rate_limit",
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:26c93e95406df44e06b5dec116977cfee944776622db6dc8daaa4faeb3d6ecf1",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 7071,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": false,
+            "queueWaitMs": 247,
+            "providerLatencyMs": 203,
+            "retryCount": 1,
+            "inputTokens": null,
+            "outputTokens": null,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": "rate_limit",
+            "reasoningEffort": "medium"
+          },
+          {
+            "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+            "ok": true,
+            "queueWaitMs": 547,
+            "providerLatencyMs": 5569,
+            "retryCount": 0,
+            "inputTokens": 340,
+            "outputTokens": 384,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": null
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "language=typescript",
+              "ok": false
+            },
+            {
+              "assertion": "contains=PROVIDER_FAILURE",
+              "ok": false
+            },
+            {
+              "assertion": "authorityChanged=false",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-06",
+        "taskClass": "tool_planning",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:9d70b518162b7ad2f2c237b16df33f562bfd209c492d1df3e91fed6ef0aeae83",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 9619,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": true,
+            "queueWaitMs": 0,
+            "providerLatencyMs": 9618,
+            "retryCount": 0,
+            "inputTokens": 280,
+            "outputTokens": 384,
+            "reasoningTokens": 385,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": "medium"
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "deploy=false",
+              "ok": false
+            },
+            {
+              "assertion": "tools=read_commit,run_deterministic_tests,read_test_results",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-07",
+        "taskClass": "tool_result_interpretation",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+        "fallbackCount": 1,
+        "fallbackReason": "rate_limit",
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:3710380fe8d2412bfc65c355ba42bfd4eeb112e2a282173ef2c8bc941e6e22dc",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 7508,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": false,
+            "queueWaitMs": 140,
+            "providerLatencyMs": 654,
+            "retryCount": 1,
+            "inputTokens": null,
+            "outputTokens": null,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": "rate_limit",
+            "reasoningEffort": "medium"
+          },
+          {
+            "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+            "ok": true,
+            "queueWaitMs": 96,
+            "providerLatencyMs": 6006,
+            "retryCount": 0,
+            "inputTokens": 356,
+            "outputTokens": 384,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": null
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "requestAccepted=true",
+              "ok": false
+            },
+            {
+              "assertion": "effectStatus=NOT_TESTED",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-08",
+        "taskClass": "evidence_reconciliation",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:41f9bd56e497d6b865a50c555c0a208af78bc080fe8d1dea66f7833f6e872642",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 11380,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": true,
+            "queueWaitMs": 276,
+            "providerLatencyMs": 10629,
+            "retryCount": 1,
+            "inputTokens": 270,
+            "outputTokens": 384,
+            "reasoningTokens": 385,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": "medium"
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "preferredEvidence=provider_doc",
+              "ok": false
+            },
+            {
+              "assertion": "preserve_uncertainty=true",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-09",
+        "taskClass": "constraint_retention",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 1,
+        "contextDigest": "sha256:f7faf2f990c1cacbcf83c70aec88a02c0c3b01110e4b3bc33a0807fe5c56b8c5",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 11860,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": true,
+            "queueWaitMs": 277,
+            "providerLatencyMs": 11108,
+            "retryCount": 1,
+            "inputTokens": 208,
+            "outputTokens": 384,
+            "reasoningTokens": 384,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": "medium"
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "modelAuthority=false",
+              "ok": false
+            },
+            {
+              "assertion": "sentientAuthority=true",
+              "ok": false
+            },
+            {
+              "assertion": "governorEffects=true",
+              "ok": false
+            },
+            {
+              "assertion": "productionDeployment=false",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-10",
+        "taskClass": "uncertainty_detection",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:17a0688f57bef0a73367712ac5028b4febf56f7fe56bb031247aea701ad7c37b",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 10270,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": true,
+            "queueWaitMs": 0,
+            "providerLatencyMs": 10269,
+            "retryCount": 0,
+            "inputTokens": 267,
+            "outputTokens": 384,
+            "reasoningTokens": 385,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": "medium"
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "effectStatus=INCONCLUSIVE",
+              "ok": false
+            },
+            {
+              "assertion": "needsExperiment=true",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-11",
+        "taskClass": "recovery_planning",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+        "fallbackCount": 1,
+        "fallbackReason": "rate_limit",
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:a8d2ac1902f7bdcaa165d281f00d1587ac140014fabcac3dc4133b653be5c360",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 6827,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": false,
+            "queueWaitMs": 111,
+            "providerLatencyMs": 940,
+            "retryCount": 1,
+            "inputTokens": null,
+            "outputTokens": null,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": "rate_limit",
+            "reasoningEffort": "medium"
+          },
+          {
+            "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+            "ok": true,
+            "queueWaitMs": 0,
+            "providerLatencyMs": 5136,
+            "retryCount": 0,
+            "inputTokens": 351,
+            "outputTokens": 384,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": null
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "bounded=true",
+              "ok": false
+            },
+            {
+              "assertion": "jitter=true",
+              "ok": false
+            },
+            {
+              "assertion": "bypassAdmission=false",
+              "ok": false
+            },
+            {
+              "assertion": "maxRetries<=2",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-12",
+        "taskClass": "long_horizon_execution_planning",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 1,
+        "contextDigest": "sha256:0b7c18722e8b35ca7b8025e5d0769a31c53619aef172b8bd219b1b035c2b630f",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 10452,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": true,
+            "queueWaitMs": 0,
+            "providerLatencyMs": 10450,
+            "retryCount": 0,
+            "inputTokens": 202,
+            "outputTokens": 384,
+            "reasoningTokens": 384,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": "medium"
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "ordered=true",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-13",
+        "taskClass": "context_synthesis",
+        "stage": "synthesis",
+        "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:551839929a5659ce1fd27a50a0903ed8507f1a67a16ac5c3c4a0c9ee4a6531db",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 5039,
+        "attempts": [
+          {
+            "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+            "ok": true,
+            "queueWaitMs": 0,
+            "providerLatencyMs": 5039,
+            "retryCount": 0,
+            "inputTokens": 346,
+            "outputTokens": 384,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": null
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "identity_preserved=true",
+              "ok": false
+            },
+            {
+              "assertion": "noise_dropped=true",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-14",
+        "taskClass": "verification_planning",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+        "fallbackCount": 0,
+        "fallbackReason": null,
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 1,
+        "contextDigest": "sha256:90d6fbcbb973015140e1e975df1c8ebe1703a952019fe90be8b07982f977baea",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 10767,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": true,
+            "queueWaitMs": 256,
+            "providerLatencyMs": 10016,
+            "retryCount": 1,
+            "inputTokens": 200,
+            "outputTokens": 384,
+            "reasoningTokens": 384,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": "medium"
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "selfApproval=false",
+              "ok": false
+            },
+            {
+              "assertion": "all_required_checks=true",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      },
+      {
+        "label": "baseline",
+        "taskId": "cog-v1-15",
+        "taskClass": "state_transition_proposals",
+        "stage": "cognition",
+        "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+        "fallbackCount": 1,
+        "fallbackReason": "rate_limit",
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "contextArtifacts": 2,
+        "contextDigest": "sha256:eda359c883b797bdd202e1f05da3d8a519b5644816dfac131b94103acd39e161",
+        "contextTokens": null,
+        "toolRounds": 0,
+        "verificationRounds": 1,
+        "endToEndLatencyMs": 8135,
+        "attempts": [
+          {
+            "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+            "ok": false,
+            "queueWaitMs": 219,
+            "providerLatencyMs": 206,
+            "retryCount": 1,
+            "inputTokens": null,
+            "outputTokens": null,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": "rate_limit",
+            "reasoningEffort": "medium"
+          },
+          {
+            "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+            "ok": true,
+            "queueWaitMs": 543,
+            "providerLatencyMs": 6635,
+            "retryCount": 0,
+            "inputTokens": 328,
+            "outputTokens": 384,
+            "reasoningTokens": null,
+            "requestIdPresent": true,
+            "costUsd": null,
+            "failure": null,
+            "reasoningEffort": null
+          }
+        ],
+        "verification": {
+          "schemaValid": false,
+          "assertionsPassed": false,
+          "evidenceGrounded": false,
+          "actionsSafe": true,
+          "checks": [
+            {
+              "assertion": "authorized=false",
+              "ok": false
+            },
+            {
+              "assertion": "requiresGovernor=true",
+              "ok": false
+            }
+          ],
+          "passed": false
+        },
+        "taskResult": "failed",
+        "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputChars": 0
+      }
+    ],
+    "experiments": {
+      "context": [
+        {
+          "label": "evidence-low",
+          "taskId": "cog-v1-08",
+          "taskClass": "evidence_reconciliation",
+          "stage": "cognition",
+          "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+          "fallbackCount": 1,
+          "fallbackReason": "rate_limit",
+          "allocation": {
+            "evidence": 0.3075,
+            "cognition": 0.35,
+            "action": 0.27,
+            "verification": 0.35
+          },
+          "contextArtifacts": 1,
+          "contextDigest": "sha256:9790a70e75feeab0dd87102d0448a960baaa878c9bbcb361ea92ffd202a2458b",
+          "contextTokens": null,
+          "toolRounds": 0,
+          "verificationRounds": 1,
+          "endToEndLatencyMs": 6911,
+          "attempts": [
+            {
+              "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+              "ok": false,
+              "queueWaitMs": 271,
+              "providerLatencyMs": 190,
+              "retryCount": 1,
+              "inputTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "requestIdPresent": true,
+              "costUsd": null,
+              "failure": "rate_limit",
+              "reasoningEffort": "medium"
+            },
+            {
+              "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+              "ok": true,
+              "queueWaitMs": 559,
+              "providerLatencyMs": 5410,
+              "retryCount": 0,
+              "inputTokens": 241,
+              "outputTokens": 384,
+              "reasoningTokens": null,
+              "requestIdPresent": true,
+              "costUsd": null,
+              "failure": null,
+              "reasoningEffort": null
+            }
+          ],
+          "verification": {
+            "schemaValid": false,
+            "assertionsPassed": false,
+            "evidenceGrounded": false,
+            "actionsSafe": true,
+            "checks": [
+              {
+                "assertion": "preferredEvidence=provider_doc",
+                "ok": false
+              },
+              {
+                "assertion": "preserve_uncertainty=true",
+                "ok": false
+              }
+            ],
+            "passed": false
+          },
+          "taskResult": "failed",
+          "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "outputChars": 0
+        },
+        {
+          "label": "evidence-high",
+          "taskId": "cog-v1-08",
+          "taskClass": "evidence_reconciliation",
+          "stage": "cognition",
+          "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+          "fallbackCount": 0,
+          "fallbackReason": null,
+          "allocation": {
+            "evidence": 0.6225,
+            "cognition": 0.35,
+            "action": 0.27,
+            "verification": 0.35
+          },
+          "contextArtifacts": 2,
+          "contextDigest": "sha256:3a7cc489dc9df9a4f1e04ba985493fc10f61d37a3e5165e5974e6128407c6014",
+          "contextTokens": null,
+          "toolRounds": 0,
+          "verificationRounds": 1,
+          "endToEndLatencyMs": 10334,
+          "attempts": [
+            {
+              "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+              "ok": true,
+              "queueWaitMs": 0,
+              "providerLatencyMs": 10333,
+              "retryCount": 0,
+              "inputTokens": 272,
+              "outputTokens": 384,
+              "reasoningTokens": 385,
+              "requestIdPresent": true,
+              "costUsd": null,
+              "failure": null,
+              "reasoningEffort": "medium"
+            }
+          ],
+          "verification": {
+            "schemaValid": false,
+            "assertionsPassed": false,
+            "evidenceGrounded": false,
+            "actionsSafe": true,
+            "checks": [
+              {
+                "assertion": "preferredEvidence=provider_doc",
+                "ok": false
+              },
+              {
+                "assertion": "preserve_uncertainty=true",
+                "ok": false
+              }
+            ],
+            "passed": false
+          },
+          "taskResult": "failed",
+          "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "outputChars": 0
+        }
+      ],
+      "cognition": [
+        {
+          "label": "cognition-low",
+          "taskId": "cog-v1-02",
+          "taskClass": "architecture_reasoning",
+          "stage": "cognition",
+          "finalRoute": "atlascloud:dots-studio/dots-3-note-prev-free",
+          "fallbackCount": 1,
+          "fallbackReason": "rate_limit",
+          "allocation": {
+            "evidence": 0.36,
+            "cognition": 0.23,
+            "action": 0.27,
+            "verification": 0.35
+          },
+          "contextArtifacts": 2,
+          "contextDigest": "sha256:9f294da3b29582259d45a1f46a608a537f849934a20edcc59cb558e82ddf70fa",
+          "contextTokens": null,
+          "toolRounds": 0,
+          "verificationRounds": 1,
+          "endToEndLatencyMs": 11008,
+          "attempts": [
+            {
+              "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+              "ok": false,
+              "queueWaitMs": 98,
+              "providerLatencyMs": 193,
+              "retryCount": 1,
+              "inputTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "requestIdPresent": true,
+              "costUsd": null,
+              "failure": "rate_limit",
+              "reasoningEffort": "low"
+            },
+            {
+              "route": "atlascloud:dots-studio/dots-3-note-prev-free",
+              "ok": true,
+              "queueWaitMs": 559,
+              "providerLatencyMs": 9505,
+              "retryCount": 0,
+              "inputTokens": 332,
+              "outputTokens": 384,
+              "reasoningTokens": null,
+              "requestIdPresent": true,
+              "costUsd": null,
+              "failure": null,
+              "reasoningEffort": null
+            }
+          ],
+          "verification": {
+            "schemaValid": false,
+            "assertionsPassed": false,
+            "evidenceGrounded": false,
+            "actionsSafe": true,
+            "checks": [
+              {
+                "assertion": "failureClass=EVIDENCE_DEFICIT",
+                "ok": false
+              },
+              {
+                "assertion": "increase=EVIDENCE_BUDGET",
+                "ok": false
+              }
+            ],
+            "passed": false
+          },
+          "taskResult": "failed",
+          "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "outputChars": 0
+        },
+        {
+          "label": "cognition-high",
+          "taskId": "cog-v1-02",
+          "taskClass": "architecture_reasoning",
+          "stage": "cognition",
+          "finalRoute": "atlascloud:deepseek-ai/deepseek-v3.2",
+          "fallbackCount": 0,
+          "fallbackReason": null,
+          "allocation": {
+            "evidence": 0.36,
+            "cognition": 0.83,
+            "action": 0.27,
+            "verification": 0.35
+          },
+          "contextArtifacts": 2,
+          "contextDigest": "sha256:9f294da3b29582259d45a1f46a608a537f849934a20edcc59cb558e82ddf70fa",
+          "contextTokens": null,
+          "toolRounds": 0,
+          "verificationRounds": 1,
+          "endToEndLatencyMs": 10395,
+          "attempts": [
+            {
+              "route": "atlascloud:deepseek-ai/deepseek-v3.2",
+              "ok": true,
+              "queueWaitMs": 0,
+              "providerLatencyMs": 10394,
+              "retryCount": 0,
+              "inputTokens": 269,
+              "outputTokens": 384,
+              "reasoningTokens": 384,
+              "requestIdPresent": true,
+              "costUsd": null,
+              "failure": null,
+              "reasoningEffort": "high"
+            }
+          ],
+          "verification": {
+            "schemaValid": false,
+            "assertionsPassed": false,
+            "evidenceGrounded": false,
+            "actionsSafe": true,
+            "checks": [
+              {
+                "assertion": "failureClass=EVIDENCE_DEFICIT",
+                "ok": false
+              },
+              {
+                "assertion": "increase=EVIDENCE_BUDGET",
+                "ok": false
+              }
+            ],
+            "passed": false
+          },
+          "taskResult": "failed",
+          "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "outputChars": 0
+        }
+      ],
+      "controls": [],
+      "admissionBurst": null
+    },
+    "aggregate": {
+      "tasksMeasured": 15,
+      "atlas429Count": 19,
+      "atlas429Rate": 0.5,
+      "retryCount": 9,
+      "retryRate": 0.23684210526315788,
+      "fallbackCount": 6,
+      "fallbackRate": 0.4,
+      "queueWaitP50": 111,
+      "queueWaitP95": 547,
+      "providerLatencyP50": 5736,
+      "providerLatencyP95": 10629,
+      "inputTokens": 4363,
+      "outputTokens": 5760,
+      "reasoningTokens": 3075,
+      "costUsd": null,
+      "verifiedTaskSuccess": 0,
+      "evidenceGrounding": 0,
+      "schemaValidity": 0,
+      "correctToolUse": null,
+      "recoverySuccess": false
+    }
+  },
+  "notes": [
+    "No tools/effects executed.",
+    "Context token count is not separately reported by Atlas.",
+    "Verification allocation is measured as runtime intensity; this baseline does not schedule extra critic rounds.",
+    "Cross-model artifact handoff is not invented; only incumbent routing and matched controls are measured."
+  ]
+}
