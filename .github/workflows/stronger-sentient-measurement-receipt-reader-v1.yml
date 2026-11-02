@@ -7,6 +7,14 @@ on:
         required: false
         default: "41496814542"
         type: string
+      artifact_name:
+        required: false
+        default: "stronger-sentient-baseline-v1"
+        type: string
+      file_name:
+        required: false
+        default: "stronger-sentient-baseline-v1.json"
+        type: string
 
 permissions:
   actions: read
@@ -20,7 +28,7 @@ jobs:
       - name: Download immutable measurement receipt
         uses: actions/download-artifact@v4
         with:
-          name: stronger-sentient-baseline-v1
+          name: ${{ inputs.artifact_name }}
           path: receipt
           run-id: ${{ inputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -28,6 +36,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat receipt/stronger-sentient-baseline-v1.json
+          cat "receipt/${{ inputs.file_name }}"
           echo "PROVIDER_CALLS_ADDED=0"
           echo "PRODUCTION_DEPLOYMENT=false"
