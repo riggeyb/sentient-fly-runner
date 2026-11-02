@@ -12,8 +12,8 @@ concurrency:
 
 env:
   BASE_SHA: 67b5f7f6bbac14dbf991e444947912deba2bdc3e
-  EXPECTED_SHA: 08188a2c47658c9120c7adbd9e45ef8ad78f3ff5
-  EXPECTED_TREE: 5c33abad8ab331068b746699a6cbc17c62678371
+  EXPECTED_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  EXPECTED_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
   NODE_VERSION: "22"
 
 jobs:
@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git rev-pars`'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
 
       - name: Verify bounded source scope
         shell: bash
@@ -112,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git rev-pars`'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
           test -z "$(git status --porcelain --untracked-files=no)"
           echo "STRONGER_SENTIENT_INTEGRATION_ACCEPTANCE=PASS"
           echo "PRODUCTION_DEPLOYMENT=false"
