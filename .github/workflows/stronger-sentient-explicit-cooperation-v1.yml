@@ -1,0 +1,105 @@
+name: Stronger Sentient Explicit Cooperation v1
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stronger-sentient-explicit-cooperation-v1
+  cancel-in-progress: false
+
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+  CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
+  CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout operator harness
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact accepted Sentient baseline
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.BASELINE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout frozen corpus
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.CORPUS_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: corpus-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify immutable identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
+          actual="$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')"
+          test "$actual" = "$CORPUS_DIGEST"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build exact accepted baseline
+        working-directory: sentient
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Validate cooperation harness
+        run: node --check scripts/stronger-sentient-cooperation-v1.mjs
+
+      - name: Run bounded explicit cooperation experiment
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          BASELINE_SHA: ${{ env.BASELINE_SHA }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
+          CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
+          EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-cooperation-v1.json
+        run: node scripts/stronger-sentient-cooperation-v1.mjs
+
+      - name: Verify baseline immutability
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          git -C sentient diff --exit-code
+          git -C sentient diff --cached --exit-code
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+
+      - name: Upload cooperation receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-cooperation-v1
+          path: ${{ runner.temp }}/stronger-sentient-cooperation-v1.json
+          retention-days: 14
+
+      - name: Guard
+        run: |
+          echo "MAX_PROVIDER_CALLS=4"
+          echo "PROVIDER_RETRIES=0"
+          echo "MODEL_TEXT_EXPOSED=false"
+          echo "PRIVATE_CHAIN_OF_THOUGHT_REQUESTED=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "PRODUCTION_CONFIGURATION_CHANGE=false"
