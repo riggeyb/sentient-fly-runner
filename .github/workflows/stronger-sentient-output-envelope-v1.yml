@@ -1,7 +1,13 @@
 name: Stronger Sentient Output Envelope Experiment v1
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      max_output_tokens:
+        description: Bounded max output tokens for the existing four-task causal experiment
+        required: false
+        default: "1024"
+        type: string
 
 permissions:
   contents: read
@@ -20,6 +26,8 @@ jobs:
   measure:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      OUTPUT_CAP: ${{ inputs.max_output_tokens }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,6 +59,10 @@ jobs:
           test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           actual="$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')"
           test "$actual" = "$CORPUS_DIGEST"
+          case "$OUTPUT_CAPZ" in
+            512|1024|2048|4096) ;;
+            *) echo "unsupported bounded output cap: $OUTPUT_CAPZ" >&2; exit 2 ;;
+          esac
 
       - uses: actions/setup-node@v4
         with:
@@ -68,16 +80,18 @@ jobs:
           set -euo pipefail
           cp scripts/stronger-sentient-baseline-measurement.mjs scripts/output-envelope-tmp.mjs
           python3 - <<'PY'
+          import os
           from pathlib import Path
+          cap=os.environ["OUTPUT_CAP"]
           p=Path("scripts/output-envelope-tmp.mjs")
           s=p.read_text()
           s=s.replace("for(const t of corpus.tasks){", 'for(const t of corpus.tasks.filter(t=>["cog-v1-02","cog-v1-05","cog-v1-13","cog-v1-14"].includes(t.taskId))){', 1)
-          s=s.replace("maxOutputTokens:512", "maxOutputTokens:1024", 1)
+          s=s.replace("maxOutputTokens:512", f"maxOutputTokens:{cap}", 1)
           s=s.replace('"STRONGER_SENTIENT_BASELINE_V1"', '"STRONGER_SENTIENT_OUTPUT_ENVELOPE_V1"', 1)
           s=s.replace('"stronger-sentient-baseline-v1.json"', '"stronger-sentient-output-envelope-v1.json"', 1)
           p.write_text(s)
           PY
-          grep -q 'maxOutputTokens:1024' scripts/output-envelope-tmp.mjs
+          grep -q "maxOutputTokens:${OUTPUT_CAP}" scripts/output-envelope-tmp.mjs
           grep -q 'cog-v1-14' scripts/output-envelope-tmp.mjs
 
       - name: Run bounded output-envelope experiment
