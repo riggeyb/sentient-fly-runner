@@ -1,0 +1,66 @@
+name: Stronger Sentient Atlas Admission Burst v1
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stronger-sentient-atlas-admission-burst-v1
+  cancel-in-progress: false
+
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.BASELINE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify immutable baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build exact accepted baseline
+        working-directory: sentient
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+      - name: Run bounded 1/2/4/8 admission bursts
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: node scripts/stronger-sentient-admission-burst-v1.mjs
+      - name: Verify baseline immutability
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-admission-burst-v1
+          path: stronger-sentient-admission-burst-v1.json
+          retention-days: 14
+      - name: Deployment guard
+        run: |
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "PRODUCTION_CONFIGURATION_CHANGE=false"
