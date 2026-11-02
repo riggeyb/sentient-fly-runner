@@ -111,7 +111,7 @@ jobs:
           MAX_PROVIDER_CALLS: ${{ inputs.max_provider_calls }}
           BASELINE_ROOT: sentient
           CORPUS_ROOT: corpus-source
-          MEASUREMENT_OUTPUT: ${{ runner.temp }}/stronger-sentient-measurement.json
+          MEASUREMENT_OUT: ${{ runner.temp }}/stronger-sentient-measurement.json
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
         run: node ./stronger-sentient-measure-v1.mjs
 
