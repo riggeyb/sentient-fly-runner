@@ -12,8 +12,8 @@ concurrency:
 
 env:
   BASE_SHA: 67b5f7f6bbac14dbf991e444947912deba2bdc3e
-  EXPECTED_SHA: 4e20a2e50036bd51560917c09952263b9d1bf0b6
-  EXPECTED_TREE: 5a0e2fecac6d0e97505fd2d81c6705ff13951869
+  EXPECTED_SHA: 4cb18665bf61aa1dce860f063ada043ce489ca2a
+  EXPECTED_TREE: 36eb436ad6cb8e9e5e947af9ea58e21e37fc5638
   NODE_VERSION: "22"
 
 jobs:
@@ -48,6 +48,7 @@ jobs:
           git diff --name-only "$BASE_SHA" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual.txt"
           cat > "$RUNNER_TEMP/expected.txt" <<'SCOPE'
           src/index.ts
+          src/lab/librechat/bridge.ts
           src/model/cognitive-policy.ts
           src/model/providers/atlas-admission-controller.ts
           src/model/providers/atlas-cloud-client.ts
