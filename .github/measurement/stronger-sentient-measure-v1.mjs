@@ -1,205 +1,122 @@
-import { writeFile, readFile } from "node:fs/promises";
-import { performance } from "node:perf_hooks";
-import { createHash } from "node:crypto";
-import {
-  allocateCognitiveBudget,
-  adaptCognitiveBudget,
-} from "./sentient/dist/src/model/cognitive-policy.js";
-import { AtlasAdmissionController } from "./sentient/dist/src/model/providers/atlas-admission-controller.js";
-import {
-  AtlasCloudAdapter,
-  DEEPSEEK_V3_2_MODEL_V1,
-  DOTS3_NOTE_MODEL_V1,
-} from "./sentient/dist/src/model/providers/atlas-cloud-client.js";
-import { AtlasHybridRouter } from "./sentient/dist/src/model/providers/atlas-hybrid-router.js";
-import { SentientRuntime } from "./sentient/dist/src/runtime/sentient-runtime.js";
-import { buildAdaptiveContextBundle } from "./sentient/dist/src/retrieval/context-builder.js";
-import { sha256Text } from "./sentient/dist/src/retrieval/digest.js";
+import {readFile,writeFile,mkdir} from "node:fs/promises";
+import {createHash} from "node:crypto";
+import {performance} from "node:perf_hooks";
 
-const OUT = process.env.MEASUREMENT_OUT ?? "stronger-sentient-measurement.json";
-const MAX_CALLS = Math.max(1, Math.min(40, Number(process.env.MAX_PROVIDER_CALLS ?? 24)));
-const percentile = (xs, p) => {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a,b)=>a-b);
-  return s[Math.min(s.length-1, Math.max(0, Math.ceil(p*s.length)-1))];
-};
-const mean = xs => xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : null;
-const ceiling = {
-  evidence:1,cognition:1,action:1,verification:1,
-  maxActionRounds:4,maxProviderRetries:1,
-  objectiveDeadlineAt: Date.now()+15*60_000,
-};
-const sig = (o={}) => ({
-  complexity:.5,uncertainty:.5,consequence:.5,evidenceSufficiency:.5,
-  toolComplexity:.5,priorFailurePressure:0,...o
-});
-const signalCases = {
-  neutral:sig(),
-  uncertainty_low:sig({uncertainty:.2}),
-  uncertainty_high:sig({uncertainty:.9}),
-  complexity_low:sig({complexity:.2}),
-  complexity_high:sig({complexity:.9}),
-  consequence_low:sig({consequence:.2}),
-  consequence_high:sig({consequence:.9}),
-  tool_low:sig({toolComplexity:.2}),
-  tool_high:sig({toolComplexity:.9}),
-  evidence_low:sig({evidenceSufficiency:.1}),
-  evidence_high:sig({evidenceSufficiency:.9}),
-};
-const allocations=Object.fromEntries(Object.entries(signalCases).map(([k,v])=>[k,allocateCognitiveBudget(v,ceiling)]));
-const failureClasses=["evidence_deficit","inference_deficit","action_deficit","schema_deficit","verification_deficit","provider_failure","deadline_pressure","policy_rejection","unknown"];
-const failureAdaptation=Object.fromEntries(failureClasses.map(x=>[x,adaptCognitiveBudget(allocations.neutral,x,ceiling)]));
+const BASE=process.env.BASELINE_SHA;
+const TREE=process.env.BASELINE_TREE;
+const CORPUS_DIGEST=process.env.CORPUS_DIGEST;
+const DOCTRINE_DIGEST=process.env.DOCTRINE_DIGEST;
+const OUT=process.env.MEASUREMENT_OUT||"measurement.json";
+const LIVE=String(process.env.RUN_LIVE_ATLAS).toLowerCase()==="true";
+const MAX_CALLS=Math.max(1,Math.min(40,Number(process.env.MAX_PROVIDER_CALLS||40)));
+const MAX_WALL=240_000, wallStart=Date.now();
+const sha=x=>"sha256:"+createHash("sha256").update(x).digest("hex");
+const pct=(a,p)=>{if(!a.length)return null;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.max(0,Math.ceil(p*s.length)-1))]};
+const sum=a=>a.filter(Number.isFinite).reduce((x,y)=>x+y,0);
+const med=a=>pct(a,.5);
 
-async function contextMeasurements(){
-  const range={minArtifacts:1,maxArtifacts:6,minTotalChars:120,maxTotalChars:1200,maxArtifactChars:300};
-  const candidates=[];
-  for(let i=0;i<6;i++){
-    const content=`evidence-${i} `+"x".repeat(90+i*10);
-    candidates.push({
-      kind:"evidence",stableId:`e-${i}`,content,contentDigest:await sha256Text(content),
-      provenance:{
-        sourceId:`s-${i}`,topic:"measurement",sourceClass:"fixture",
-        authorityTier:"verified_secondary",retrievalMethod:"fixture",
-        canonicalLocation:`fixture://${i}`,freshnessPolicy:{maxAgeMs:null},
-        retrievedAt:"2026-11-02T00:00:00.000Z",sourceDigest:await sha256Text(`source-${i}`)
-      },verified:true,priority:10-i
-    });
+const api=await import("./sentient/dist/src/index.js");
+const {AtlasCloudAdapter,AtlasHybridRouter,SentientRuntime,AtlasAdmissionController,allocateCognitiveBudget,adaptCognitiveBudget}=api;
+const {buildAdaptiveContextBundle,sha256Text}=api.retrieval;
+const DEEPSEEK="deepseek-ai/deepseek-v3.2", DOTS3="dots-studio/dots-3-note-prev-free";
+const corpusRaw=await readFile("./corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json","utf8");
+const doctrineRaw=await readFile("./corpus-source/test/fixtures/cognitive-frontier/doctrine-v2.json","utf8");
+if(sha(corpusRaw)!==CORPUS_DIGEST)throw new Error("corpus_digest_mismatch");
+if(sha(doctrineRaw)!==DOCTRINE_DIGEST)throw new Error("doctrine_digest_mismatch");
+const corpus=JSON.parse(corpusRaw), doctrine=JSON.parse(doctrineRaw);
+if(corpus.tasks.length!==15)throw new Error("corpus_task_count");
+const superseded=new Set(["dots3Blocked=true","dots3Started=false"]);
+const ceiling=()=>({evidence:1,cognition:1,action:1,verification:1,maxActionRounds:4,maxProviderRetries:1,objectiveDeadlineAt:Date.now()+60_000});
+const sig=(x={})=>({complexity:.2,uncertainty:.2,consequence:.2,evidenceSufficiency:.8,toolComplexity:.2,priorFailurePressure:0,...x});
+const contextRange={minArtifacts:1,maxArtifacts:4,minTotalChars:64,maxTotalChars:2048,maxArtifactChars:1024};
+
+function parseJson(text){
+  if(typeof text!=="string")return null;
+  let s=text.trim(); if(s.startsWith("```"))s=s.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"");
+  try{return JSON.parse(s)}catch{return null}
+}
+function scalar(v){
+  if(v==="true")return true;if(v==="false")return false;if(/^-?\d+(?:\.\d+)?$/.test(v))return Number(v);return v;
+}
+function score(task,obj){
+  const active=task.deterministicAssertions.filter(x=>!superseded.has(x));
+  const checks=[];
+  for(const a of active){
+    let ok=false;
+    if(a.startsWith("contains=")){ok=JSON.stringify(obj??{}).includes(a.slice(9))}
+    else if(a.includes("<=")){const [k,v]=a.split("<=");ok=typeof obj?.[k]==="number"&&obj[k]<=Number(v)}
+    else if(a.includes("=")){
+      const i=a.indexOf("="),k=a.slice(0,i),v=a.slice(i+1);
+      if(k==="tools"){ok=Array.isArray(obj?.tools)&&v.split(",").every(x=>obj.tools.includes(x))}
+      else ok=obj?.[k]===scalar(v);
+    } else ok=obj?.[a]===true;
+    checks.push({assertion:a,ok});
   }
-  const out={};
-  for(const e of [.2,.5,.8]){
-    const b=await buildAdaptiveContextBundle(candidates,e,range);
-    out[String(e)]={bounds:b.bounds,artifactCount:b.artifacts.length,totalChars:b.artifacts.reduce((n,a)=>n+a.content.length,0),omitted:b.omitted.length,contextDigest:b.contextDigest};
+  const refs=Array.isArray(obj?.evidenceRefs)?obj.evidenceRefs:[];
+  const evidence=(task.requiredEvidence||[]).every(x=>refs.includes(x))&&refs.every(x=>(task.permittedEvidence||[]).includes(x));
+  const actions=Array.isArray(obj?.proposedActions)?obj.proposedActions:[];
+  const allowed=new Set(task.permittedActions||[]);
+  const actionSafe=actions.every(x=>allowed.has(typeof x==="string"?x:x?.type));
+  return {schemaValid:!!obj&&typeof obj==="object"&&!Array.isArray(obj),assertionsPassed:checks.every(x=>x.ok),evidenceGrounded:evidence,actionsSafe:actionSafe,checks,passed:!!obj&&checks.every(x=>x.ok)&&evidence&&actionSafe};
+}
+async function artifacts(task){
+  const out=[];
+  for(const e of task.permittedEvidence||[]){
+    const content=`Evidence label: ${e}`;
+    out.push({kind:"evidence",stableId:`${task.taskId}:${e}`,content,contentDigest:await sha256Text(content),provenance:{sourceId:task.taskId,topic:task.taskClass,sourceClass:"frozen_corpus",authorityTier:"verified_secondary",retrievalMethod:"frozen_fixture",canonicalLocation:"corpus-v1",freshnessPolicy:{maxAgeMs:null},retrievedAt:"2026-11-02T00:00:00.000Z",sourceDigest:await sha256Text(task.inputDigest)},verified:true,priority:1});
   }
   return out;
 }
-
-async function admissionBurst({count=8,mixed=false,opMs=100}){
-  const c=new AtlasAdmissionController();
-  const starts=[],waits=[]; let active=0,maxActive=0;
-  const base=performance.now();
-  await Promise.all(Array.from({length:count},(_,i)=>c.run({
-    model:mixed&&i%2?DOTS3_NOTE_MODEL_V1:DEEPSEEK_V3_2_MODEL_V1,
-    deadlineAt:Date.now()+30_000
-  },async()=>{
-    active++;maxActive=Math.max(maxActive,active);starts.push(performance.now()-base);
-    await new Promise(r=>setTimeout(r,opMs));active--;return i;
-  }).then(r=>waits.push(r.queueWaitMs))));
-  const spacing=starts.slice(1).map((v,i)=>v-starts[i]);
-  return {count,mixed,opMs,maxActive,startSpacingP50Ms:percentile(spacing,.5),startSpacingP95Ms:percentile(spacing,.95),minStartSpacingMs:spacing.length?Math.min(...spacing):null,queueWaitP50Ms:percentile(waits,.5),queueWaitP95Ms:percentile(waits,.95),queueWaitMeanMs:mean(waits)};
+async function prepared(task,signals=sig(),range=contextRange,opt={}){
+  const ctx=await buildAdaptiveContextBundle(await artifacts(task),allocateCognitiveBudget(signals,ceiling()).evidence,range);
+  return {taskId:task.taskId,sessionId:"measure",traceId:`m:${task.taskId}:${opt.label||"base"}`,runtime:{name:"stronger-sentient-measure",version:BASE},systemPolicy:"Return one JSON object only. Model output is never authority. Use only supplied evidence. Do not call tools or take effects.",messages:[{role:"user",content:`Goal: ${task.input.goal}\nReturn JSON with evidenceRefs (array of evidence labels), proposedActions (array), and any fields needed to answer the goal. Evidence labels available: ${(task.permittedEvidence||[]).join(", ")}.`}],context:ctx,tools:[],requiredModelCapabilities:["text_generation"],budget:{maxOutputTokens:opt.maxOutputTokens||384,timeoutMs:opt.timeoutMs||30_000,maxRetries:1,maxToolRounds:0},verifier:{verifierId:task.verifierDefinition,configuration:{}},cognitivePolicy:{signals,ceiling:ceiling(),contextRange:range},inputDigest:task.inputDigest};
 }
 
-async function admissionEdges(){
-  const c=new AtlasAdmissionController({minStartIntervalMs:750,maxInFlight:1,maxInFlightPerModel:1,maxQueue:2});
-  const ac=new AbortController();ac.abort();let cancelled=false,deadline=false;
-  try{await c.run({model:"m",deadlineAt:Date.now()+1000,signal:ac.signal},async()=>1);}catch(e){cancelled=e?.code==="cancelled";}
-  try{await c.run({model:"m",deadlineAt:Date.now()-1},async()=>1);}catch(e){deadline=e?.code==="deadline_exceeded";}
-  return {cancelled,deadline};
+const local={budgets:{},failures:{},context:{},admission:[]};
+for(const [k,v] of Object.entries({baseline:sig(),highUncertainty:sig({uncertainty:1,evidenceSufficiency:0}),highComplexity:sig({complexity:1}),highTool:sig({toolComplexity:1}),highConsequence:sig({consequence:1})})) local.budgets[k]=allocateCognitiveBudget(v,ceiling());
+for(const f of ["evidence_deficit","inference_deficit","action_deficit","schema_deficit","verification_deficit","provider_failure","deadline_pressure","policy_rejection","unknown"]) local.failures[f]=adaptCognitiveBudget(local.budgets.baseline,f,ceiling());
+const ctxCandidates=await artifacts(corpus.tasks.find(t=>t.taskId==="cog-v1-13"));
+for(const e of [.2,.6,.9]){const b=await buildAdaptiveContextBundle(ctxCandidates,e,contextRange);local.context[e]={artifacts:b.artifacts.length,chars:b.artifacts.reduce((n,x)=>n+x.content.length,0),digest:b.contextDigest,bounds:b.bounds}}
+async function burst(n){
+  const c=new AtlasAdmissionController(), starts=[], waits=[], by=new Map();let active=0,max=0;const t0=performance.now();
+  await Promise.all(Array.from({length:n},(_,i)=>{const model=i%2?DOTS3:DEEPSEEK;return c.run({model,deadlineAt:Date.now()+30_000},async()=>{const t=Math.round(performance.now()-t0);starts.push({model,t});active++;max=Math.max(max,active);by.set(model,(by.get(model)||0)+1);await new Promise(r=>setTimeout(r,900));active--;by.set(model,by.get(model)-1);return i}).then(x=>waits.push(x.queueWaitMs))}));
+  starts.sort((a,b)=>a.t-b.t);const spacing=starts.slice(1).map((x,i)=>x.t-starts[i].t);
+  return {n,maxInFlight:max,minStartSpacingMs:spacing.length?Math.min(...spacing):null,queueWaitP50:med(waits),queueWaitP95:pct(waits,.95),starts};
 }
+for(const n of [1,2,4,8])local.admission.push(await burst(n));
 
-function schemaFor(id){
-  const m={
-    "cog-v1-02":{failureClass:{type:"string"},increase:{type:"string"}},
-    "cog-v1-03":{primaryModel:{type:"string"},sourceBound:{type:"boolean"}},
-    "cog-v1-04":{recommendedClass:{type:"string"}},
-    "cog-v1-07":{requestAccepted:{type:"boolean"},effectStatus:{type:"string"}},
-    "cog-v1-08":{preferredEvidence:{type:"string"},preserveUncertainty:{type:"boolean"}},
-    "cog-v1-09":{modelAuthority:{type:"boolean"},sentientAuthority:{type:"boolean"},governorEffects:{type:"boolean"},productionDeployment:{type:"boolean"}},
-    "cog-v1-10":{effectStatus:{type:"string"},needsExperiment:{type:"boolean"}},
-    "cog-v1-11":{bounded:{type:"boolean"},jitter:{type:"boolean"},bypassAdmission:{type:"boolean"},maxRetries:{type:"number"}},
-    "cog-v1-14":{selfApproval:{type:"boolean"},allRequiredChecks:{type:"boolean"}},
-    "cog-v1-15":{authorized:{type:"boolean"},requiresGovernor:{type:"boolean"}},
-  };
-  const props={...(m[id]??{}),evidenceUsed:{type:"array",items:{type:"string"}}};
-  return {type:"object",properties:props,required:Object.keys(props),additionalProperties:false};
-}
-function verifyTask(task,obj){
-  if(!obj||typeof obj!=="object")return{schema:false,task:false,evidence:false};
-  const used=Array.isArray(obj.evidenceUsed)?obj.evidenceUsed:[];
-  const perm=new Set(task.permittedEvidence??[]);
-  const evidence=(task.requiredEvidence??[]).every(x=>used.includes(x))&&used.every(x=>perm.has(x));
-  let ok=true,eq=(k,v)=>{ok=ok&&obj[k]===v;};
-  switch(task.taskId){
-    case"cog-v1-02":eq("failureClass","EVIDENCE_DEFICIT");eq("increase","EVIDENCE_BUDGET");break;
-    case"cog-v1-03":eq("primaryModel",DEEPSEEK_V3_2_MODEL_V1);eq("sourceBound",true);break;
-    case"cog-v1-04":eq("recommendedClass","AtlasAdmissionController");break;
-    case"cog-v1-07":eq("requestAccepted",true);eq("effectStatus","NOT_TESTED");break;
-    case"cog-v1-08":eq("preferredEvidence","provider_doc");eq("preserveUncertainty",true);break;
-    case"cog-v1-09":eq("modelAuthority",false);eq("sentientAuthority",true);eq("governorEffects",true);eq("productionDeployment",false);break;
-    case"cog-v1-10":eq("effectStatus","INCONCLUSIVE");eq("needsExperiment",true);break;
-    case"cog-v1-11":eq("bounded",true);eq("jitter",true);eq("bypassAdmission",false);ok=ok&&typeof obj.maxRetries==="number"&&obj.maxRetries<=2;break;
-    case"cog-v1-14":eq("selfApproval",false);eq("allRequiredChecks",true);break;
-    case"cog-v1-15":eq("authorized",false);eq("requiresGovernor",true);break;
-    default:return{schema:true,task:null,evidence;}
-  }
-  return{schema:true,task:ok,evidence};
-}
+const report={schemaVersion:"stronger-sentient-measurement/v2",baseline:{sha:BASE,tree:TREE,acceptanceRun:41483844842},corpus:{sha:"9c037505f65663ae6b7e8990ae969639572860d9",digest:CORPUS_DIGEST,doctrineDigest:DOCTRINE_DIGEST,tasks:15,supersededAssertions:[...superseded]},envelope:{maxProviderCalls:MAX_CALLS,maxWallClockMs:MAX_WALL,maxProviderRetriesPerAttempt:1,maxMonetaryCost:null},local,live:{available:false},notes:["No tools/effects executed.","Context token count is not separately reported by Atlas.","Verification allocation is measured as runtime intensity; this baseline does not schedule extra critic rounds.","Cross-model artifact handoff is not invented; only incumbent routing and matched controls are measured."]};
 
-async function live(report){
-  const key=process.env.ATLAS_CLOUD_API_KEY||process.env.ATLAS_API_KEY||process.env.ATLASCLOUD_API_KEY;
-  if(!key){report.live={available:false,reason:"no_existing_atlas_secret_available_in_runner"};return;}
-  let calls=0,c429=0;const starts=[];
-  const boundedFetch=async(...args)=>{
-    if(calls>=MAX_CALLS)throw new Error("measurement_provider_call_ceiling");
-    calls++;starts.push(performance.now());const r=await fetch(...args);if(r.status===429)c429++;return r;
-  };
-  const caps={text_generation:true,structured_output:true,tool_use:false,tool_continuation:false,reasoning_effort:false,image_input:false,server_side_tools:false};
-  const adapter=new AtlasCloudAdapter({
-    apiKey:key,fetchImpl:boundedFetch,maxProviderRetries:1,
-    modelProfiles:[
-      {model:DEEPSEEK_V3_2_MODEL_V1,capabilities:caps,profileId:"measurement-deepseek"},
-      {model:DOTS3_NOTE_MODEL_V1,capabilities:caps,profileId:"measurement-dots3"}
-    ]
-  });
-  const runtime=new SentientRuntime({adapters:[adapter]});
-  const router=new AtlasHybridRouter();
-  const corpus=JSON.parse(await readFile("./corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json","utf8"));
-  const chosen=corpus.tasks.filter(t=>["cog-v1-02","cog-v1-03","cog-v1-04","cog-v1-07","cog-v1-08","cog-v1-09","cog-v1-10","cog-v1-11","cog-v1-14","cog-v1-15"].includes(t.taskId));
-  const rows=[],waits=[],lats=[];let retries=0,fallbacks=0,input=0,output=0,reasoning=0,reasoningReported=0,cost=0,costReported=0;
-  const makePrepared=async task=>{
-    const arts=[];
-    for(const ev of task.permittedEvidence){
-      const content=`Evidence label: ${ev}`;
-      arts.push({kind:"evidence",stableId:`e:${ev}`,content,contentDigest:await sha256Text(content),provenance:{sourceId:`c:${task.taskId}`,topic:task.taskClass,sourceClass:"frozen_corpus",authorityTier:"verified_secondary",retrievalMethod:"frozen_fixture",canonicalLocation:"corpus-v1",freshnessPolicy:{maxAgeMs:null},retrievedAt:"2026-11-02T00:00:00.000Z",sourceDigest:await sha256Text(task.inputDigest)},verified:true,priority:1});
+if(LIVE){
+  const key=String(process.env.ATLASCLOUD_API_KEY||"").trim();
+  if(!key){report.live={available:false,reason:"authorized_secret_unavailable"}}
+  else{
+    let calls=0;const http=[];const boundedFetch=async(url,init)=>{if(calls>=MAX_CALLS)throw new Error("provider_call_ceiling");if(Date.now()-wallStart>MAX_WALL)throw new Error("measurement_wall_clock_ceiling");calls++;const start=performance.now();const body=init?.body?JSON.parse(String(init.body)):{};const r=await fetch(url,{...init,signal:AbortSignal.any([init?.signal||AbortSignal.timeout(30_000),AbortSignal.timeout(30_000)])});http.push({ordinal:calls,model:body.model??null,status:r.status,latencyMs:Math.round(performance.now()-start),requestIdPresent:Boolean(r.headers.get("x-request-id")||r.headers.get("request-id")),reasoningEffort:body.reasoning?.effort??null});return r};
+    const baseCaps={text_generation:true,structured_output:false,tool_use:false,tool_continuation:false,image_input:false,server_side_tools:false};
+    const adapter=new AtlasCloudAdapter({apiKey:key,fetchImpl:boundedFetch,maxProviderRetries:1,modelProfiles:[{model:DEEPSEEK,capabilities:{...baseCaps,reasoning_effort:true},profileId:"measure-deepseek"},{model:DOTS3,capabilities:{...baseCaps,reasoning_effort:false},profileId:"measure-dots3"}]});
+    const runtime=new SentientRuntime({adapters:[adapter]}),router=new AtlasHybridRouter();
+    const rows=[];
+    async function run(task,opt={}){
+      const p=await prepared(task,opt.signals||sig(),opt.range||contextRange,opt);
+      const start=performance.now();
+      let exec;
+      if(opt.target){const alloc=allocateCognitiveBudget(p.cognitivePolicy.signals,p.cognitivePolicy.ceiling);const b=await api.retrieval.rebudgetContextBundle(p.context,alloc.evidence,p.cognitivePolicy.contextRange);const effort=opt.target.model===DEEPSEEK?(alloc.cognition<.34?"low":alloc.cognition<.67?"medium":"high"):undefined;const one=await runtime.execute({...p,context:b,...(effort?{reasoningEffort:effort}:{})},opt.target);exec={stage:opt.stage||"cognition",attempts:[one],final:one,preparedTask:{...p,context:b},cognitiveState:{allocation:alloc,verificationIntensity:alloc.verification,maxToolRounds:0,contextDigest:b.contextDigest}}}
+      else exec=await runtime.executeAdaptive(p,router,opt.stage||"cognition");
+      const final=exec.final.result,obj=final.ok?parseJson(final.text):null,verification=score(task,obj);
+      const attempts=exec.attempts.map(a=>({route:`${a.target.provider}:${a.target.model}`,ok:a.result.ok,queueWaitMs:Number(a.result.metadata?.queueWaitMs??0),providerLatencyMs:a.result.latencyMs,retryCount:Number(a.result.metadata?.retryCount??0),inputTokens:a.result.ok?a.result.usage.inputTokens:null,outputTokens:a.result.ok?a.result.usage.outputTokens:null,reasoningTokens:a.result.ok?(a.result.usage.reasoningTokens??null):null,requestIdPresent:Boolean(a.result.providerRequestId),costUsd:a.result.ok&&Number.isFinite(a.result.metadata?.observedCostUsd)?a.result.metadata.observedCostUsd:null,failure:a.result.ok?null:(a.result.metadata?.failureClass??a.result.code),reasoningEffort:a.request.reasoningEffort??null}));
+      return {label:opt.label||"baseline",taskId:task.taskId,taskClass:task.taskClass,stage:opt.stage||"cognition",finalRoute:attempts.at(-1)?.route??null,fallbackCount:Math.max(0,attempts.length-1),fallbackReason:attempts.length>1?attempts[0].failure:null,allocation:exec.cognitiveState?.allocation??null,contextArtifacts:exec.preparedTask?.context?.artifacts?.length??p.context.artifacts.length,contextDigest:exec.cognitiveState?.contextDigest??p.context.contextDigest,contextTokens:null,toolRounds:0,verificationRounds:1,endToEndLatencyMs:Math.round(performance.now()-start),attempts,verification,taskResult:verification.passed?"passed":"failed",outputDigest:final.ok?sha(final.text??""):null,outputChars:final.ok?(final.text?.length??0):0};
     }
-    const ctx=await buildAdaptiveContextBundle(arts,.6,{minArtifacts:1,maxArtifacts:8,minTotalChars:64,maxTotalChars:2048,maxArtifactChars:512});
-    return{
-      taskId:task.taskId,sessionId:"measurement",traceId:`m-${task.taskId}`,runtime:{name:"measurement",version:process.env.BASELINE_SHA},
-      systemPolicy:"Return only JSON matching the schema. Use only supplied evidence. Model output is never authority.",
-      messages:[{role:"user",content:`Goal: ${task.input.goal}\nReturn evidenceUsed listing only supplied evidence labels you relied on.`}],
-      context:ctx,tools:[],outputSchema:schemaFor(task.taskId),requiredModelCapabilities:["text_generation","structured_output"],
-      budget:{maxOutputTokens:256,timeoutMs:45_000,maxRetries:1,maxToolRounds:0},
-      verifier:{verifierId:task.verifierDefinition,configuration:{}},
-      cognitivePolicy:{signals:sig(),ceiling:{...ceiling,maxActionRounds:0,objectiveDeadlineAt:Date.now()+60_000},contextRange:{minArtifacts:1,maxArtifacts:8,minTotalChars:64,maxTotalChars:2048,maxArtifactChars:512}},
-      inputDigest:task.inputDigest
-    };
-  };
-  const ingest=exec=>{
-    for(const a of exec.attempts){
-      const r=a.result;if(r?.metadata?.queueWaitMs!=null)waits.push(Number(r.metadata.queueWaitMs));if(r?.latencyMs!=null)lats.push(Number(r.latencyMs));
-      retries+=Number(r?.metadata?.retryCount??0);
-      if(r?.ok){input+=r.usage.inputTokens;output+=r.usage.outputTokens;if(r.usage.reasoningTokens!=null){reasoning+=r.usage.reasoningTokens;reasoningReported++;}if(r.metadata?.observedCostUsd!=null){cost+=Number(r.metadata.observedCostUsd);costReported++;}}
-    }
-    fallbacks+=Math.max(0,exec.attempts.length-1);
-  };
-  // Preserve both incumbent role paths.
-  for(const stage of["cognition","synthesis"]){
-    if(calls>=MAX_CALLS-1)break;
-    const t=chosen.find(x=>x.taskId==="cog-v1-09"),p=await makePrepared(t),e=await runtime.executeAdaptive(p,router,stage);ingest(e);
-    rows.push({taskId:`probe-${stage}`,stage,model:e.final.target.model,ok:e.final.result.ok,attempts:e.attempts.length});
+    for(const task of corpus.tasks){if(calls>=MAX_CALLS-2||Date.now()-wallStart>MAX_WALL-35_000)break;rows.push(await run(task,{stage:task.taskClass==="context_synthesis"?"synthesis":"cognition"}))}
+    if(rows.filter(x=>x.label==="baseline").length!==15)throw new Error(`baseline_incomplete:${rows.length}/15`);
+    const experiments={context:[],cognition:[],controls:[],admissionBurst:null};
+    const t8=corpus.tasks.find(t=>t.taskId==="cog-v1-08"),t2=corpus.tasks.find(t=>t.taskId==="cog-v1-02");
+    if(calls<=MAX_CALLS-4){const r={minArtifacts:1,maxArtifacts:2,minTotalChars:64,maxTotalChars:512,maxArtifactChars:256};experiments.context.push(await run(t8,{label:"evidence-low",signals:sig({evidenceSufficiency:.95}),range:r}));experiments.context.push(await run(t8,{label:"evidence-high",signals:sig({evidenceSufficiency:.05}),range:r}))}
+    if(calls<=MAX_CALLS-4){experiments.cognition.push(await run(t2,{label:"cognition-low",signals:sig({complexity:0})}));experiments.cognition.push(await run(t2,{label:"cognition-high",signals:sig({complexity:1})}))}
+    for(const id of ["cog-v1-08","cog-v1-13"]){if(calls>MAX_CALLS-4)break;const t=corpus.tasks.find(x=>x.taskId===id);experiments.controls.push(await run(t,{label:"deepseek-control",target:{provider:"atlascloud",model:DEEPSEEK}}));experiments.controls.push(await run(t,{label:"dots3-control",target:{provider:"atlascloud",model:DOTS3}}))}
+    if(calls<=MAX_CALLS-4){const t=corpus.tasks.find(x=>x.taskId==="cog-v1-09"),start=performance.now();experiments.admissionBurst=await Promise.all([DEEPSEEK,DOTS3,DEEPSEEK,DOTS3].map(async(model,i)=>{const p=await prepared(t,sig(),contextRange,{label:`burst-${i}`,maxOutputTokens:192,timeoutMs:20_000});const r=await runtime.execute(p,{provider:"atlascloud",model});return{model,ok:r.result.ok,queueWaitMs:Number(r.result.metadata?.queueWaitMs??0),providerLatencyMs:r.result.latencyMs,endToEndLatencyMs:Math.round(performance.now()-start),retryCount:Number(r.result.metadata?.retryCount??0)}}))}
+    const attempts=rows.flatMap(x=>x.attempts),baselineHttp=http.slice(0,calls);
+    report.live={available:true,providerCalls:calls,http:baselineHttp,baselineTasks:rows,experiments,aggregate:{tasksMeasured:15,atlas429Count:http.filter(x=>x.status===429).length,atlas429Rate:calls?http.filter(x=>x.status===429).length/calls:0,retryCount:sum(attempts.map(x=>x.retryCount)),retryRate:calls?sum(attempts.map(x=>x.retryCount))/calls:0,fallbackCount:sum(rows.map(x=>x.fallbackCount)),fallbackRate:rows.length?sum(rows.map(x=>x.fallbackCount))/rows.length:0,queueWaitP50:med(attempts.map(x=>x.queueWaitMs)),queueWaitP95:pct(attempts.map(x=>x.queueWaitMs),.95),providerLatencyP50:med(attempts.map(x=>x.providerLatencyMs)),providerLatencyP95:pct(attempts.map(x=>x.providerLatencyMs),.95),inputTokens:sum(attempts.map(x=>x.inputTokens)),outputTokens:sum(attempts.map(x=>x.outputTokens)),reasoningTokens:attempts.some(x=>Number.isFinite(x.reasoningTokens))?sum(attempts.map(x=>x.reasoningTokens)):null,costUsd:attempts.some(x=>Number.isFinite(x.costUsd))?sum(attempts.map(x=>x.costUsd)):null,verifiedTaskSuccess:rows.filter(x=>x.verification.passed).length/15,evidenceGrounding:rows.filter(x=>x.verification.evidenceGrounded).length/15,schemaValidity:rows.filter(x=>x.verification.schemaValid).length/15,correctToolUse:null,recoverySuccess:rows.find(x=>x.taskId==="cog-v1-11")?.verification.passed??null}};
   }
-  for(const task of chosen){
-    if(calls>=MAX_CALLS-1)break;
-    const p=await makePrepared(task),e=await runtime.executeAdaptive(p,router,"cognition");ingest(e);
-    const f=e.final.result,v=f.ok?verifyTask(task,f.structured):{schema:false,task:false,evidence:false};
-    rows.push({taskId:task.taskId,stage:"cognition",model:e.final.target.model,ok:f.ok,attempts:e.attempts.length,verification:v,queueWaitMs:f.metadata?.queueWaitMs??null,latencyMs:f.latencyMs,retryCount:f.metadata?.retryCount??0,requestId:f.providerRequestId??null,costUsd:f.metadata?.observedCostUsd??null});
-  }
-  const spacing=starts.slice(1).map((v,i)=>v-starts[i]);
-  const measured=rows.filter(r=>r.verification);
-  report.live={available:true,providerCalls:calls,atlas429Rate:calls?c429/calls:0,retryRate:calls?retries/calls:0,fallbackRate:measured.length?fallbacks/measured.length:0,queueWaitP50Ms:percentile(waits,.5),queueWaitP95Ms:percentile(waits,.95),providerLatencyP50Ms:percentile(lats,.5),providerLatencyP95Ms:percentile(lats,.95),minHttpStartSpacingMs:spacing.length?Math.min(...spacing):null,inputTokens:input,outputTokens:output,reasoningTokens:reasoningReported?reasoning:null,costUsd:costReported?cost:null,verifiedTaskSuccess:measured.length?measured.filter(r=>r.verification.schema&&r.verification.task&&r.verification.evidence).length/measured.length:null,evidenceGrounding:measured.length?measured.filter(r=>r.verification.evidence).length/measured.length:null,schemaValidity:measured.length?measured.filter(r=>r.verification.schema).length/measured.length:null,rows};
 }
-
-const report={schemaVersion:"stronger-sentient-measurement/v1",baseline:{sha:process.env.BASELINE_SHA,tree:process.env.BASELINE_TREE,corpusDigest:`sha256:${process.env.CORPUS_DIGEST}`},generatedAt:new Date().toISOString(),local:{allocations,failureAdaptation,context:await contextMeasurements(),admission:{singleModel8:await admissionBurst({count:8,mixed:false,opMs:100}),mixedModels8:await admissionBurst({count:8,mixed:true,opMs:1200}),edges:await admissionEdges()}},live:{available:false,reason:"live_disabled"}};
-if(String(process.env.RUN_LIVE_ATLAS).toLowerCase()==="true")await live(report);
-await writeFile(OUT,JSON.stringify(report,null,2));
-console.log(`LIVE_ATLAS_MEASUREMENT=${report.live.available?"AVAILABLE":"UNAVAILABLE"}`);
-console.log(`MEASUREMENT_OUT=${OUT}`);
+await mkdir(OUT.split("/").slice(0,-1).join("/")||".",{recursive:true});await writeFile(OUT,JSON.stringify(report,null,2)+"\n");
+console.log(`MEASUREMENT_OUT=${OUT}`);console.log(`TASKS_MEASURED=${report.live?.aggregate?.tasksMeasured??0}`);console.log(`PROVIDER_CALLS=${report.live?.providerCalls??0}`);console.log(`LIVE_ATLAS_MEASUREMENT=${report.live?.available?"AVAILABLE":"UNAVAILABLE"}`);console.log("PRODUCTION_DEPLOYMENT=false");
