@@ -1,0 +1,102 @@
+name: Stronger Sentient Director Data Efficiency Acceptance V1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      EXPECTED_SHA: 8c92f664207b2fb216d3e23bac73b35e2aa6318d
+      EXPECTED_TREE: 30e1205ffbbc7cf2491c82ffecc8bdcbe8e5e210
+      EXPECTED_SCOPE_BASE: 29b4db913590b1c585b5d00c4b314712dafb93d0
+      NEXT_TELEMETRY_DISABLED: "1"
+      CF_ACCESS_TEAM_DOMAIN: https://acceptance-placeholder.cloudflareaccess.com
+      CF_ACCESS_POLICY_AUD: acceptance-placeholder-aud
+      DIRECTOR_SENTIENT_BASE_URL: https://sentient-acceptance.invalid
+      DIRECTOR_SENTIENT_TOKEN: acceptance-build-placeholder
+    steps:
+      - name: Checkout exact Director data-efficiency candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/director-studio-beta
+          ref: 8c92f664207b2fb216d3e23bac73b35e2aa6318d
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Fence exact SHA tree and seven-file scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          printf '%s\n' \
+            'app/api/[...segments]/route.ts' \
+            'docs/workspace-view-revision.md' \
+            'lib/projects.ts' \
+            'public/studio-ui/app-1.js' \
+            'public/studio-ui/app-10.js' \
+            'public/studio-ui/app-2.js' \
+            'tests/workspace-view-revision.test.ts' | sort > "$RUNNER_TEMP/expected"
+          git diff --name-only "$EXPECTED_SCOPE_BASE" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+          echo "EXACT_SOURCE_FENCE=PASS"
+          echo "SEVEN_FILE_SCOPE=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install exact lock without regeneration
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$(sha256sum package-lock.json | awk '{print $1}')"
+          npm ci --no-audit --no-fund
+          after="$(sha256sum package-lock.json | awk '{print $1}')"
+          test "$before" = "$after"
+          echo "PACKAGE_LOCK_REGENERATED=false"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and component tests
+        run: npm test
+
+      - name: Vinext compatibility
+        run: npm run check:vinext
+
+      - name: Production build
+        run: npm run build:vinext
+
+      - name: Wrangler dry run
+        run: npx wrangler deploy --dry-run
+
+      - name: Final immutable-source fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          dirty="$(git diff --name-only)"
+          if [ -n "$dirty" ]; then
+            printf 'TRACKED_MUTATION=%s\n' "$dirty"
+            if [ "$dirty" = "next-env.d.ts" ]; then
+              git restore --source="$EXPECTED_SHA" -- next-env.d.ts
+              echo "GENERATED_NEXT_ENV_RESTORED=true"
+            else
+              echo "UNEXPECTED_TRACKED_MUTATION=true"
+              exit 1
+            fi
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TRACKED_SOURCE_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "DIRECTOR_DATA_EFFICIENCY_ACCEPTANCE=PASS"
