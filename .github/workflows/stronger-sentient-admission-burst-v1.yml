@@ -1,7 +1,13 @@
 name: Stronger Sentient Atlas Admission Burst v1
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      min_start_interval_ms:
+        description: "Experimental Atlas minimum start spacing in ms (250-5000)"
+        required: false
+        default: "750"
+        type: string
 
 permissions:
   contents: read
@@ -47,7 +53,13 @@ jobs:
       - name: Run bounded 1/2/4/8 admission bursts
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
-        run: node scripts/stronger-sentient-admission-burst-v1.mjs
+          MIN_START_INTERVAL_MS: ${{ inputs.min_start_interval_ms || '750' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$MIN_START_INTERVAL_MS" -ge 250
+          test "$MIN_START_INTERVAL_MS" -le 5000
+          node scripts/stronger-sentient-admission-burst-v1.mjs
       - name: Verify baseline immutability
         shell: bash
         run: |
