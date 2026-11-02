@@ -60,21 +60,15 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path("stronger-sentient-measure-v1.mjs")
-          s=p.read_text()
-          marker='const LIVE=String(process.env.RUN_LIVE_ATLAS).toLowerCase()==="true";\n'
+          p = Path("stronger-sentient-measure-v1.mjs")
+          s = p.read_text()
+          marker = 'const LIVE=String(process.env.RUN_LIVE_ATLAS).toLowerCase()==="true";\n'
           assert marker in s
-          s=s.replace(marker, marker+'const TARGETED_ONLY=String(process.env.TARGETED_ONLY).toLowerCase()==="true";\n', 1)
-          old='''    for(const task of corpus.tasks){if(calls>=MAX_CALLS-2||Date.now()-wallStart>MAX_WALL-35_000)break;rows.push(await run(task,{stage:task.taskClass==="context_synthesis"?"synthesis":"cognition"}))}
-    if(rows.filter(x=>x.label==="baseline").length!==15)throw new Error(`baseline_incomplete:${rows.length}/15`);
-'''
+          s = s.replace(marker, marker + 'const TARGETED_ONLY=String(process.env.TARGETED_ONLY).toLowerCase()==="true";\n', 1)
+          old = '    for(const task of corpus.tasks){if(calls>=MAX_CALLS-2||Date.now()-wallStart>MAX_WALL-35_000)break;rows.push(await run(task,{stage:task.taskClass==="context_synthesis"?"synthesis":"cognition"}))}\n    if(rows.filter(x=>x.label==="baseline").length!==15)throw new Error(`baseline_incomplete:${rows.length}/15`);\n'
+          new = '    if(!TARGETED_ONLY){\n      for(const task of corpus.tasks){if(calls>=MAX_CALLS-2||Date.now()-wallStart>MAX_WALL-35_000)break;rows.push(await run(task,{stage:task.taskClass==="context_synthesis"?"synthesis":"cognition"}))}\n      if(rows.filter(x=>x.label==="baseline").length!==15)throw new Error(`baseline_incomplete:${rows.length}/15`);\n    }\n'
           assert old in s
-          new='''    if(!TARGETED_ONLY){
-      for(const task of corpus.tasks){if(calls>=MAX_CALLS-2||Date.now()-wallStart>MAX_WALL-35_000)break;rows.push(await run(task,{stage:task.taskClass==="context_synthesis"?"synthesis":"cognition"}))}
-      if(rows.filter(x=>x.label==="baseline").length!==15)throw new Error(`baseline_incomplete:${rows.length}/15`);
-    }
-'''
-          s=s.replace(old,new,1)
+          s = s.replace(old, new, 1)
           p.write_text(s)
           PY
           node --check stronger-sentient-measure-v1.mjs
@@ -114,7 +108,9 @@ jobs:
           calls="${{ inputs.max_provider_calls }}"
           test "$calls" -ge 1
           test "$calls" -le 40
-          if [ "${{ inputs.run_live_atlas }}" = "true" ]; then test -n "${ATLASCLOUD_API_KEY:-}"; fi
+          if [ "${{ inputs.run_live_atlas }}" = "true" ]; then
+            test -n "${ATLASCLOUD_API_KEY:-}"
+          fi
           echo "MAX_PROVIDER_CALLS=$calls"
           echo "TARGETED_ONLY=${{ inputs.targeted_only }}"
           echo "MAX_WALL_CLOCK_MS=240000"
