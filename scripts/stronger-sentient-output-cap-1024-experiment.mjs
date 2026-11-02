@@ -7,7 +7,7 @@ const taskIds = (process.env.TARGET_TASK_IDS ?? "cog-v1-02,cog-v1-03,cog-v1-14")
 const maxOutputTokens = Number(process.env.TARGET_MAX_OUTPUT_TOKENS ?? "1024");
 const complexity =
   process.env.TARGET_COMPLEXITY === undefined ? undefined : Number(process.env.TARGET_COMPLEXITY);
-const campaign = process.env.TARGET_CAMPAIGN ?? "STRONGER_SENTIENT_OUTPUT_CAPN_1024_V1";
+const campaign = process.env.TARGET_CAMPAIGN ?? "STRONGER_SENTIENT_OUTPUT_CAP_1024_V1";
 const outputFile =
   process.env.TARGET_OUTPUT_FILE ?? "stronger-sentient-output-cap-1024-v1.json";
 
@@ -54,7 +54,7 @@ for (const [from, to] of replacements) {
 }
 
 const targetUrl = new URL("./.stronger-sentient-targeted-runtime.mjs", import.meta.url);
-s.writeFileSync(targetUrl, source);
+fs.writeFileSync(targetUrl, source);
 try {
   await import(`${targetUrl.href}?v=${Date.now()}`);
 } finally {
