@@ -1,8 +1,5 @@
 name: Stronger Sentient Measurement v2
 on:
-  push:
-    paths:
-      - ".github/workflows/stronger-sentient-measurement-v2.yml"
   workflow_dispatch:
 permissions:
   contents: read
@@ -64,10 +61,7 @@ jobs:
           ATLAS_CLOUD_API_KEY: ${{ secrets.ATLAS_CLOUD_API_KEY }}
           ATLAS_API_KEY: ${{ secrets.ATLAS_API_KEY }}
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
-        run: |
-          set -euo pipefail
-          cp .github/measurement/stronger-sentient-measure-v1.mjs ./stronger-sentient-measure.mjs
-          node ./stronger-sentient-measure.mjs
+        run: node .github/measurement/stronger-sentient-measure-v1.mjs
       - name: Verify baseline immutability
         shell: bash
         run: |
@@ -80,3 +74,7 @@ jobs:
           name: stronger-sentient-measurement-v2
           path: ${{ runner.temp }}/stronger-sentient-measurement.json
           retention-days: 14
+      - name: Deployment guard
+        run: |
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "PRODUCTION_CONFIGURATION_CHANGE=false"
