@@ -1,0 +1,289 @@
+{
+  "schemaVersion": "stronger-sentient-measurement/v2",
+  "baseline": {
+    "sha": "c05ebe9ffed7254bb749cee1c72a965f970def7c",
+    "tree": "00296d7129fa8ab7f3254943a57df444591ad1ab",
+    "acceptanceRun": 41483844842
+  },
+  "corpus": {
+    "sha": "9c037505f65663ae6b7e8990ae969639572860d9",
+    "digest": "sha256:611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51",
+    "doctrineDigest": "sha256:ec2a36ce9ebc6a735e11593da32988083616a43f1eedddc2467b0d80affa4389",
+    "tasks": 15,
+    "supersededAssertions": [
+      "dots3Blocked=true",
+      "dots3Started=false"
+    ]
+  },
+  "envelope": {
+    "maxProviderCalls": 1,
+    "maxWallClockMs": 240000,
+    "maxProviderRetriesPerAttempt": 1,
+    "maxMonetaryCost": null
+  },
+  "local": {
+    "budgets": {
+      "baseline": {
+        "evidence": 0.36,
+        "cognition": 0.35,
+        "action": 0.27,
+        "verification": 0.35
+      },
+      "highUncertainty": {
+        "evidence": 1,
+        "cognition": 0.47,
+        "action": 0.27,
+        "verification": 0.43
+      },
+      "highComplexity": {
+        "evidence": 0.36,
+        "cognition": 0.83,
+        "action": 0.27,
+        "verification": 0.35
+      },
+      "highTool": {
+        "evidence": 0.36,
+        "cognition": 0.35,
+        "action": 0.75,
+        "verification": 0.35
+      },
+      "highConsequence": {
+        "evidence": 0.36,
+        "cognition": 0.35,
+        "action": 0.27,
+        "verification": 0.87
+      }
+    },
+    "failures": {
+      "evidence_deficit": {
+        "allocation": {
+          "evidence": 0.56,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "retrieve_more"
+      },
+      "inference_deficit": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.55,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "deepen_cognition"
+      },
+      "action_deficit": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.47,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "permit_more_action"
+      },
+      "schema_deficit": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "constrained_regeneration"
+      },
+      "verification_deficit": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.55
+        },
+        "hardStop": false,
+        "strategy": "strengthen_verification"
+      },
+      "provider_failure": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "provider_recovery"
+      },
+      "deadline_pressure": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": false,
+        "strategy": "deadline_recovery"
+      },
+      "policy_rejection": {
+        "allocation": {
+          "evidence": 0.36,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.35
+        },
+        "hardStop": true,
+        "strategy": "stop_policy"
+      },
+      "unknown": {
+        "allocation": {
+          "evidence": 0.41,
+          "cognition": 0.35,
+          "action": 0.27,
+          "verification": 0.4
+        },
+        "hardStop": false,
+        "strategy": "conservative_continue"
+      }
+    },
+    "context": {
+      "0.2": {
+        "artifacts": 2,
+        "chars": 46,
+        "digest": "sha256:72f62fc6696cfe51bcc75036fbae1132a434ec4b21e7e9b8e16aacad5491741d",
+        "bounds": {
+          "maxArtifacts": 2,
+          "maxTotalChars": 461,
+          "maxArtifactChars": 1024
+        }
+      },
+      "0.6": {
+        "artifacts": 3,
+        "chars": 67,
+        "digest": "sha256:6fc74280b87ef412f66764af31db70f90a52f26d3a616d2bb1874289143d54d2",
+        "bounds": {
+          "maxArtifacts": 3,
+          "maxTotalChars": 1254,
+          "maxArtifactChars": 1024
+        }
+      },
+      "0.9": {
+        "artifacts": 4,
+        "chars": 86,
+        "digest": "sha256:4a397b1221db0449283c97c2504ff3c36be6638c3402cfa8770983c6a0809a08",
+        "bounds": {
+          "maxArtifacts": 4,
+          "maxTotalChars": 1850,
+          "maxArtifactChars": 1024
+        }
+      }
+    },
+    "admission": [
+      {
+        "n": 1,
+        "maxInFlight": 1,
+        "minStartSpacingMs": null,
+        "queueWaitP50": 0,
+        "queueWaitP95": 0,
+        "starts": [
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 0
+          }
+        ]
+      },
+      {
+        "n": 2,
+        "maxInFlight": 2,
+        "minStartSpacingMs": 751,
+        "queueWaitP50": 0,
+        "queueWaitP95": 751,
+        "starts": [
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 0
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 751
+          }
+        ]
+      },
+      {
+        "n": 4,
+        "maxInFlight": 2,
+        "minStartSpacingMs": 750,
+        "queueWaitP50": 750,
+        "queueWaitP95": 2251,
+        "starts": [
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 0
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 750
+          },
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 1501
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 2252
+          }
+        ]
+      },
+      {
+        "n": 8,
+        "maxInFlight": 2,
+        "minStartSpacingMs": 749,
+        "queueWaitP50": 2253,
+        "queueWaitP95": 5254,
+        "starts": [
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 0
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 751
+          },
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 1502
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 2254
+          },
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 3003
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 3755
+          },
+          {
+            "model": "deepseek-ai/deepseek-v3.2",
+            "t": 4505
+          },
+          {
+            "model": "dots-studio/dots-3-note-prev-free",
+            "t": 5255
+          }
+        ]
+      }
+    ]
+  },
+  "live": {
+    "available": false
+  },
+  "notes": [
+    "No tools/effects executed.",
+    "Context token count is not separately reported by Atlas.",
+    "Verification allocation is measured as runtime intensity; this baseline does not schedule extra critic rounds.",
+    "Cross-model artifact handoff is not invented; only incumbent routing and matched controls are measured."
+  ]
+}
