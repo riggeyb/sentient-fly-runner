@@ -1,0 +1,98 @@
+name: Stronger Sentient Baseline Measurement v1
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stronger-sentient-baseline-measurement-v1
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  SOURCE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+  CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
+  CORPUS_DIGEST: sha256:611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
+  MAX_PROVIDER_CALLS: "30"
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout operator harness
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact accepted Sentient baseline
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.SOURCE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Guard exact baseline identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$SOURCE_TREE"
+          echo "BASELINE_IDENTITY=PASS"
+
+      - name: Checkout frozen cognitive corpus
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.CORPUS_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: corpus-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Guard frozen corpus digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="sha256:$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')"
+          test "$actual" = "$CORPUS_DIGEST"
+          cp corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json corpus-v1.json
+          echo "CORPUS_DIGEST=PASS"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install accepted baseline dependencies
+        working-directory: sentient
+        run: npm install --no-audit --no-fund --package-lock=false
+
+      - name: Build accepted baseline
+        working-directory: sentient
+        run: npm run build
+
+      - name: Run bounded live Atlas baseline campaign
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          CORPUS_PATH: ./corpus-v1.json
+        run: node scripts/stronger-sentient-baseline-measurement.mjs
+
+      - name: Upload measurement receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-baseline-v1
+          path: stronger-sentient-baseline-v1.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Deployment guard
+        run: |
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "PRODUCTION_CONFIGURATION_CHANGE=false"
+          echo "PRODUCTION_DATABASE_MIGRATION=false"
