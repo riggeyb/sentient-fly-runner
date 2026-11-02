@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { pathToFileURL } from "node:url";
 
 const sourceUrl = new URL("./stronger-sentient-baseline-measurement.mjs", import.meta.url);
 let source = fs.readFileSync(sourceUrl, "utf8");
@@ -33,7 +32,7 @@ for (const [from, to] of replacements) {
 const targetUrl = new URL("./.stronger-sentient-output-cap-1024-runtime.mjs", import.meta.url);
 fs.writeFileSync(targetUrl, source);
 try {
-  await import(`${pathToFileURL(TargetUrl.pathname).href}?v=${Date.now()}`);
+  await import(`${targetUrl.href}?v=${Date.now()}`);
 } finally {
   fs.rmSync(targetUrl, { force: true });
 }
