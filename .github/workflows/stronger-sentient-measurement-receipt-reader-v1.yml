@@ -38,34 +38,19 @@ jobs:
           set -euo pipefail
           file="receipt/${{ inputs.file_name }}"
           jq -c '{
-            schemaVersion,
-            campaign,
-            sourceSha,
-            sourceTree,
-            corpusDigest,
-            neutralSignalProfile,
-            tasksExpected,
-            tasksMeasured,
-            providerCalls,
-            maxProviderCalls,
-            http429Count,
-            atlas429Rate,
-            retryCount,
-            retryRate,
-            fallbackTaskCount,
-            fallbackRate,
-            queueWaitP50Ms,
-            queueWaitP95Ms,
-            providerLatencyP50Ms,
-            providerLatencyP95Ms,
-            inputTokens,
-            outputTokens,
-            reasoningTokens,
-            reportedCostUsd,
-            verifiedTaskSuccessRate,
-            evidenceGroundingRate,
-            schemaValidityRate,
+            schemaVersion,campaign,sourceSha,sourceTree,corpusDigest,neutralSignalProfile,
+            tasksExpected,tasksMeasured,providerCalls,maxProviderCalls,http429Count,atlas429Rate,
+            retryCount,retryRate,fallbackTaskCount,fallbackRate,queueWaitP50Ms,queueWaitP95Ms,
+            providerLatencyP50Ms,providerLatencyP95Ms,inputTokens,outputTokens,reasoningTokens,
+            reportedCostUsd,verifiedTaskSuccessRate,evidenceGroundingRate,schemaValidityRate,
             deploymentPerformed
           }' "$file"
+          jq -c '.providerStarts // []' "$file"
+          jq -c '[.rows[] | {
+            taskId,taskClass,route,model,allocation,contextArtifacts,inputTokens,outputTokens,
+            reasoningTokens,queueWaitMs,providerLatencyMs,e2e,retryCount,fallbackCount,
+            providerRequestIdPresent,costUsd,schemaValid,evidenceGrounded,authorityPass,
+            failedAssertions,verified,error
+          }]' "$file"
           echo "PROVIDER_CALLS_ADDED=0"
           echo "PRODUCTION_DEPLOYMENT=false"
