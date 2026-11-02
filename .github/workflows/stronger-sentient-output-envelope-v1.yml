@@ -12,7 +12,7 @@ concurrency:
 
 env:
   BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
-  BASELINE_TRED: 00296d7129fa8ab7f3254943a57df444591ad1ab
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
   CORPUS_SOURCE_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
   CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
 
@@ -78,7 +78,7 @@ jobs:
           p.write_text(s)
           PY
           grep -q 'maxOutputTokens:1024' scripts/output-envelope-tmp.mjs
-          grep -q 'cog-v1-14' scripts/output-envelope-tmqp.mjs
+          grep -q 'cog-v1-14' scripts/output-envelope-tmp.mjs
 
       - name: Run bounded output-envelope experiment
         shell: bash
