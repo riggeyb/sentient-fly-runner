@@ -22,8 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - uses: actions/checkout@v4
+      - uses: actions/checkout4v4
         with:
           repository: riggeyb/sentient
           ref: ${{ env.BASELINE_SHA }}
@@ -31,24 +30,20 @@ jobs:
           path: sentient
           fetch-depth: 1
           persist-credentials: false
-
       - name: Verify exact baseline
         shell: bash
         run: |
           set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-
       - name: Build exact baseline
         working-directory: sentient
         run: |
           npm install --no-audit --no-fund --package-lock=false
           npm run build
-
       - name: Repair checked-out measurement harness only
         shell: bash
         run: |
@@ -56,11 +51,8 @@ jobs:
           sed -i 's#\"\./sentient/dist/src/index.js\"#\"../sentient/dist/src/index.js\"#' scripts/stronger-sentient-rate-limit-recovery-v1.mjs
           sed -i 's/try{M=/try{m=/' scripts/stronger-sentient-rate-limit-recovery-v1.mjs
           node --check scripts/stronger-sentient-rate-limit-recovery-v1.mjs
-
       - name: Run bounded recovery characterization
         env:
-          ATLAS_CLOUD_API_KEY: ${{ secrets.ATLAS_CLOUD_API_KEY }}
-          ATLAS_API_KEY: ${{ secrets.ATLAS_API_KEY }}
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-rate-limit-recovery-v1.json
         run: node scripts/stronger-sentient-rate-limit-recovery-v1.mjs
