@@ -36,7 +36,7 @@ jobs:
           MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
-          [[ "$SORCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
           test "$MODE" = "safe" || test "$MODE" = "output_headroom"
 
