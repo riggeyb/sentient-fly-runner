@@ -21,29 +21,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout exact candidate
+      - name: Checkout exact private candidate
+        id: source_checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.EXPECTED_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify private source checkout
+        if: always()
         shell: bash
-        env:
-          SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
-          git init .
-          git remote add origin https://github.com/riggeyb/sentient.git
-          git -c http.extraheader="AUTHORIZATION: basic $auth" fetch --no-tags origin "$EXPECTED_SHA" "$BASE_SHA"
-          git checkout --detach "$EXPECTED_SHA"
+          if [ "${{ steps.source_checkout.outcome }}" != "success" ]; then
+            echo "SENTIENT_INDEPENDENT_ACCEPTANCE_STATUS=VERIFIER_INFRASTRUCTURE_FAILURE"
+            echo "VERIFIER_FAILURE_CLASS=PRIVATE_SOURCE_CHECKOUT"
+            exit 1
+          fi
+          echo "PRIVATE_SOURCE_CHECKOUT=PASS"
 
-      - name: Verify exact SHA and tree
+      - name: Verify exact identity and source scope
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
-
-      - name: Verify bounded source scope
-        shell: bash
-        run: |
-          set -euo pipefail
           git cat-file -e "$BASE_SHA^{commit}"
           git diff --name-only "$BASE_SHA" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual.txt"
           cat > "$RUNNER_TEMP/expected.txt" <<'SCOPE'
@@ -74,40 +80,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code "$BASE_SHA" "$EXPECTED_SHA" -- \
-            src/state/postgres-state-repository.ts \
-            src/state/repository.ts \
-            src/deployment-governor \
-            src/production \
-            src/action-fabric
+          git diff --exit-code "$BASE_SHA" "$EXPECTED_SHA" --             src/state/postgres-state-repository.ts             src/state/repository.ts             src/deployment-governor             src/production             src/action-fabric
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install dependencies using repository no-lockfile pattern
-        run: npm install --no-audit --no-fund --package-lock=false
-
-      - name: Build TypeScript
-        run: npm run build
-
-      - name: Run full repository tests
-        run: npm test
-
-      - name: Run focused Stronger Sentient tests
-        shell: bash
+      - name: Install repository dependencies
         run: |
           set -euo pipefail
-          node --test \
-            dist/test/mvp1-state-v2-lifecycle.test.js \
-            dist/test/lab/atlas-admission-and-client.test.js \
-            dist/test/lab/atlas-hybrid-router-current.test.js \
-            dist/test/lab/cognitive-policy-context.test.js \
-            dist/test/lab/cognitive-runtime-wiring.test.js \
-            dist/test/lab/cognitive-runtime-hard-ceilings.test.js
+          test ! -e package-lock.json
+          npm install --no-audit --no-fund --package-lock=false
 
-      - name: Verify source immutability
+      - name: Build and test exact candidate
+        run: |
+          set -euo pipefail
+          npm run build
+          npm test
+          node --test             dist/test/mvp1-state-v2-lifecycle.test.js             dist/test/lab/atlas-admission-and-client.test.js             dist/test/lab/atlas-hybrid-router-current.test.js             dist/test/lab/cognitive-policy-context.test.js             dist/test/lab/cognitive-runtime-wiring.test.js             dist/test/lab/cognitive-runtime-hard-ceilings.test.js
+
+      - name: Verify immutable source and emit receipt
         shell: bash
         run: |
           set -euo pipefail
@@ -115,4 +107,5 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
           test -z "$(git status --porcelain --untracked-files=no)"
           echo "STRONGER_SENTIENT_INTEGRATION_ACCEPTANCE=PASS"
+          echo "PRIVATE_SOURCE_CHECKOUT=PASS"
           echo "PRODUCTION_DEPLOYMENT=false"
