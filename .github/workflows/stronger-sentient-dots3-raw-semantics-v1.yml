@@ -1,0 +1,118 @@
+name: Stronger Sentient Dots3 Raw Semantics v1
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stronger-sentient-dots3-raw-semantics-v1
+  cancel-in-progress: false
+
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+  CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
+  CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
+  CONTRACT_DIGEST: sha256:62f98338f60164620a3fe93fd69e7c94b33e8ec4602ba3337c1b06b89651673d
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.BASELINE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.CORPUS_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: corpus-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Guard frozen inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
+          test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
+          test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build accepted baseline
+        working-directory: sentient
+        run: npm install --no-audit --no-fund --package-lock=false && npm run build
+
+      - name: Instrument existing synthesis harness for raw semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/stronger-sentient-cognition-artifact-v1.mjs "$RUNNER_TEMP/raw-semantics.mjs"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path(os.environ["RUNNER_TEMP"])/"raw-semantics.mjs"
+          s=p.read_text()
+          old='const F=async(...a)=>{if(calls>=M)throw Error("call_ceiling");const n=++calls,z=Date.now(),res=await fetch(...a);events.push({n,status:res.status,latencyMs:Date.now()-z});return res};'
+          new='const F=async(...a)=>{if(calls>=M)throw Error("call_ceiling");const n=++calls,z=Date.now(),res=await fetch(...a);let raw=null;try{raw=await res.clone().json()}catch{};const ch=Array.isArray(raw?.choices)?raw.choices[0]:null;const msg=ch&&typeof ch.message==="object"&&ch.message?ch.message:{};const info=v=>({type:Array.isArray(v)?"array":v===null?"null":typeof v,length:typeof v==="string"?v.length:Array.isArray(v)?v.length:null,digest:typeof v==="string"?createHash("sha256").update(v).digest("hex"):null});const usage=raw&&typeof raw.usage==="object"&&raw.usage?raw.usage:{};const details=usage&&typeof usage.completion_tokens_details==="object"&&usage.completion_tokens_details?usage.completion_tokens_details:{};fs.appendFileSync(process.env.RAW_SHAPES_OUT,JSON.stringify({n,status:res.status,choiceCount:Array.isArray(raw?.choices)?raw.choices.length:0,finishReason:ch?.finish_reason??null,messageKeys:Object.keys(msg).sort(),content:info(msg.content),reasoning:info(msg.reasoning),reasoningContent:info(msg.reasoning_content),toolCallsType:Array.isArray(msg.tool_calls)?"array":msg.tool_calls===null?"null":typeof msg.tool_calls,toolCallsCount:Array.isArray(msg.tool_calls)?msg.tool_calls.length:null,promptTokens:usage.prompt_tokens??null,completionTokens:usage.completion_tokens??null,totalTokens:usage.total_tokens??null,reasoningTokens:details.reasoning_tokens??usage.reasoning_tokens??null,responseModel:raw?.model??null})+"\\\\n");events.push({n,status:res.status,latencyMs:Date.now()-z});return res};'
+          if s.count(old)!=1:
+              raise SystemExit(f"expected one fetch anchor, found {s.count(old)}")
+          p.write_text(s.replace(old,new,1))
+          PY
+          node --check "$RUNNER_TEMP/raw-semantics.mjs"
+
+      - name: Run same five Dots3 synthesis calls with raw-shape capture
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          EXPERIMENT_OUT: ${{ runner.temp }}/normalized-report.json
+          RAW_SHAPES_OUT: ${{ runner.temp }}/raw-shapes.jsonl
+        run: node "$RUNNER_TEMP/raw-semantics.mjs"
+
+      - name: Summarize raw semantics without exposing reasoning text
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat "$RUNNER_TEMP/raw-shapes.jsonl"
+          jq '{phase2: .phase2}' "$RUNNER_TEMP/normalized-report.json"
+
+      - name: Guard immutable Sentient source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-dots3-raw-semantics-v1
+          path: |
+            ${{ runner.temp }}/raw-shapes.jsonl
+            ${{ runner.temp }}/normalized-report.json
+          retention-days: 14
+
+      - name: Guard
+        run: |
+          echo MAX_PROVIDER_CALLS=5
+          echo PROVIDER_RETRIES=0
+          echo CHALLENGER_CALLS=0
+          echo SENTIENT_SOURCE_CHANGE=false
+          echo PRODUCTION_DEPLOYMENT=false
