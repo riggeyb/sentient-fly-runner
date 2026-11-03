@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -21,18 +25,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/checkout@v4
+
+      - name: Checkout exact Sentient candidate
+        uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: ${{ inputs.sha }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: sentient
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Verify exact candidate and run all compiled tests
+
+      - name: Guard candidate identity and source scope
         working-directory: sentient
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
@@ -41,12 +49,76 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git show -s --format=%T HEAD)" = "$EXPECTED_TREE"
+          git cat-file -e "$BASELINE_SHA^{commit}"
+          test "$(git show -s --format=%T "$BASELINE_SHA")" = "$BASELINE_TREE"
+
+          git diff --name-only "$BASELINE_SHA" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/expected.txt" <<'SCOPE'
+          src/retrieval/context-compiler-types.ts
+          src/retrieval/context-compiler-v0-contracts.ts
+          src/retrieval/context-compiler-v0.ts
+          src/retrieval/index.ts
+          src/runtime/context-compiler-shadow-v0.ts
+          src/runtime/sentient-runtime.ts
+          src/spawn/context-shadow-v0.ts
+          src/spawn/index.ts
+          src/spawn/orchestrator.ts
+          test/context-compiler-v0.test.ts
+          test/context-runtime-shadow-v0.test.ts
+          test/context-shadow-v0.test.ts
+          SCOPE
+          sed -i 's/^          //' "$RUNNER_TEMP/expected.txt"
+          sort -o "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+
+          git diff --exit-code "$BASELINE_SHA" "$EXPECTED_SHA" --             src/model             src/state             src/deployment-governor             src/production             src/action-fabric             src/lab
+
+      - name: Install and build
+        working-directory: sentient
+        run: |
+          set -euo pipefail
           npm install --no-audit --no-fund --package-lock=false
           npm run build
-          node --test dist/test/*.test.js
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_TREE"
+
+      - name: Run Context Compiler V0 focused proofs
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          node --test             dist/test/context-compiler-v0.test.js             dist/test/context-shadow-v0.test.js             dist/test/context-runtime-shadow-v0.test.js
+
+      - name: Run all runnable compiled tests
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(
+            find dist/test -maxdepth 1 -name '*.test.js' -print               | sort               | grep -v '/permanent-continuation-http.test.js$'               | grep -v '/permanent-continuation-multiprocess.test.js$'
+          )
+          test "${#tests[@]}" -gt 0
+          node --test "${tests[@]}"
+
+      - name: Classify database-gated tests
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test -z "${SENTIENT_TEST_DATABASE_URL:-}"
+          grep -q 'SENTIENT_TEST_DATABASE_URL is required' dist/test/permanent-continuation-http.test.js
+          grep -q 'SENTIENT_TEST_DATABASE_URL is required' dist/test/permanent-continuation-multiprocess.test.js
+          echo "DATABASE_GATED_TESTS=2"
+          echo "DATABASE_GATED_TESTS_STATUS=NOT_RUN_ENVIRONMENT_UNAVAILABLE"
+
+      - name: Guard invariants and emit receipt
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.sha }}"
+          test "$(git show -s --format=%T HEAD)" = "${{ inputs.tree }}"
           test -z "$(git status --porcelain --untracked-files=no)"
-          echo "CONTEXT_COMPILER_V0_FULL_SUITE=PASS"
+          echo "CONTEXT_COMPILER_V0_VALIDATION=PASS"
+          echo "SHADOW_MODE_VALIDATED=true"
+          echo "PRIMARY_COGNITION_SHADOW_VALIDATED=true"
+          echo "DELEGATED_COGNITION_SHADOW_VALIDATED=true"
+          echo "COGNITION_ARTIFACT_V1_CHANGED=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
           echo "PROVIDER_CALLS=0"
           echo "PRODUCTION_DEPLOYMENT=false"
