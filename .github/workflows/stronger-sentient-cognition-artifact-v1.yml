@@ -58,9 +58,9 @@ jobs:
         if: ${{ inputs.mode != 'challenger_screen' }}
         run: |
           node -e 'JSON.parse(require("fs").readFileSync("measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json","utf8"))'
-          sed -i 's/maxOutputTokens:768/maxOutputTokens:1536/' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          sed -i 's/maxOutputTokens:768/maxOutputTokens:3072/' scripts/stronger-sentient-cognition-artifact-v1.mjs
           node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
-          grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'maxOutputTokens:3072' scripts/stronger-sentient-cognition-artifact-v1.mjs
       - name: Run artifact validation
         if: ${{ inputs.mode != 'challenger_screen' }}
         env:
@@ -109,10 +109,10 @@ jobs:
         run: |
           echo MAX_PROVIDER_CALLS=5
           echo DOTS3_DIRECT_SYNTHESIS_ONLY=true
-          echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536
+          echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=3072
           echo DEEPSEEK_PROVIDER_CALLS=0
           echo PROVIDER_RETRIES=0
-          echo MODEL_ROLE_CHANGE=false
+          echo MODD_ROLE_CHANGE=false
           echo SOURCE_CHANGE=false
           echo PRODUCTION_DEPLOYMENT=false
       - name: Challenger guard receipt
