@@ -60,7 +60,7 @@ jobs:
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
 
-      - name: Enforce Dots3 synthesis no-thinking mode in measurement runner
+      - name: Enforce Dots3 synthesis no-thinking and literal-retention contract in measurement runner
         shell: bash
         run: |
           set -euo pipefail
@@ -72,10 +72,26 @@ jobs:
           if((s.split(old).length-1)!==1) throw Error("fetch_wrapper_anchor_mismatch");
           const next='const F=async(...a)=>{if(calls>=M)throw Error("call_ceiling");const n=++calls,z=Date.now();const [url,init0]=a;let init=init0;if(init0?.body){const b=JSON.parse(String(init0.body));if(b.model===DOTS3_NOTE_MODEL_V1){b.enable_thinking=false;init={...init0,body:JSON.stringify(b)}}}const res=await fetch(url,init);events.push({n,status:res.status,latencyMs:Date.now()-z});return res};';
           s=s.replace(old,next);
+          const rewrites=[
+            [
+              '`Preserve every important finding, constraint, uncertainty, required tool recommendation, and verification need from the artifact, but express them naturally rather than as audit tags.`',
+              '`Preserve the artifact literally where identity matters: explicitly state every keyFindings[].claim; include every constraints[] string verbatim; include every uncertainties[] string verbatim; include every verificationNeeded[] string verbatim. You may organize these in compact prose or bullets, but do not omit or rename identifiers.`'
+            ],
+            [
+              '`Cite every evidence reference exactly as [evidence: ID]. Mention each required tool by its exact tool name and explain its rationale naturally.`',
+              '`For every evidenceRefs[] item, include exactly one citation in the form [evidence: ID]. For every toolRecommendations[] item, include the exact tool name and preserve its rationale verbatim. Literal artifact strings are required interface data, not a separate audit block.`'
+            ]
+          ];
+          for(const [from,to] of rewrites){
+            if((s.split(from).length-1)!==1) throw Error("synthesis_prompt_anchor_mismatch");
+            s=s.replace(from,to);
+          }
           fs.writeFileSync(p,s);
           NODE
           node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
           grep -q 'enable_thinking=false' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -Fq 'include every constraints[] string verbatim' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -Fq 'include exactly one citation in the form [evidence: ID]' scripts/stronger-sentient-cognition-artifact-v1.mjs
 
       - name: Validate canonical prose-synthesis harness
         shell: bash
@@ -116,8 +132,10 @@ jobs:
           echo DOTS3_DIRECT_SYNTHESIS_ONLY=true
           echo DOTS3_SYNTHESIS_RESPONSE_FORMAT=USER_FACING_PROSE
           echo DOTS3_SYNTHESIS_ENABLE_THINKING=false
+          echo DOTS3_SYNTHESIS_LITERAL_RETENTION_REQUIRED=true
           echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536
           echo DEEPSEEK_PROVIDER_CALLS=0
+          echo CHALLENGER_PROVIDER_CALLS=0
           echo PROVIDER_RETRIES=0
           echo VERIFIER_TEXT_NULL_SAFE=true
           echo MODEL_ROLE_CHANGE=false
