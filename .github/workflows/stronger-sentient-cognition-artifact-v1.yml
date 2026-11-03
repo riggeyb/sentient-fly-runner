@@ -69,6 +69,15 @@ jobs:
           grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-artifact-v1.mjs
           grep -q 'user-facing answer in ordinary prose' scripts/stronger-sentient-cognition-artifact-v1.mjs
 
+      - name: Apply verifier null-safety hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'const text=r.ok?r.text:"";' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          sed -i 's/const text=r.ok?r.text:"";/const text=String(r.ok?(r.text??""):"");/' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'const text=String(r.ok?(r.text??""):"");' scripts/stronger-sentient-cognition-artifact-v1.mjs
+
       - name: Run canonical artifact validation
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
@@ -100,6 +109,7 @@ jobs:
           echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536
           echo DEEPSEEK_PROVIDER_CALLS=0
           echo PROVIDER_RETRIES=0
+          echo VERIFIER_TEXT_NULL_SAFE=true
           echo MODEL_ROLE_CHANGE=false
           echo SOURCE_CHANGE=false
           echo PRODUCTION_DEPLOYMENT=false
