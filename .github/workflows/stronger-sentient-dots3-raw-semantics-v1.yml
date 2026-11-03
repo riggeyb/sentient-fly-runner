@@ -41,6 +41,7 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: corpus-source
           persist-credentials: false
+
       - name: Guard frozen inputs
         shell: bash
         run: |
@@ -52,21 +53,36 @@ jobs:
           test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
           test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
           test -f measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
       - name: Build accepted baseline
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
+
+      - name: Repair observed measurement-runner typos in checked-out canonical script
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/minStartIntervalMs=750/minStartIntervalMs:750/' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          sed -i 's/update(q)\.digest("hex")/update(s).digest("hex")/' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          node --check scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          ! grep -q 'minStartIntervalMs=750' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          ! grep -q 'update(q)\.digest("hex")' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+
       - name: Zero-provider measurement-integrity gate
         env:
           EXPERIMENT_OUT: ${{ runner.temp }}/static-validation.json
         run: |
           set -euo pipefail
-          node --check scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
-          node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
           node scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
-          jq -e '.fairnessGateStaticValidation=="PASS" and .measurementIntegrityRequired==true and .incumbentCognitionSuccessRequired==false and .providerCalls==0 and .challengerCalls==0 and .models==4 and .tasks==3 and .maximumInitialTaskArms==12' "$EXPERIMENT_OUT"
+          jq -e '.fairnessGateStaticValidation=="PASS" and .measurementIntegrityRequired==true and .incumbentCognitionSuccessRequired==false and .providerCalls==0 and .challengerCalls==0 and .freezeReceiptVerified==true and .models==4 and .tasks==3 and .maximumInitialTaskArms==12 and .cognitionInitialProviderCompletionTokens==2000 and .cognitionAdaptiveProviderCompletionMaxTokens==4000 and .dots3Thinking==false and .dots3MandatoryForMachineExecution==false' "$EXPERIMENT_OUT"
+          echo "MEASUREMENT_INTEGRITY_STATIC_VALIDATION=PASS"
+          echo "STATIC_VALIDATION_PROVIDER_CALLS=0"
+
       - name: Run bounded adaptive four-model cognition screen
         env:
           EXPERIMENT_OUT: ${{ runner.temp }}/challenger-screen-v2.json
@@ -80,8 +96,11 @@ jobs:
             ${{ runner.temp }}/static-validation.json
             ${{ runner.temp }}/challenger-screen-v2.json
           retention-days: 14
+
       - name: Guard immutable baseline
+        shell: bash
         run: |
+          set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
