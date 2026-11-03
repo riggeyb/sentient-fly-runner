@@ -1,22 +1,17 @@
 name: Stronger Sentient Cognition Challenger Screen v1
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: stronger-sentient-cognition-challenger-screen-v1
   cancel-in-progress: false
-
 env:
   BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
   BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
   CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
   CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
   CONTRACT_DIGEST: sha256:62f98338f60164620a3fe93fd69e7c94b33e8ec4602ba3337c1b06b89651673d
-
 jobs:
   screen:
     runs-on: ubuntu-latest
@@ -25,7 +20,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
@@ -33,7 +27,6 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: sentient
           persist-credentials: false
-
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
@@ -41,33 +34,29 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: corpus-source
           persist-credentials: false
-
       - name: Guard frozen inputs
         shell: bash
         run: |
           set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
-          test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
-          test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
-          test -f measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json
-
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
+          test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
+          test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json|awk '{print $1}')" = "$CORPUS_DIGEST"
+          test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json|awk '{print $1}')" = "$CONTRACT_DIGEST"
+          jq -e '.cognitionArtifactInterfaceFrozen==true and .dots3SynthesisValidation=="PASS" and .dots3SynthesisPolicy.enableThinking==false and .dots3SynthesisPolicy.maxOutputTokens==1536 and .dots3SynthesisPolicy.evidenceCitationRetention=="REQUIRED_EXACT" and .visibleArtifactEnvelope.absoluteMax==2000 and .challengerOutputCostPolicy=="COMPACT_INTERNAL_ARTIFACT_ONLY"' measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json >/dev/null
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-
       - name: Build accepted baseline
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
-
-      - name: Validate fair screen gate and compact runner
+      - name: Validate fair gate and frozen interface
         run: |
           node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
           node --check scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          node --check scripts/stronger-sentient-challenger-frozen-interface-preload-v1.cjs
           grep -q 'maxOutputTokens:2000' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          grep -q 'body.enable_thinking=false' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          grep -q 'COMPACT_INTERNAL_ARTIFACT_ONLY' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-
+          ! grep -q 'maxOutputTokens:4096' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
       - name: Run bounded fair challenger screen
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
@@ -77,29 +66,25 @@ jobs:
           CONTRACT_DIGEST: ${{ env.CONTRACT_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/challenger-screen-v1.json
         run: node scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
-
       - name: Guard immutable baseline
         run: |
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
-
       - uses: actions/upload-artifact@v4
         with:
           name: stronger-sentient-cognition-challenger-screen-v1
           path: ${{ runner.temp }}/challenger-screen-v1.json
           retention-days: 14
-
       - name: Guard experiment envelope
         run: |
           echo "MAX_PROVIDER_CALLS=24"
           echo "DEEPSEEK_PREFLIGHT_CALLS=2"
-          echo "COGNITION_MODELS=4"
-          echo "COGNITION_TASKS=3"
           echo "COGNITION_PROVIDER_COMPLETION_MAX_TOKENS=2000"
           echo "COGNITION_VISIBLE_ARTIFACT_MAX_TOKENS=2000"
           echo "CHALLENGER_OUTPUT_COST_POLICY=COMPACT_INTERNAL_ARTIFACT_ONLY"
           echo "DOTS3_ENABLE_THINKING=false"
+          echo "DOTS3_EVIDENCE_CITATION_RETENTION=REQUIRED_EXACT"
           echo "DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536"
           echo "PROVIDER_RETRIES=0"
           echo "MODEL_PROMOTION=false"
