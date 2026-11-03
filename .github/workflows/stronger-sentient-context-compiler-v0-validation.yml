@@ -1,0 +1,74 @@
+name: Stronger Sentient Context Compiler V0 Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact Sentient candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Guard candidate identity
+        working-directory: sentient
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_TREE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install and build
+        working-directory: sentient
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Run Context Compiler V0 proofs
+        working-directory: sentient
+        run: |
+          node --test             dist/test/context-compiler-v0.test.js             dist/test/context-shadow-v0.test.js
+
+      - name: Run full repository tests
+        working-directory: sentient
+        run: npm test
+
+      - name: Guard invariants
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.sha }}"
+          test "$(git show -s --format=%T HEAD)" = "${{ inputs.tree }}"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "CONTEXT_COMPILER_V0_VALIDATION=PASS"
+          echo "SENTIENT_SOURCE_CHANGE=VALIDATION_ONLY"
+          echo "PROVIDER_CALLS=0"
+          echo "PRODUCTION_DEPLOYMENT=false"
