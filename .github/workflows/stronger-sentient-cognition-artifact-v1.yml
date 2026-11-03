@@ -80,6 +80,10 @@ jobs:
             [
               '`Cite every evidence reference exactly as [evidence: ID]. Mention each required tool by its exact tool name and explain its rationale naturally.`',
               '`For every evidenceRefs[] item, include exactly one citation in the form [evidence: ID]. For every toolRecommendations[] item, include the exact tool name and preserve its rationale verbatim. Literal artifact strings are required interface data, not a separate audit block.`'
+            ],
+            [
+              '    `Cognition artifact: ${JSON.stringify(art)}`,',
+              '    `Cognition artifact: ${JSON.stringify(art)}`,\n    `Required evidence citations (copy every token exactly once): ${art.evidenceRefs.map(evidenceTag).join(" ")}`,'
             ]
           ];
           for(const [from,to] of rewrites){
@@ -92,6 +96,7 @@ jobs:
           grep -q 'enable_thinking=false' scripts/stronger-sentient-cognition-artifact-v1.mjs
           grep -Fq 'include every constraints[] string verbatim' scripts/stronger-sentient-cognition-artifact-v1.mjs
           grep -Fq 'include exactly one citation in the form [evidence: ID]' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -Fq 'Required evidence citations (copy every token exactly once)' scripts/stronger-sentient-cognition-artifact-v1.mjs
 
       - name: Validate canonical prose-synthesis harness
         shell: bash
