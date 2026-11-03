@@ -60,6 +60,23 @@ jobs:
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
 
+      - name: Enforce Dots3 synthesis no-thinking mode in measurement runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require("fs");
+          const p="scripts/stronger-sentient-cognition-artifact-v1.mjs";
+          let s=fs.readFileSync(p,"utf8");
+          const old='const F=async(...a)=>{if(calls>=M)throw Error("call_ceiling");const n=++calls,z=Date.now(),res=await fetch(...a);events.push({n,status:res.status,latencyMs:Date.now()-z});return res};';
+          if((s.split(old).length-1)!==1) throw Error("fetch_wrapper_anchor_mismatch");
+          const next='const F=async(...a)=>{if(calls>=M)throw Error("call_ceiling");const n=++calls,z=Date.now();const [url,init0]=a;let init=init0;if(init0?.body){const b=JSON.parse(String(init0.body));if(b.model===DOTS3_NOTE_MODEL_V1){b.enable_thinking=false;init={...init0,body:JSON.stringify(b)}}}const res=await fetch(url,init);events.push({n,status:res.status,latencyMs:Date.now()-z});return res};';
+          s=s.replace(old,next);
+          fs.writeFileSync(p,s);
+          NODE
+          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'enable_thinking=false' scripts/stronger-sentient-cognition-artifact-v1.mjs
+
       - name: Validate canonical prose-synthesis harness
         shell: bash
         run: |
@@ -72,9 +89,9 @@ jobs:
 
       - name: Run canonical artifact validation
         env:
-          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLAS_CLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
-          BASELINE_TREE: ${{ env.BASELINE_TREE }}
+          BASELINE_TRED: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
         run: node scripts/stronger-sentient-cognition-artifact-v1.mjs
@@ -98,6 +115,7 @@ jobs:
           echo MAX_PROVIDER_CALLS=5
           echo DOTS3_DIRECT_SYNTHESIS_ONLY=true
           echo DOTS3_SYNTHESIS_RESPONSE_FORMAT=USER_FACING_PROSE
+          echo DOTS3_SYNTHESIS_ENABLE_THINKING=false
           echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536
           echo DEEPSEEK_PROVIDER_CALLS=0
           echo PROVIDER_RETRIES=0
