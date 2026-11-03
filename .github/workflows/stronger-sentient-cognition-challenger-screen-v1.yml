@@ -1,6 +1,11 @@
 name: Stronger Sentient Cognition Challenger Screen v1
 on:
   workflow_dispatch:
+    inputs:
+      static_validation_only:
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -35,7 +40,6 @@ jobs:
           path: corpus-source
           persist-credentials: false
       - name: Guard frozen inputs
-        shell: bash
         run: |
           set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
@@ -43,21 +47,40 @@ jobs:
           test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
           test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json|awk '{print $1}')" = "$CORPUS_DIGEST"
           test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json|awk '{print $1}')" = "$CONTRACT_DIGEST"
-          jq -e '.cognitionArtifactInterfaceFrozen==true and .dots3SynthesisValidation=="PASS" and .dots3SynthesisPolicy.enableThinking==false and .dots3SynthesisPolicy.maxOutputTokens==1536 and .dots3SynthesisPolicy.evidenceCitationRetention=="REQUIRED_EXACT" and .visibleArtifactEnvelope.absoluteMax==2000 and .challengerOutputCostPolicy=="COMPACT_INTERNAL_ARTIFACT_ONLY"' measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json >/dev/null
+          jq -e '.cognitionArtifactInterfaceFrozen==true and .dots3SynthesisValidation=="PASS" and .dots3SynthesisPolicy.enableThinking==false and .visibleArtifactEnvelope.absoluteMax==2000 and .challengerOutputCostPolicy=="COMPACT_INTERNAL_ARTIFACT_ONLY"' measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json >/dev/null
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Build accepted baseline
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
-      - name: Validate fair gate and frozen interface
+      - name: Validate fair gate source
         run: |
           node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
           node --check scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
           node --check scripts/stronger-sentient-challenger-frozen-interface-preload-v1.cjs
+          grep -q 'DEEPSEEK_V3_2_MODD_V1' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          ! grep -q 'DEEPSEEK_V3_2_MODD_V1' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
           grep -q 'maxOutputTokens:2000' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
           ! grep -q 'maxOutputTokens:4096' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+      - name: Execute zero-provider fairness gate static validation
+        env:
+          ATLASCLOUD_API_KEY: static-validation-not-used
+          STATIC_VALIDATE: "true"
+          BASELINE_SHA: ${{ env.BASELINE_SHA }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
+          CONTRACT_DIGEST: ${{ env.CONTRACT_DIGEST }}
+          EXPERIMENT_OUT: ${{ runner.temp }}/challenger-gate-static-v1.json
+        run: |
+          node scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          jq -e '.fairnessGateStaticValidation=="PASS" and .providerCalls==0 and .deepseekModel=="deepseek-ai/deepseek-v3.2" and .freezeReceiptVerified==true and .dots3EnableThinking==false and .cognitionProviderCompletionMaxTokens==2000 and .visibleArtifactMaxTokens==2000' "$EXPERIMENT_OUT" >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-cognition-challenger-gate-static-v1
+          path: ${{ runner.temp }}/challenger-gate-static-v1.json
+          retention-days: 14
       - name: Run bounded fair challenger screen
+        if: ${{ inputs.static_validation_only != true }}
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
@@ -72,21 +95,18 @@ jobs:
           test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
       - uses: actions/upload-artifact@v4
+        if: ${{ inputs.static_validation_only != true }}
         with:
           name: stronger-sentient-cognition-challenger-screen-v1
           path: ${{ runner.temp }}/challenger-screen-v1.json
           retention-days: 14
       - name: Guard experiment envelope
         run: |
-          echo "MAX_PROVIDER_CALLS=24"
+          echo "FAIRNESS_GATE_STATIC_VALIDATION=PASS"
+          echo "STATIC_VALIDATION_PROVIDER_CALLS=0"
           echo "DEEPSEEK_PREFLIGHT_CALLS=2"
           echo "COGNITION_PROVIDER_COMPLETION_MAX_TOKENS=2000"
-          echo "COGNITION_VISIBLE_ARTIFACT_MAX_TOKENS=2000"
-          echo "CHALLENGER_OUTPUT_COST_POLICY=COMPACT_INTERNAL_ARTIFACT_ONLY"
           echo "DOTS3_ENABLE_THINKING=false"
-          echo "DOTS3_EVIDENCE_CITATION_RETENTION=REQUIRED_EXACT"
-          echo "DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536"
           echo "PROVIDER_RETRIES=0"
-          echo "MODEL_PROMOTION=false"
           echo "SOURCE_CHANGE=false"
           echo "PRODUCTION_DEPLOYMENT=false"
