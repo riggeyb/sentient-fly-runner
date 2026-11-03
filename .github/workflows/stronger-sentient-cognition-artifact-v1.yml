@@ -3,13 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Measurement mode"
         required: false
-        default: "artifact_validation"
+        default: artifact_validation
         type: choice
-        options:
-          - artifact_validation
-          - challenger_screen
+        options: [artifact_validation, challenger_screen]
 permissions: {contents: read}
 concurrency:
   group: stronger-sentient-cognition-artifact-optimization-v1
@@ -41,7 +38,7 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: corpus-source
           persist-credentials: false
-      - name: Guard inputs
+      - name: Guard frozen inputs
         run: |
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
@@ -50,17 +47,9 @@ jobs:
           test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
       - uses: "actions/setup-node\u0040v4"
         with: {node-version: "22"}
-      - name: Build accepted baseline
+      - name: Build exact accepted baseline
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
-
-      - name: Validate artifact harness
-        if: ${{ inputs.mode != 'challenger_screen' }}
-        run: |
-          node -e 'JSON.parse(require("fs").readFileSync("measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json","utf8"))'
-          sed -i 's/maxOutputTokens:768/maxOutputTokens:3072/' scripts/stronger-sentient-cognition-artifact-v1.mjs
-          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
-          grep -q 'maxOutputTokens:3072' scripts/stronger-sentient-cognition-artifact-v1.mjs
       - name: Run artifact validation
         if: ${{ inputs.mode != 'challenger_screen' }}
         env:
@@ -69,7 +58,12 @@ jobs:
           BASELINE_TREE: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
-        run: node scripts/stronger-sentient-cognition-artifact-v1.mjs
+        run: |
+          node -e 'JSON.parse(require("fs").readFileSync("measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json","utf8"))'
+          grep -q 'maxOutputTokens:768' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          sed -i 's/maxOutputTokens:768/maxOutputTokens:3072/' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
+          node scripts/stronger-sentient-cognition-artifact-v1.mjs
       - name: Upload artifact validation
         if: ${{ inputs.mode != 'challenger_screen' }}
         uses: "actions/upload-artifact\u0040v4"
@@ -77,10 +71,6 @@ jobs:
           name: stronger-sentient-cognition-artifact-v1
           path: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
           retention-days: 14
-
-      - name: Validate challenger screen harness
-        if: ${{ inputs.mode == 'challenger_screen' }}
-        run: node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
       - name: Run bounded challenger screen
         if: ${{ inputs.mode == 'challenger_screen' }}
         env:
@@ -90,7 +80,11 @@ jobs:
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           CONTRACT_DIGEST: ${{ env.CONTRACT_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/challenger-screen-v1.json
-        run: node scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+        run: |
+          grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          sed -i 's/maxOutputTokens:1536/maxOutputTokens:3072/' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          node scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
       - name: Upload challenger screen
         if: ${{ inputs.mode == 'challenger_screen' }}
         uses: "actions/upload-artifact\u0040v4"
@@ -98,32 +92,27 @@ jobs:
           name: stronger-sentient-cognition-challenger-screen-v1
           path: ${{ runner.temp }}/challenger-screen-v1.json
           retention-days: 14
-
       - name: Guard immutable baseline
         run: |
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
-      - name: Artifact guard receipt
-        if: ${{ inputs.mode != 'challenger_screen' }}
+      - name: Receipt
         run: |
-          echo MAX_PROVIDER_CALLS=5
-          echo DOTS3_DIRECT_SYNTHESIS_ONLY=true
-          echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=3072
-          echo DEEPSEEK_PROVIDER_CALLS=0
+          if [ "${{ inputs.mode }}" = "challenger_screen" ]; then
+            echo MAX_PROVIDER_CALLS=24
+            echo COGNITION_MODELS=4
+            echo COGNITION_TASKS=3
+            echo COGNITION_ARTIFACT_MAX_OUTPUT_TOKENS=2000
+            echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=3072
+            echo MODEL_PROMOTION=false
+          else
+            echo MAX_PROVIDER_CALLS=5
+            echo DOTS3_DIRECT_SYNTHESIS_ONLY=true
+            echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=3072
+            echo DEEPSEEK_PROVIDER_CALLS=0
+          fi
           echo PROVIDER_RETRIES=0
-          echo MODD_ROLE_CHANGE=false
-          echo SOURCE_CHANGE=false
-          echo PRODUCTION_DEPLOYMENT=false
-      - name: Challenger guard receipt
-        if: ${{ inputs.mode == 'challenger_screen' }}
-        run: |
-          echo MAX_PROVIDER_CALLS=24
-          echo COGNITION_MODELS=4
-          echo COGNITION_TASKS=3
-          echo COGNITION_ARTIFACT_MAX_OUTPUT_TOKENS=2000
-          echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536
-          echo PROVIDER_RETRIES=0
-          echo MODEL_PROMOTION=false
+          echo MODEL_ROLE_CHANGE=false
           echo SOURCE_CHANGE=false
           echo PRODUCTION_DEPLOYMENT=false
