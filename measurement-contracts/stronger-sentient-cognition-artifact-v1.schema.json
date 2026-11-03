@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sentient-cognition-artifact/v1",
+  "title": "Sentient Model-Neutral Cognition Artifact v1",
+  "description": "Externally useful cognition products for Dots3 synthesis. No private chain-of-thought.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "problemRepresentation",
+    "keyFindings",
+    "hypotheses",
+    "recommendedApproach",
+    "evidenceRefs",
+    "constraints",
+    "toolRecommendations",
+    "risks",
+    "uncertainties",
+    "verificationNeeded"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "sentient-cognition-artifact/v1"
+    },
+    "problemRepresentation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1500
+    },
+    "keyFindings": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim",
+          "evidenceRefs",
+          "confidence"
+        ],
+        "properties": {
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          }
+        }
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hypothesis",
+          "status",
+          "evidenceRefs"
+        ],
+        "properties": {
+          "hypothesis": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "status": {
+            "enum": [
+              "supported",
+              "plausible",
+              "rejected",
+              "unresolved"
+            ]
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "recommendedApproach": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "toolRecommendations": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool",
+          "rationale"
+        ],
+        "properties": {
+          "tool": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "verificationNeeded": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "x-sentient-semantics": {
+    "keyFindingsOrdering": "descending importance",
+    "authority": "informational_only",
+    "privateChainOfThought": "forbidden",
+    "modelNeutral": true
+  },
+  "x-sentient-output-policy": {
+    "lowCognitionArtifactTargetTokens": [
+      500,
+      750
+    ],
+    "standardCognitionArtifactTargetTokens": [
+      750,
+      1200
+    ],
+    "highCognitionArtifactTargetTokens": [
+      1200,
+      2000
+    ],
+    "absoluteVisibleArtifactMaxTokens": 2000,
+    "targetsAreExperimental": true,
+    "doNotPadToMinimum": true,
+    "doNotOverCompress": true
+  }
+}
