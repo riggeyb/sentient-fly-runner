@@ -1,0 +1,52 @@
+name: Stronger Sentient Context Compiler V0 Full Suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify exact candidate and run all compiled tests
+        working-directory: sentient
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          EXPECTED_TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_TREE"
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+          node --test dist/test/*.test.js
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "CONTEXT_COMPILER_V0_FULL_SUITE=PASS"
+          echo "PROVIDER_CALLS=0"
+          echo "PRODUCTION_DEPLOYMENT=false"
