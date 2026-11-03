@@ -21,6 +21,8 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,11 +50,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${ATLASCLOUD_API_KEY:-}"
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
           test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
           test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
           test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
+          echo "MAX_PROVIDER_CALLS=5"
+          echo "PROVIDER_RETRIES=0"
+          echo "CHALLENGER_CALLS=0"
+          echo "PRIVATE_REASONING_TEXT_LOGGED=false"
+          echo "RAW_VISIBLE_CONTENT_TEXT_LOGGED=false"
 
       - uses: actions/setup-node@v4
         with:
@@ -62,9 +70,16 @@ jobs:
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
 
+      - name: Validate raw-safe preload and synthesis harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/stronger-sentient-dots3-raw-preload-v1.cjs
+          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'response.clone().json' scripts/stronger-sentient-dots3-raw-preload-v1.cjs
       - name: Run exact five-task Dots3 synthesis with raw-safe preload
         env:
-          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
           BASELINE_TREE: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
@@ -85,13 +100,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
-          test "$(git -C sentient rev-parse 'HEAD{tree}')" = "$BASELINE_TREE"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
-          echo MAX_PROVIDER_CALLS=5
-          echo PROVIDER_RETRIES=0
-          echo CHALLENGER_CALLS=0
-          echo SENTIENT_SOURCE_CHANGE=false
-          echo PRODUCTION_DEPLOYMENT=false
+          echo "SENTIENT_SOURCE_CHANGE=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
 
       - uses: actions/upload-artifact@v4
         with:
