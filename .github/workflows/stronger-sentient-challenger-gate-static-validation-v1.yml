@@ -1,0 +1,35 @@
+name: Stronger Sentient Challenger Gate Static Validation v1
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate frozen challenger gate without provider calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          node --check scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          node --check scripts/stronger-sentient-challenger-frozen-interface-preload-v1.cjs
+          jq -e '.cognitionArtifactInterfaceFrozen==true and .dots3SynthesisValidation=="PASS" and .dots3SynthesisPolicy.enableThinking==false and .dots3SynthesisPolicy.maxOutputTokens==1536 and .dots3SynthesisPolicy.evidenceCitationRetention=="REQUIRED_EXACT" and .visibleArtifactEnvelope.absoluteMax==2000 and .challengerOutputCostPolicy=="COMPACT_INTERNAL_ARTIFACT_ONLY"' measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json >/dev/null
+          grep -q 'maxOutputTokens:2000' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          ! grep -q 'maxOutputTokens:4096' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          grep -q 'DEEPSEEK_WINDOW_NOT_HEALTHY' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          grep -q 'kimiK26Calls:0' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          grep -q 'qwen38MaxCalls:0' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          grep -q 'kimiK31ProCalls:0' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          grep -q 'enable_thinking' scripts/stronger-sentient-challenger-frozen-interface-preload-v1.cjs
+          echo PROVIDER_CALLS=0
+          echo CHALLENGER_CALLS=0
+          echo SENTIENT_SOURCE_CHANGE=false
+          echo PRODUCTION_DEPLOYMENT=false
