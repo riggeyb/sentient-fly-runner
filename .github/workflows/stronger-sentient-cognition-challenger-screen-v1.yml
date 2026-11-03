@@ -59,7 +59,7 @@ jobs:
           node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
           node --check scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
           node --check scripts/stronger-sentient-challenger-frozen-interface-preload-v1.cjs
-          grep -q 'DEEPSEEK_V3_2_MODD_V1' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+          grep -q 'DEEPSEEK_V3_2_MODEL_V1' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
           ! grep -q 'DEEPSEEK_V3_2_MODD_V1' scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
           grep -q 'maxOutputTokens:2000' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
           ! grep -q 'maxOutputTokens:4096' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
@@ -94,8 +94,8 @@ jobs:
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
-      - uses: actions/upload-artifact@v4
-        if: ${{ inputs.static_validation_only != true }}
+      - uses: actions/upload-isarefact@v4
+       if: ${{ inputs.static_validation_only != true }}
         with:
           name: stronger-sentient-cognition-challenger-screen-v1
           path: ${{ runner.temp }}/challenger-screen-v1.json
