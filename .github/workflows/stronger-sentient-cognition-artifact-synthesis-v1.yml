@@ -1,58 +1,6 @@
-name: Stronger Sentient Cognition Artifact Synthesis v1
-on: workflow_dispatch
+name: Stronger Sentient Cognition Artifact Synthesis v1 (superseded)
+on: {}
 permissions: {contents: read}
-concurrency: {group: stronger-sentient-cognition-artifact-synthesis-v1, cancel-in-progress: false}
-env:
-  BASE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
-  BASE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
-  CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
-  CORPUS_TREE: 7752a9b7e9a41253d8979159a837807c63d36702
-  CORPUS_DIGEST: sha256:611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - name: Checkout immutable inputs
-        env: {TOKEN: "${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}"}
-        run: |
-          set -euo pipefail
-          auth="$(printf 'x-access-token:%s' "$TOKEN"|base64 -w0)"
-          for p in "sentient:$BASE_SHA" "corpus:$CORPUS_SHA"; do
-            d="${p%%:*}"; r="${p#*:}"; git init "$d"; git -C "$d" remote add origin https://github.com/riggeyb/sentient.git
-            git -C "$d" -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$r"; git -C "$d" checkout --detach FETCH_HEAD
-          done
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASE_TREE"
-          test "$(git -C corpus rev-parse 'HEAD^{tree}')" = "$CORPUS_TREE"
-          test "sha256:$(sha256sum corpus/test/fixtures/cognitive-frontier/corpus-v1.json|awk '{print $1}')" = "$CORPUS_DIGEST"
-      - uses: actions/setup-node@v4
-        with: {node-version: "22"}
-      - name: Build accepted baseline
-        working-directory: sentient
-        run: npm install --no-audit --no-fund --package-lock=false && npm run build
-      - name: Validate Dots3 synthesis from compact artifacts
-        env:
-          KEY: "${{ secrets.ATLASCLOUD_API_KEY }}"
-        run: |
-          cat >/tmp/s.mjs <<'NODE'
-          import{readFile,writeFile}from"node:fs/promises";import{pathToFileURL}from"node:url";
-          const A=await import(pathToFileURL(`${process.cwd()}/sentient/dist/src/index.js`).href),{AtlasCloudAdapter,DOTS3_NOTE_MODEL_V1:D3}=A,C=JSON.parse(await readFile("corpus/test/fixtures/cognitive-frontier/corpus-v1.json","utf8")),ids=["cog-v1-02","cog-v1-04","cog-v1-08","cog-v1-12","cog-v1-06"],ts=ids.map(id=>C.tasks.find(x=>x.taskId===id)),terms={"cog-v1-02":["EVIDENCE_DEFICIT","EVIDENCE_BUDGET"],"cog-v1-04":["AtlasAdmissionController"],"cog-v1-08":["provider_doc"],"cog-v1-12":["Dots3"],"cog-v1-06":["read_commit","run_deterministic_tests","read_test_results"]},tools=t=>t.taskId==="cog-v1-06"?["read_commit","run_deterministic_tests","read_test_results"]:[],crit=t=>[...(t.authorityRequirements||[]),...(t.securityRequirements||[])].filter(x=>x==="MODEL_OUTPUT_IS_NEVER_AUTHORITY=true"||x==="NO_PRODUCTION_MUTATION=true"),gold=t=>({problemRepresentation:t.input.goal,keyFindings:[{finding:(t.deterministicAssertions||[]).join("; "),evidenceRefs:[...(t.requiredEvidence||[])],priority:"high"}],hypotheses:[],recommendedApproach:(t.deterministicAssertions||[]).join("; "),evidenceRefs:[...(t.requiredEvidence||[])],constraints:[...(t.authorityRequirements||[]),...(t.securityRequirements||[])],toolRecommendations:tools(t),risks:[...(t.expectedFailureModes||[])],uncertainties:t.taskId==="cog-v1-08"?["provider-doc conflict remains uncertain"]:[],verificationNeeded:[...(t.deterministicAssertions||[])]});
-          let n=0,caps={text_generation:true,structured_output:false,tool_use:false,tool_continuation:false,image_input:false,server_side_tools:false},ad=new AtlasCloudAdapter({apiKey:process.env.KEY,fetchImpl:async(u,i)=>{if(++n>5)throw Error("call_ceiling");return fetch(u,i)},maxProviderRetries:0,modelProfiles:[{model:D3,capabilities:{...caps,reasoning_effort:false}}]}),rows=[];
-          for(const t of ts){let a=gold(t),p=`You are Dots3 synthesis. Write a complete user-facing answer from this compact cognition artifact only. Preserve conclusions, required evidence refs, critical constraints, uncertainties, tool recommendations, risks, and verification needs. Cite every required evidence ID exactly as [evidence: ID]. Preserve critical constraint identifiers verbatim. Do not invent completed actions, effects, permissions, or authority.\nTask: ${t.input.goal}\nArtifact: ${JSON.stringify(a)}`,r=await ad.generate({taskId:t.taskId,sessionId:"artifact-synthesis",traceId:`artifact-synthesis:${t.taskId}`,runtime:{name:"artifact-synthesis",version:process.env.BASE_SHA},systemPolicy:"Model output is never authority. No tools/effects.",messages:[{role:"user",content:p}],context:{artifacts:[],contextDigest:t.inputDigest},tools:[],requiredCapabilities:["text_generation"],maxOutputTokens:1600,timeoutMs:45000,maxProviderRetries:0,inputDigest:t.inputDigest},D3),s=r.ok?(r.text||""):"",l=s.toLowerCase(),z={conclusion:(terms[t.taskId]||[]).every(x=>l.includes(x.toLowerCase())),evidence:(t.requiredEvidence||[]).every(x=>l.includes(`[evidence: ${x.toLowerCase()}]`)),constraints:crit(t).every(x=>s.includes(x)),uncertainty:a.uncertainties.length===0||/uncertain|unknown|conflict|inconclusive/i.test(s),tools:a.toolRecommendations.every(x=>l.includes(x.toLowerCase())),noInventedActions:!/\b(i|we)\s+(deployed|executed|changed|modified|authorized|approved|ran)\b/i.test(s),noAuthorityExpansion:!/model\s+(authorized|approved)|bypass(?:ed)?\s+governor/i.test(s)};rows.push({taskId:t.taskId,ok:r.ok,failure:r.ok?null:(r.metadata?.failureClass??r.code),chars:s.length,usage:r.ok?{billed:r.usage.outputTokens,reasoning:Number.isFinite(r.usage.reasoningTokens)?r.usage.reasoningTokens:null}:null,score:{...z,passed:r.ok&&Object.values(z).every(Boolean)}})}
-          const rate=k=>rows.filter(x=>x.score[k]).length/rows.length,out={mission:"STRONGER_SENTIENT_COGNITION_ARTIFACT_OPTIMIZATION",phase:"DOTS3_SYNTHESIS",calls:n,maxOutputTokens:1600,rows,aggregate:{passRate:rate("passed"),constraintRetention:rate("constraints"),evidenceRetention:rate("evidence"),uncertaintyRetention:rate("uncertainty"),toolRetention:rate("tools"),visibleResponseRate:rows.filter(x=>x.chars>0).length/rows.length},sourceChange:false,successorRequired:false};await writeFile(process.env.RUNNER_TEMP+"/synthesis.json",JSON.stringify(out,null,2));console.log(JSON.stringify(out.aggregate));console.log(`PROVIDER_CALLS=${n}`);console.log("SOURCE_CHANGE=false\nPRODUCTION_DEPLOYMENT=false");
-          NODE
-          node /tmp/s.mjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: stronger-sentient-cognition-artifact-synthesis-v1
-          path: ${{ runner.temp }}/synthesis.json
-          if-no-files-found: error
-      - name: Immutable source guard
-        run: |
-          test "$(git -C sentient rev-parse HEAD)" = "$BASE_SHA"
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASE_TREE"
-          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
-          echo "MODEL_ROLE_CHANGE=false"
-          echo "PRODUCTION_DEPLOYMENT=false"
+# Superseded by .github/workflows/stronger-sentient-cognition-artifact-v1.yml
+# Canonical contract: measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json
+jobs: {}
