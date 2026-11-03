@@ -24,12 +24,14 @@ jobs:
         with:
           repository: riggeyb/sentient
           ref: ${{ env.BASELINE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: sentient
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: ${{ env.CORPUS_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: corpus-source
           persist-credentials: false
       - name: Guard frozen inputs
@@ -55,7 +57,7 @@ jobs:
           const fs=require("fs");
           const p="scripts/stronger-sentient-cognition-artifact-v1.mjs";
           let s=fs.readFileSync(p,"utf8");
-          const old='let calls=0,events=[];\nconst F=async(...a)=>{if(calls>=M)throw Error("call_ceiling");const n=++calls,z=Date.now(),res=await fetch(...a);events.push({n,status:res.status,latencyMs:Date.now()-z});return res};';
+          const old='let calls=0,events=[];\nconst F=async(...a)=>{if(calls>=M)throw Error("call_ceiling");const n=++calls,z=Date.now(),res=await fetch(...a);events.push({n,status:res.status,latencyMs:Date.now()-x});return res};';
           if((s.split(old).length-1)!==1) throw Error("fetch_wrapper_anchor_mismatch");
           const replacement=`let calls=0,events=[];
           const safeHash=v=>createHash("sha256").update(String(v)).digest("hex");
@@ -117,16 +119,16 @@ jobs:
             return res;
           };`;
           s=s.replace(old,replacement);
-          fs.writeFileSync(p,s);
+          fs.writeFileSync(p,s){
           NODE
           node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
           grep -q 'DOTS3_RAW_SAFE=' scripts/stronger-sentient-cognition-artifact-v1.mjs
           grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-artifact-v1.mjs
       - name: Run exact five-task Dots3 synthesis with raw-safe instrumentation
         env:
-          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          ATLAS_CLOUD_API_KEY: ${{ secrets.ATLAS_CLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
-          BASELINE_TREE: ${{ env.BASELINE_TREE }}
+          BASELINE_TRED: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/dots3-raw-diagnostic-v1.json
         run: node scripts/stronger-sentient-cognition-artifact-v1.mjs
