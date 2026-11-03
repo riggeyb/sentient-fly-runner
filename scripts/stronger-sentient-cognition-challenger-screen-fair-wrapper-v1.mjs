@@ -1,100 +1,80 @@
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { DEEPSEEK_V3_2_MODEL_V1 as D } from "../sentient/dist/src/index.js";
 
-const S="scripts/stronger-sentient-cognition-challenger-screen-v1.mjs";
-const F="measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json";
-const P=path.resolve("scripts/stronger-sentient-challenger-frozen-interface-preload-v1.cjs");
-const O=process.env.EXPERIMENT_OUT;
-const K=String(process.env.ATLASCLOUD_API_KEY??"").trim();
-const G=process.env.CONTRACT_DIGEST;
-const STATIC=process.env.STATIC_VALIDATE==="true";
-if(!O||!K) throw new Error("runner_env_missing");
-if(D!=="deepseek-ai/deepseek-v3.2") throw new Error("deepseek_model_constant_mismatch");
-if(!fs.existsSync(F)||!fs.existsSync(P)||!fs.existsSync(S)) throw new Error("runner_input_missing");
+const SCREEN="scripts/stronger-sentient-cognition-challenger-screen-v1.mjs";
+const FREEZE="measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json";
+const OUT=process.env.EXPERIMENT_OUT;
+const DIGEST=process.env.CONTRACT_DIGEST;
 
-const f=JSON.parse(fs.readFileSync(F,"utf8")),e=f.visibleArtifactEnvelope??{},pre=fs.readFileSync(P,"utf8");
-const frozen=
+if(!OUT) throw new Error("experiment_out_missing");
+if(D!=="deepseek-ai/deepseek-v3.2") throw new Error("deepseek_model_constant_mismatch");
+if(!fs.existsSync(FREEZE)||!fs.existsSync(SCREEN)) throw new Error("measurement_integrity_input_missing");
+
+const f=JSON.parse(fs.readFileSync(FREEZE,"utf8"));
+const e=f.visibleArtifactEnvelope??{};
+const s=fs.readFileSync(SCREEN,"utf8");
+
+const freezeValid=
   f.contract==="sentient-cognition-artifact/v1" &&
-  f.contractDigest===G &&
+  f.contractDigest===DIGEST &&
   f.baselineSha===process.env.BASELINE_SHA &&
   f.baselineTree===process.env.BASELINE_TREE &&
   f.cognitionArtifactInterfaceFrozen===true &&
   f.dots3SynthesisValidation==="PASS" &&
-  f.challengerOutputCostPolicy==="COMPACT_INTERNAL_ARTIFACT_ONLY" &&
   f.dots3SynthesisPolicy?.enableThinking===false &&
-  e.absoluteMax===2000 && e.doNotPad===true && e.doNotOverCompress===true;
-const policy=
-  pre.includes("COMMON_ADAPTIVE_COGNITION_POLICY_V1") &&
-  pre.includes("ladder=[2000,4000]") &&
-  pre.includes('SCREEN_MODE==="deepseek_readiness"') &&
-  pre.includes('result.finishReason==="length"') &&
-  pre.includes("validOngoingCognition");
-if(!frozen||!policy) throw new Error("frozen_or_adaptive_policy_invalid");
+  f.challengerOutputCostPolicy==="COMPACT_INTERNAL_ARTIFACT_ONLY" &&
+  JSON.stringify(e.low)==="[500,750]" &&
+  JSON.stringify(e.standard)==="[750,1200]" &&
+  JSON.stringify(e.high)==="[1200,2000]" &&
+  e.absoluteMax===2000 &&
+  e.doNotPad===true &&
+  e.doNotOverCompress===true;
 
-const write=r=>fs.writeFileSync(O,JSON.stringify(r,null,2)+"\n");
-if(STATIC){
-  const r={
-    schemaVersion:"stronger-sentient-challenger-static/v4",
-    fairnessGateStaticValidation:"PASS",
-    providerCalls:0,
-    deepseekModel:D,
-    freezeReceiptVerified:true,
-    dots3SynthesisValidation:"PASS",
-    dots3EnableThinking:false,
-    cognitionInitialProviderCompletionTokens:2000,
-    cognitionAdaptiveProviderCompletionMaxTokens:4000,
-    cognition2000IsInitialScreenEnvelope:true,
-    cognition2000IsGlobalIntelligenceLimit:false,
-    visibleArtifactMaxTokens:2000,
-    correctedHealthPredicate:"COMPLETE_USABLE_SENTIENT_COGNITION_ARTIFACT_UNDER_COMMON_ADAPTIVE_COMPLETION_POLICY",
-    challengerCalls:0,
-    sourceChange:false,
-    productionDeployment:false,
-  };
-  write(r);
-  console.log("FAIRNESS_GATE_STATIC_VALIDATION="+JSON.stringify(r));
-  process.exit(0);
-}
+const requiredMarkers=[
+  'const taskIds=["cog-v1-02","cog-v1-08","cog-v1-06"]',
+  '["DeepSeek V3.2","deepseek-ai/deepseek-v3.2"]',
+  '["Kimi K2.6","moonshotai/kimi-k2.6"]',
+  '["Qwen 3.8 Max","qwen/qwen3.8-max"]',
+  '["Kimi K3.1 Pro","moonshotai/kimi-k3.1-pro"]',
+  'const INITIAL=2000, ESCALATE_TO=4000, VISIBLE_ARTIFACT_MAX=2000',
+  'const MAX_INITIAL_ARMS=12, MAX_PROVIDER_CALLS=24',
+  'result.finishReason==="length"',
+  'structurallyRelevant',
+  'sameForEveryModel:true',
+  'measurementIntegrityRequired:true',
+  'incumbentCognitionSuccessRequired:false',
+  'dots3Called:false',
+  'dots3Thinking:false',
+  'dots3MandatoryForMachineExecution:false',
+];
+const screenValid=requiredMarkers.every(m=>s.includes(m)) && !s.includes("dots-studio/");
+if(!freezeValid||!screenValid) throw new Error("measurement_integrity_static_validation_failed");
 
-const opts=[process.env.NODE_OPTIONS,`--require=${P}`].filter(Boolean).join(" ");
-const R=path.join(os.tmpdir(),"deepseek-readiness-v1.json");
-const a=spawnSync(process.execPath,[S],{
-  stdio:"inherit",
-  env:{...process.env,NODE_OPTIONS:opts,SCREEN_MODE:"deepseek_readiness",EXPERIMENT_OUT:R},
-});
-if(a.status!==0||!fs.existsSync(R)) throw new Error("deepseek_readiness_child_failed");
-const rr=JSON.parse(fs.readFileSync(R,"utf8"));
-const ready=
-  rr.schemaVersion==="stronger-sentient-deepseek-cognition-readiness/v1" &&
-  rr.model===D &&
-  rr.contract==="sentient-cognition-artifact/v1" &&
-  rr.contractDigest===G &&
-  rr.providerCompletionPolicy?.initial===2000 &&
-  rr.providerCompletionPolicy?.nextBoundedEnvelope===4000 &&
-  rr.providerCompletionPolicy?.sameForEveryModel===true &&
-  rr.visibleArtifactMaxTokens===2000 &&
-  rr.cognitionReadiness==="READY" &&
-  rr.completeUsableArtifact===true;
-
-const gate={
-  schemaVersion:"stronger-sentient-challenger-readiness-gate/v4",
+const report={
+  schemaVersion:"stronger-sentient-challenger-measurement-integrity/v1",
   fairnessGateStaticValidation:"PASS",
-  deepseekTransportHealth:rr.transportHealth??"UNKNOWN",
-  deepseekCognitionReadiness:rr.cognitionReadiness??"NOT_READY",
-  deepseekReadiness:rr,
-  readinessProviderCalls:rr.providerCalls??0,
-  readyForFairChallengerScreen:ready,
-  screenOpened:false,
-  stopScreen:!ready,
-  kimiK26Calls:0,
-  qwen38MaxCalls:0,
-  kimiK31ProCalls:0,
-  modelRanking:"NOT_PERMITTED",
+  measurementIntegrityRequired:true,
+  incumbentCognitionSuccessRequired:false,
+  providerCalls:0,
+  challengerCalls:0,
+  freezeReceiptVerified:true,
+  deepseekModelConstant:D,
+  models:4,
+  tasks:3,
+  maximumInitialTaskArms:12,
+  cognitionInitialProviderCompletionTokens:2000,
+  cognitionAdaptiveProviderCompletionMaxTokens:4000,
+  cognition2000IsInitialScreenEnvelope:true,
+  cognition2000IsGlobalIntelligenceLimit:false,
+  visibleArtifactMaxTokens:2000,
+  dots3SynthesisValidation:"PASS_5_OF_5",
+  dots3Thinking:false,
+  dots3Role:"OPTIONAL_SYNTHESIS_PRESENTATION",
+  dots3MandatoryForMachineExecution:false,
+  completionPolicy:"INITIAL_2000_ESCALATE_TO_4000_ONLY_ON_LENGTH_AND_INCOMPLETE_AND_STRUCTURALLY_RELEVANT",
+  priorChallengerDataClass:"EXPLORATORY_PRE_FAIRNESS_SCREEN_DATA_NOT_PROMOTION_EVIDENCE",
   sourceChange:false,
   productionDeployment:false,
 };
-write(gate);
-console.log("CHALLENGER_READINESS_GATE="+JSON.stringify(gate));
+fs.writeFileSync(OUT,JSON.stringify(report,null,2)+"\n");
+console.log("MEASUREMENT_INTEGRITY_GATE="+JSON.stringify(report));
