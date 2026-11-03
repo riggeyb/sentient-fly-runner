@@ -94,8 +94,8 @@ jobs:
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
-      - uses: actions/upload-isarefact@v4
-       if: ${{ inputs.static_validation_only != true }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.static_validation_only != true }}
         with:
           name: stronger-sentient-cognition-challenger-screen-v1
           path: ${{ runner.temp }}/challenger-screen-v1.json
