@@ -16,8 +16,7 @@ jobs:
     timeout-minutes: 18
     steps:
       - uses: "actions/checkout\u0040v4"
-        with:
-          persist-credentials: false
+        with: {persist-credentials: false}
       - uses: "actions/checkout\u0040v4"
         with:
           repository: riggeyb/sentient
@@ -39,61 +38,23 @@ jobs:
           test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json|awk '{print $1}')" = "$CORPUS_DIGEST"
           test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json|awk '{print $1}')" = "$CONTRACT_DIGEST"
       - uses: "actions/setup-node\u0040v4"
-        with:
-          node-version: "22"
+        with: {node-version: "22"}
       - name: Build accepted baseline
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
-      - name: Prepare corrected fair-screen headroom
-        shell: bash
+      - name: Validate fair screen wrapper
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path("scripts/stronger-sentient-cognition-challenger-screen-v1.mjs")
-          s=p.read_text()
-          old="maxOutputTokens:2000"
-          if s.count(old) != 1:
-              raise SystemExit(f"expected one {old}, found {s.count(old)}")
-          s=s.replace(old,"maxOutputTokens"+chr(58)+"4096",1)
-
-          marker="const verification=cognitionVerify(task,artifact);"
-          if s.count(marker) != 1:
-              raise SystemExit(f"expected one verification marker, found {s.count(marker)}")
-          visible_guard = (
-              marker
-              + '\n  if(result.ok){'
-              + 'const billed=result.usage.outputTokens;'
-              + 'const reasoning=result.usage.reasoningTokens??null;'
-              + 'const visible=reasoning==null?billed:Math.max(0,billed-reasoning);'
-              + 'if(visible>2000) verification.verified=false;'
-              + '}'
-          )
-          s=s.replace(marker,visible_guard,1)
-
-          old_report="commonCognitionMaxOutputTokens:2000"
-          if s.count(old_report) != 1:
-              raise SystemExit(f"expected one report field, found {s.count(old_report)}")
-          s=s.replace(
-              old_report,
-              "commonProviderCompletionMaxTokens:4096,visibleArtifactMaxTokens:2000",
-              1,
-          )
-          p.write_text(s)
-          PY
           node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          grep -q 'maxOutputTokens>4096' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          grep -q 'visible>2000' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          grep -q 'visibleArtifactMaxTokens:2000' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-      - name: Run bounded challenger screen
+          node --check scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
+      - name: Run bounded fair challenger screen
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
-          BASELINE_TREEO: ${{ env.BASELINE_TREE }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           CONTRACT_DIGEST: ${{ env.CONTRACT_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/challenger-screen-v1.json
-        run: node scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+        run: node scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
       - name: Guard immutable baseline
         run: |
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
