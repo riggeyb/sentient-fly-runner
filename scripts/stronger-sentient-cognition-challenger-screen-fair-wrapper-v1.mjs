@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   AtlasCloudAdapter,
@@ -8,10 +9,12 @@ import {
 
 const source="scripts/stronger-sentient-cognition-challenger-screen-v1.mjs";
 const freezePath="measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json";
+const preloadPath=path.resolve("scripts/stronger-sentient-challenger-frozen-interface-preload-v1.cjs");
 const out=process.env.EXPERIMENT_OUT;
 const key=String(process.env.ATLASCLOUD_API_KEY??"").trim();
 const expectedContract="sentient-cognition-artifact/v1";
 const expectedDigest=process.env.CONTRACT_DIGEST;
+
 if(!out) throw new Error("experiment_out_missing");
 if(!key) throw new Error("atlas_secret_missing");
 
@@ -40,15 +43,10 @@ function writeBlocked(reason,extra={}){
 }
 
 if(!fs.existsSync(freezePath)) writeBlocked("COGNITION_ARTIFACT_INTERFACE_NOT_FROZEN");
+if(!fs.existsSync(preloadPath)) throw new Error("frozen_interface_preload_missing");
+
 const freeze=JSON.parse(fs.readFileSync(freezePath,"utf8"));
-const env=freeze.visibleArtifactEnvelope??{};
-const envelopeValid=
-  JSON.stringify(env.low)==='[500,750]' &&
-  JSON.stringify(env.standard)==='[750,1200]' &&
-  JSON.stringify(env.high)==='[1200,2000]' &&
-  env.absoluteMax===2000 &&
-  env.doNotPad===true &&
-  env.doNotOverCompress===true;
+const envelope=freeze.visibleArtifactEnvelope??{};
 const freezeValid=
   freeze.schemaVersion==="sentient-cognition-artifact-freeze/v1" &&
   freeze.contract===expectedContract &&
@@ -59,42 +57,53 @@ const freezeValid=
   freeze.dots3SynthesisValidation==="PASS" &&
   freeze.challengerOutputCostPolicy==="COMPACT_INTERNAL_ARTIFACT_ONLY" &&
   freeze.dots3SynthesisPolicy?.enableThinking===false &&
-  envelopeValid;
+  freeze.dots3SynthesisPolicy?.maxOutputTokens===1536 &&
+  freeze.dots3SynthesisPolicy?.evidenceCitationRetention==="REQUIRED_EXACT" &&
+  JSON.stringify(envelope.low)==='[500,750]' &&
+  JSON.stringify(envelope.standard)==='[750,1200]' &&
+  JSON.stringify(envelope.high)==='[1200,2000]' &&
+  envelope.absoluteMax===2000 &&
+  envelope.doNotPad===true &&
+  envelope.doNotOverCompress===true;
 if(!freezeValid){
-  writeBlocked("COGNITION_ARTIFACT_INTERFACE_NOT_FROZEN",{
-    freezeObserved:{
-      schemaVersion:freeze.schemaVersion??null,
-      contract:freeze.contract??null,
-      contractDigest:freeze.contractDigest??null,
-      baselineSha:freeze.baselineSha??null,
-      baselineTree:freeze.baselineTree??null,
-      cognitionArtifactInterfaceFrozen:freeze.cognitionArtifactInterfaceFrozen??null,
-      dots3SynthesisValidation:freeze.dots3SynthesisValidation??null,
-      challengerOutputCostPolicy:freeze.challengerOutputCostPolicy??null,
-      dots3EnableThinking:freeze.dots3SynthesisPolicy?.enableThinking??null,
-      visibleArtifactEnvelope:env,
-    }
-  });
+  writeBlocked("COGNITION_ARTIFACT_INTERFACE_NOT_FROZEN",{freezeObserved:{
+    schemaVersion:freeze.schemaVersion??null,
+    contract:freeze.contract??null,
+    contractDigest:freeze.contractDigest??null,
+    baselineSha:freeze.baselineSha??null,
+    baselineTree:freeze.baselineTree??null,
+    cognitionArtifactInterfaceFrozen:freeze.cognitionArtifactInterfaceFrozen??null,
+    dots3SynthesisValidation:freeze.dots3SynthesisValidation??null,
+    challengerOutputCostPolicy:freeze.challengerOutputCostPolicy??null,
+    dots3SynthesisPolicy:freeze.dots3SynthesisPolicy??null,
+    visibleArtifactEnvelope:envelope,
+  }});
 }
 
 const screenSource=fs.readFileSync(source,"utf8");
-for(const marker of [
-  "maxOutputTokens:2000",
-  "visibleArtifactMaxTokens:2000",
-  'challengerOutputCostPolicy:"COMPACT_INTERNAL_ARTIFACT_ONLY"',
-  "body.enable_thinking=false",
-  "dots3EnableThinking:false",
-]){
-  if(!screenSource.includes(marker)) throw new Error(`economic_or_synthesis_guard_missing:${marker}`);
-}
+if((screenSource.match(/maxOutputTokens:2000/g)??[]).length!==1) throw new Error("unexpected_cognition_cap_marker");
 if(screenSource.includes("maxOutputTokens:4096")) throw new Error("economic_guard_regression_4096");
+if(!screenSource.includes("Do not write the final user-facing answer")) throw new Error("compact_artifact_contract_missing");
 
-const caps={text_generation:true,structured_output:false,tool_use:false,tool_continuation:false,reasoning_effort:false,image_input:false,server_side_tools:false};
+const caps={
+  text_generation:true,
+  structured_output:false,
+  tool_use:false,
+  tool_continuation:false,
+  reasoning_effort:false,
+  image_input:false,
+  server_side_tools:false,
+};
 const preflightAdapter=new AtlasCloudAdapter({
   apiKey:key,
   maxProviderRetries:0,
-  modelProfiles:[{model:DEEPSEEK_V3_2_MODEL_V1,capabilities:caps,profileId:"challenger-fairness-preflight-v1"}],
+  modelProfiles:[{
+    model:DEEPSEEK_V3_2_MODD\_V1,
+    capabilities:caps,
+    profileId:"challenger-fairness-preflight-v1",
+  }],
 });
+
 const preflight=[];
 for(let i=0;i<2;i+=1){
   const content="[challenger-fairness-preflight] Return only OK.";
@@ -114,17 +123,19 @@ for(let i=0;i<2;i+=1){
     timeoutMs:20000,
     maxProviderRetries:0,
     inputDigest:digest,
-  },DEEPSEEK_V3_2_MODEL_V1);
+  },DEEPSEEK_V3_2_MODD\_V1);
+  const visible=result.ok && typeof result.text==="string" && result.text.trim().length>0;
   preflight.push({
     attempt:i+1,
-    ok:result.ok && typeof result.text==="string" && result.text.trim().length>0,
-    providerOk*result.ok,
-    visibleTextPresent:result.ok && typeof result.text==="string" && result.text.trim().length>0,
+    ok:visible,
+    providerOk:result.ok,
+    visibleTextPresent:visible,
     httpStatus:result.ok?200:(result.metadata?.httpStatus??null),
     failureClass:result.ok?null:(result.metadata?.failureClass??result.code),
     latencyMs:Date.now()-t0,
   });
 }
+
 const successes=preflight.filter(x=>x.ok).length;
 const window=successes===2?"HEALTHY":successes===1?"DEGRADED":"UNUSABLE";
 if(window!=="HEALTHY"){
@@ -135,20 +146,25 @@ if(window!=="HEALTHY"){
   });
 }
 
-console.log("CHALLENGER_SCREEN_GATE="+JSON.stringify {
+console.log("CHALLENGER_SCREEN_GATE="+JSON.stringify(s
   screenStatus:"OPEN",
   contract:expectedContract,
   contractDigest:expectedDigest,
   cognitionArtifactInterfaceFrozen:true,
   dots3SynthesisValidation:"PASS",
+  dots3EnableThinking:false,
+  dots3SynthesisMaxOutputTokens:1536,
+  dots3EvidenceCitationRetention:"REQUIRED_EXACT",
   deepseekWindow:window,
   deepseekPreflight:preflight,
   cognitionProviderCompletionMaxTokens:2000,
   visibleArtifactMaxTokens:2000,
   challengerOutputCostPolicy:"COMPACT_INTERNAL_ARTIFACT_ONLY",
-  dots3EnableThinking:false,
-  dots3SynthesisMaxOutputTokens:1536,
 }));
 
-const result=spawnSync(process.execPath,[source],{stdio:"inherit",env:process.env});
-process.exit(result.status??1);
+const nodeOptions=[process.env.NODE_OPTIONS,`--require=${preloadPath}`].filter(Boolean).join(" ");
+const child=spawnSync(process.execPath,[source],{
+  stdio:"inherit",
+  env:{...process.env,NODE_OPTIONS:nodeOptions},
+});
+process.exit(child.status??1);
