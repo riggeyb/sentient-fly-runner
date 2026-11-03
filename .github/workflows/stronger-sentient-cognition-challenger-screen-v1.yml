@@ -56,14 +56,34 @@ jobs:
           if s.count(old) != 1:
               raise SystemExit(f"expected one {old}, found {s.count(old)}")
           s=s.replace(old,"maxOutputTokens"+chr(58)+"4096",1)
+
+          marker="const verification=cognitionVerify(task,artifact);"
+          if s.count(marker) != 1:
+              raise SystemExit(f"expected one verification marker, found {s.count(marker)}")
+          visible_guard = (
+              marker
+              + '\n  if(result.ok){'
+              + 'const billed=result.usage.outputTokens;'
+              + 'const reasoning=result.usage.reasoningTokens??null;'
+              + 'const visible=reasoning==null?billed:Math.max(0,billed-reasoning);'
+              + 'if(visible>2000) verification.verified=false;'
+              + '}'
+          )
+          s=s.replace(marker,visible_guard,1)
+
           old_report="commonCognitionMaxOutputTokens:2000"
           if s.count(old_report) != 1:
               raise SystemExit(f"expected one report field, found {s.count(old_report)}")
-          s=s.replace(old_report,"commonProviderCompletionMaxTokens:4096,visibleArtifactMaxTokens:2000",1)
+          s=s.replace(
+              old_report,
+              "commonProviderCompletionMaxTokens:4096,visibleArtifactMaxTokens:2000",
+              1,
+          )
           p.write_text(s)
           PY
           node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          grep -q 'maxOutputTokens:4096' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          grep -q 'maxOutputTokens>4096' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          grep -q 'visible>2000' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
           grep -q 'visibleArtifactMaxTokens:2000' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
       - name: Run bounded challenger screen
         env:
