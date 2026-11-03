@@ -89,9 +89,9 @@ jobs:
 
       - name: Run canonical artifact validation
         env:
-          ATLASCLOUD_API_KEY: ${{ secrets.ATLAS_CLOUD_API_KEY }}
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
-          BASELINE_TRED: ${{ env.BASELINE_TREE }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
         run: node scripts/stronger-sentient-cognition-artifact-v1.mjs
