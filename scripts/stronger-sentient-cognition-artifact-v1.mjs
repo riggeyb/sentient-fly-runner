@@ -96,7 +96,7 @@ for(const t of tasks){
     requiredModelCapabilities:["text_generation"],budget:{maxOutputTokens:1536,timeoutMs:30000,maxRetries:0,maxToolRounds:0},
     verifier:{verifierId:t.verifierDefinition,configuration:{}},inputDigest:input};
   const z=Date.now(),ex=await R.execute(q,{provider:"atlascloud",model:DOTS3_NOTE_MODEL_V1}),r=ex.result;
-  const text=r.ok?r.text:"";
+  const text=r.ok?String(r.text??""):"";
   const findings=art.keyFindings.every((v,i)=>text.includes(tag("finding",i))&&overlap(text,v.claim));
   const constraints=art.constraints.every((v,i)=>text.includes(tag("constraint",i))&&overlap(text,v));
   const evidence=art.evidenceRefs.every(e=>text.includes(evidenceTag(e)));
@@ -117,7 +117,8 @@ const dots=conf?"PROVIDER_CONFOUNDED":vr===1?"PASS":"FAIL";
 const ratio=phase1.reduce((n,r)=>n+r.compressionRatio,0)/phase1.length;
 const report={schemaVersion:"stronger-sentient-cognition-artifact-optimization/v1",mission:"STRONGER_SENTIENT_COGNITION_ARTIFACT_OPTIMIZATION",
   dataset:"frozen-corpus-five-task-interface-validation-prose-synthesis",baselineSha:S,baselineTree:T,baselineAcceptanceRun:41483844842,
-  corpusDigest:`sha256:${D}`,taskIds:ids,contract:"sentient-cognition-artifact/v1",contractDigest:`sha256:${createHash("sha256").update(schemaRaw).digest("hex")}`,artifactFields:schema.required,reuseExistingInterface:true,
+  corpusDigest:`sha256:${D}`,taskIds:ids,contract:"sentient-cognition-artifact/v1",
+  contractDigest:`sha256:${createHash("sha256").update(schemaRaw).digest("hex")}`,artifactFields:schema.required,reuseExistingInterface:true,
   currentInterface:"generic PreparedTask/ModelResult JSON-capable interface",modelNeutral:true,outputPolicy:schema["x-sentient-output-policy"],
   tokenAccounting:{visibleArtifact:"ceil(UTF-8 bytes/4) deterministic estimate here; challenger screen uses cognition-call usage.outputTokens",
     reasoning:"provider usage.reasoningTokens when reported; UNMEASURED here",billedOutput:"cognition provider output/cost metadata when available; Dots3 synthesis recorded separately"},
