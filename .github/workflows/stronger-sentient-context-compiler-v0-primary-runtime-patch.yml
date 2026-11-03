@@ -44,7 +44,36 @@ jobs:
           test "$(git -C sentient rev-parse HEAD)" = "$EXPECTED_SHA"
           gzip -dc scripts/patch-context-compiler-primary-runtime-v0.py.gz > "$RUNNER_TEMP/patch-context-v0.py"
           python3 "$RUNNER_TEMP/patch-context-v0.py"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          compiler = Path("sentient/src/retrieval/context-compiler-v0.ts")
+          text = compiler.read_text()
+          text = text.replace(
+              'import type { JsonObject, JsonValue, ContextArtifact, PreparedTask } from "../model/types.js";',
+              'import type { JsonObject, JsonValue, ContextArtifact, PreparedTask, ContextBundle } from "../model/types.js";',
+              1,
+          )
+          text = text.replace(
+              'input: Pick<ContextCompilerInputV0, "context" | "skills">,',
+              'input: { context: ContextBundle; skills: readonly { stableId: string }[] },',
+              1,
+          )
+          compiler.write_text(text)
+
+          test_file = Path("sentient/test/context-runtime-shadow-v0.test.ts")
+          test_text = test_file.read_text()
+          test_text = test_text.replace("  sha256Text,\n", "", 1)
+          test_text = test_text.replace(
+              '} from "../src/index.js";\n',
+              '} from "../src/index.js";\nimport { sha256Text } from "../src/retrieval/digest.js";\n',
+              1,
+          )
+          test_file.write_text(test_text)
+          PY
           cd sentient
+          grep -q 'ContextBundle' src/retrieval/context-compiler-v0.ts
+          grep -q '../src/retrieval/digest.js' test/context-runtime-shadow-v0.test.ts
           npm install --no-audit --no-fund --package-lock=false
           npm run build
           node --test \
