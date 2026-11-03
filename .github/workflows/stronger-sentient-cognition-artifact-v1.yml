@@ -67,16 +67,8 @@ jobs:
           node -e 'JSON.parse(require("fs").readFileSync("measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json","utf8"))'
           node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
           grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-artifact-v1.mjs
-          grep -q 'user-facing answer in ordinary prose' scripts/stronger-sentient-cognition-artifact-v1.mjs
-
-      - name: Apply verifier null-safety hotfix
-        shell: bash
-        run: |
-          set -euo pipefail
-          grep -q 'const text=r.ok?r.text:"";' scripts/stronger-sentient-cognition-artifact-v1.mjs
-          sed -i 's/const text=r.ok?r.text:"";/const text=String(r.ok?(r.text??""):"");/' scripts/stronger-sentient-cognition-artifact-v1.mjs
-          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
-          grep -q 'const text=String(r.ok?(r.text??""):"");' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'ordinary prose' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'String(r.text??"")' scripts/stronger-sentient-cognition-artifact-v1.mjs
 
       - name: Run canonical artifact validation
         env:
