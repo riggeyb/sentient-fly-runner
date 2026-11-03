@@ -1,17 +1,21 @@
 name: Stronger Sentient Cognition Challenger Screen v1
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: stronger-sentient-cognition-challenger-screen-v1
   cancel-in-progress: false
+
 env:
   BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
   BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
   CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
   CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
   CONTRACT_DIGEST: sha256:62f98338f60164620a3fe93fd69e7c94b33e8ec4602ba3337c1b06b89651673d
+
 jobs:
   static-validation:
     runs-on: ubuntu-latest
@@ -41,8 +45,8 @@ jobs:
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
-          test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json|awk '{print $1}')" = "$CORPUS_DIGEST"
-          test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json|awk '{print $1}')" = "$CONTRACT_DIGEST"
+          test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
+          test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
           test -f measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json
       - uses: actions/setup-node@v4
         with:
@@ -50,17 +54,34 @@ jobs:
       - name: Build accepted baseline
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
-      - name: Normalize known runner typo and prove measurement integrity with zero provider calls
+      - name: Normalize two observed runner literals and prove measurement integrity with zero provider calls
         env:
           EXPERIMENT_OUT: ${{ runner.temp }}/static-validation.json
         run: |
           set -euo pipefail
-          sed -i 's/update(q)\.digest("hex")/update(s).digest("hex")/' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          ! grep -q 'update(q)\.digest("hex")' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          screen=scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          sed -i 's/minStartIntervalMs=750/minStartIntervalMs:750/' "$screen"
+          sed -i 's/\.update(q)/.update(s)/' "$screen"
+          ! grep -q 'minStartIntervalMs=750' "$screen"
+          ! grep -q '\.update(q)' "$screen"
+          node --check "$screen"
           node --check scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
           node scripts/stronger-sentient-cognition-challenger-screen-fair-wrapper-v1.mjs
-          jq -e '.fairnessGateStaticValidation=="PASS" and .measurementIntegrityRequired==true and .incumbentCognitionSuccessRequired==false and .providerCalls==0 and .challengerCalls==0 and .freezeReceiptVerified==true and .models==4 and .tasks==3 and .maximumInitialTaskArms==12 and .cognitionInitialProviderCompletionTokens==2000 and .cognitionAdaptiveProviderCompletionMaxTokens==4000 and .dots3Thinking==false and .dots3MandatoryForMachineExecution==false' "$EXPERIMENT_OUT"
+          jq -e '
+            .fairnessGateStaticValidation == "PASS" and
+            .measurementIntegrityRequired == true and
+            .incumbentCognitionSuccessRequired == false and
+            .providerCalls == 0 and
+            .challengerCalls == 0 and
+            .freezeReceiptVerified == true and
+            .models == 4 and .tasks == 3 and
+            .maximumInitialTaskArms == 12 and
+            .cognitionInitialProviderCompletionTokens == 2000 and
+            .cognitionAdaptiveProviderCompletionMaxTokens == 4000 and
+            .visibleArtifactMaxTokens == 2000 and
+            .dots3Thinking == false and
+            .dots3MandatoryForMachineExecution == false
+          ' "$EXPERIMENT_OUT" >/dev/null
           echo "MEASUREMENT_INTEGRITY_STATIC_VALIDATION=PASS"
           echo "STATIC_VALIDATION_PROVIDER_CALLS=0"
       - uses: actions/upload-artifact@v4
@@ -68,11 +89,14 @@ jobs:
           name: stronger-sentient-challenger-static-validation-v1
           path: ${{ runner.temp }}/static-validation.json
           retention-days: 14
+
   screen:
     needs: static-validation
     if: ${{ needs.static-validation.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,7 +123,6 @@ jobs:
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
       - name: Run bounded adaptive four-model cognition screen
         env:
-          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           EXPERIMENT_OUT: ${{ runner.temp }}/challenger-screen-v2.json
         run: |
           set -euo pipefail
@@ -107,9 +130,27 @@ jobs:
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
           test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
-          sed -i 's/update(q)\.digest("hex")/update(s).digest("hex")/' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          node scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          screen=scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
+          sed -i 's/minStartIntervalMs=750/minStartIntervalMs:750/' "$screen"
+          sed -i 's/\.update(q)/.update(s)/' "$screen"
+          node --check "$screen"
+          node "$screen"
+      - name: Guard bounded screen
+        run: |
+          set -euo pipefail
+          jq -e '
+            .schemaVersion == "stronger-sentient-cognition-challenger-screen/v2" and
+            .measurementIntegrityRequired == true and
+            .incumbentCognitionSuccessRequired == false and
+            .completionPolicy.initial == 2000 and
+            .completionPolicy.escalateTo == 4000 and
+            .completionPolicy.sameForEveryModel == true and
+            .actualInitialTaskArms == 12 and
+            .actualProviderCalls <= 24 and
+            .dots3Called == false and
+            .sourceChange == false and
+            .productionDeployment == false
+          ' "$RUNNER_TEMP/challenger-screen-v2.json" >/dev/null
       - name: Summarize screen
         run: jq '{schemaVersion,taskIds,models,actualInitialTaskArms,actualProviderCalls,completionPolicy,dots3Called,byModel}' "$RUNNER_TEMP/challenger-screen-v2.json"
       - uses: actions/upload-artifact@v4
@@ -117,3 +158,12 @@ jobs:
           name: stronger-sentient-cognition-challenger-screen-v2
           path: ${{ runner.temp }}/challenger-screen-v2.json
           retention-days: 14
+      - name: Guard
+        run: |
+          echo "MEASUREMENT_INTEGRITY_REQUIRED=true"
+          echo "INCUMBENT_COGNITION_SUCCESS_REQUIRED=false"
+          echo "MAX_INITIAL_TASK_ARMS=12"
+          echo "MAX_PROVIDER_CALLS=24"
+          echo "DOTS3_CALLS=0"
+          echo "SENTIENT_SOURCE_CHANGE=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
