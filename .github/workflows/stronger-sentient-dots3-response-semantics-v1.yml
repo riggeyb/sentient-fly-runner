@@ -53,10 +53,28 @@ jobs:
           npm run build
       - name: Validate diagnostic harness
         run: node --check scripts/stronger-sentient-dots3-response-semantics-v1.mjs
-      - name: Inspect exact raw response semantics
+      - name: Prepare Atlas reasoning-off preload
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/dots3-reasoning-none-preload.mjs" <<'EOF'
+          const originalFetch = globalThis.fetch;
+          globalThis.fetch = async (input, init = {}) => {
+            let next = init;
+            try {
+              const body = JSON.parse(String(init?.body ?? "{}"));
+              if (body?.model === "dots-studio/dots-3-note-prev-free") {
+                body.reasoning_effort = "none";
+                next = { ...init, body: JSON.stringify(body) };
+              }
+            } catch {}
+            return originalFetch(input, next);
+          };
+          EOF
+      - name: Inspect exact raw response semantics with reasoning disabled
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           EXPERIMENT_OUT: ${{ runner.temp }}/dots3-response-semantics-v1.json
+          NODE_OPTIONS: --import=${{ runner.temp }}/dots3-reasoning-none-preload.mjs
         run: node scripts/stronger-sentient-dots3-response-semantics-v1.mjs
       - name: Verify baseline immutability
         shell: bash
@@ -72,11 +90,13 @@ jobs:
           name: stronger-sentient-dots3-response-semantics-v1
           path: ${{ runner.temp }}/dots3-response-semantics-v1.json
           retention-days: 14
+          if-no-files-found: error
       - name: Guard
         run: |
           echo "MAX_PROVIDER_CALLS=5"
           echo "DOTS3_ONLY=true"
           echo "MAX_OUTPUT_TOKENS=1536"
+          echo "REASONING_EFFORT=none"
           echo "PROVIDER_RETRIES=0"
           echo "DEEPSEEK_CALLS=0"
           echo "SOURCE_CHANGE=false"
