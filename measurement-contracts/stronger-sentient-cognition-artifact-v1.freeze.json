@@ -1,0 +1,54 @@
+{
+  "baselineAcceptanceRun": 41483844842,
+  "baselineSha": "c05ebe9ffed7254bb749cee1c72a965f970def7c",
+  "baselineTree": "00296d7129fa8ab7f3254943a57df444591ad1ab",
+  "challengerOutputCostPolicy": "COMPACT_INTERNAL_ARTIFACT_ONLY",
+  "cognitionArtifactInterfaceFrozen": true,
+  "contract": "sentient-cognition-artifact/v1",
+  "contractDigest": "sha256:62f98338f60164620a3fe93fd69e7c94b33e8ec4602ba3337c1b06b89651673d",
+  "dots3SynthesisModel": "dots-studio/dots-3-note-prev-free",
+  "dots3SynthesisPolicy": {
+    "enableThinking": false,
+    "evidenceCitationRetention": "REQUIRED_EXACT",
+    "maxOutputTokens": 1536,
+    "providerRetries": 0,
+    "responseFormat": "USER_FACING_PROSE"
+  },
+  "dots3SynthesisValidation": "PASS",
+  "evidence": {
+    "averageStructuralCompressionRatio": 0.5461111311880036,
+    "citationRetentionRun": 41642153355,
+    "phase1Retention": "PASS_5_OF_5",
+    "rawSemanticsRun": 41641223048,
+    "reasoningOffRun": 41641957101,
+    "replicatedPassRun": 41642266075
+  },
+  "modelRolesChanged": false,
+  "productionDeployment": false,
+  "schemaVersion": "sentient-cognition-artifact-freeze/v1",
+  "sentientSourceChange": false,
+  "tokenAccounting": {
+    "billedCost": "MEASURE_SEPARATELY_WHEN_REPORTED",
+    "economicMetric": "COST_PER_USEFUL_COGNITION_ARTIFACT",
+    "providerOutputTokens": "MEASURE_SEPARATELY",
+    "providerReasoningTokens": "MEASURE_SEPARATELY_WHEN_REPORTED",
+    "visibleArtifactTokens": "MEASURE_SEPARATELY"
+  },
+  "visibleArtifactEnvelope": {
+    "absoluteMax": 2000,
+    "doNotOverCompress": true,
+    "doNotPad": true,
+    "high": [
+      1200,
+      2000
+    ],
+    "low": [
+      500,
+      750
+    ],
+    "standard": [
+      750,
+      1200
+    ]
+  }
+}
