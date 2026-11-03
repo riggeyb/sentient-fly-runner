@@ -7,7 +7,6 @@ import {
 } from "../sentient/dist/src/index.js";
 
 const source="scripts/stronger-sentient-cognition-challenger-screen-v1.mjs";
-const target="scripts/stronger-sentient-cognition-challenger-screen-fair-tmp.mjs";
 const freezePath="measurement-contracts/stronger-sentient-cognition-artifact-v1.freeze.json";
 const out=process.env.EXPERIMENT_OUT;
 const key=String(process.env.ATLASCLOUD_API_KEY??"").trim();
@@ -27,6 +26,10 @@ function writeBlocked(reason,extra={}){
     blockedReason:reason,
     challengerCalls:0,
     modelRanking:"NOT_PERMITTED",
+    stopScreen:true,
+    kimiK26Calls:0,
+    qwen38MaxCalls:0,
+    kimiK31ProCalls:0,
     sourceChange:false,
     productionDeployment:false,
     ...extra,
@@ -38,15 +41,53 @@ function writeBlocked(reason,extra={}){
 
 if(!fs.existsSync(freezePath)) writeBlocked("COGNITION_ARTIFACT_INTERFACE_NOT_FROZEN");
 const freeze=JSON.parse(fs.readFileSync(freezePath,"utf8"));
-if(freeze.contract!==expectedContract || freeze.contractDigest!==expectedDigest ||
-   freeze.cognitionArtifactInterfaceFrozen!==true || freeze.dots3SynthesisValidation!=="PASS"){
-  writeBlocked("COGNITION_ARTIFACT_INTERFACE_NOT_FROZEN",{freezeObserved:{
-    contract:freeze.contract??null,
-    contractDigest:freeze.contractDigest??null,
-    cognitionArtifactInterfaceFrozen:freeze.cognitionArtifactInterfaceFrozen??null,
-    dots3SynthesisValidation:freeze.dots3SynthesisValidation??null,
-  }});
+const env=freeze.visibleArtifactEnvelope??{};
+const envelopeValid=
+  JSON.stringify(env.low)==='[500,750]' &&
+  JSON.stringify(env.standard)==='[750,1200]' &&
+  JSON.stringify(env.high)==='[1200,2000]' &&
+  env.absoluteMax===2000 &&
+  env.doNotPad===true &&
+  env.doNotOverCompress===true;
+const freezeValid=
+  freeze.schemaVersion==="sentient-cognition-artifact-freeze/v1" &&
+  freeze.contract===expectedContract &&
+  freeze.contractDigest===expectedDigest &&
+  freeze.baselineSha===process.env.BASELINE_SHA &&
+  freeze.baselineTree===process.env.BASELINE_TREE &&
+  freeze.cognitionArtifactInterfaceFrozen===true &&
+  freeze.dots3SynthesisValidation==="PASS" &&
+  freeze.challengerOutputCostPolicy==="COMPACT_INTERNAL_ARTIFACT_ONLY" &&
+  freeze.dots3SynthesisPolicy?.enableThinking===false &&
+  envelopeValid;
+if(!freezeValid){
+  writeBlocked("COGNITION_ARTIFACT_INTERFACE_NOT_FROZEN",{
+    freezeObserved:{
+      schemaVersion:freeze.schemaVersion??null,
+      contract:freeze.contract??null,
+      contractDigest:freeze.contractDigest??null,
+      baselineSha:freeze.baselineSha??null,
+      baselineTree:freeze.baselineTree??null,
+      cognitionArtifactInterfaceFrozen:freeze.cognitionArtifactInterfaceFrozen??null,
+      dots3SynthesisValidation:freeze.dots3SynthesisValidation??null,
+      challengerOutputCostPolicy:freeze.challengerOutputCostPolicy??null,
+      dots3EnableThinking:freeze.dots3SynthesisPolicy?.enableThinking??null,
+      visibleArtifactEnvelope:env,
+    }
+  });
 }
+
+const screenSource=fs.readFileSync(source,"utf8");
+for(const marker of [
+  "maxOutputTokens:2000",
+  "visibleArtifactMaxTokens:2000",
+  'challengerOutputCostPolicy:"COMPACT_INTERNAL_ARTIFACT_ONLY"',
+  "body.enable_thinking=false",
+  "dots3EnableThinking:false",
+]){
+  if(!screenSource.includes(marker)) throw new Error(`economic_or_synthesis_guard_missing:${marker}`);
+}
+if(screenSource.includes("maxOutputTokens:4096")) throw new Error("economic_guard_regression_4096");
 
 const caps={text_generation:true,structured_output:false,tool_use:false,tool_continuation:false,reasoning_effort:false,image_input:false,server_side_tools:false};
 const preflightAdapter=new AtlasCloudAdapter({
@@ -69,14 +110,16 @@ for(let i=0;i<2;i+=1){
     context:{artifacts:[],contextDigest:digest},
     tools:[],
     requiredCapabilities:["text_generation"],
-    maxOutputTokens:16,
+    maxOutputTokens:64,
     timeoutMs:20000,
     maxProviderRetries:0,
     inputDigest:digest,
   },DEEPSEEK_V3_2_MODEL_V1);
   preflight.push({
     attempt:i+1,
-    ok:result.ok,
+    ok:result.ok && typeof result.text==="string" && result.text.trim().length>0,
+    providerOk*result.ok,
+    visibleTextPresent:result.ok && typeof result.text==="string" && result.text.trim().length>0,
     httpStatus:result.ok?200:(result.metadata?.httpStatus??null),
     failureClass:result.ok?null:(result.metadata?.failureClass??result.code),
     latencyMs:Date.now()-t0,
@@ -89,26 +132,10 @@ if(window!=="HEALTHY"){
     deepseekWindow:window,
     deepseekPreflight:preflight,
     deepseekPreflightSuccesses:successes,
-    stopScreen:true,
-    kimiK26Calls:0,
-    qwen38MaxCalls:0,
-    kimiK31ProCalls:0,
   });
 }
 
-let s=fs.readFileSync(source,"utf8");
-if((s.match(/maxOutputTokens:2000/g)??[]).length!==1) throw new Error("unexpected_cognition_cap_marker");
-if(s.includes("maxOutputTokens:4096")) throw new Error("economic_guard_regression_4096");
-const oldOut='const out=c.result.ok?c.result.usage.outputTokens:null, reason=c.result.ok?(c.result.usage.reasoningTokens??null):null;';
-const newOut='const out=c.result.ok?c.result.usage.outputTokens:null, reason=c.result.ok?(c.result.usage.reasoningTokens??null):null, visible=c.result.ok?Math.ceil(Buffer.byteLength(String(c.result.text??""),"utf8")/4):null;';
-if((s.split(oldOut).length-1)!==1) throw new Error("unexpected_output_accounting_marker");
-s=s.replace(oldOut,newOut);
-const oldVisible='visibleArtifactTokens:c.result.ok?(reason==null?out:Math.max(0,out-reason)):null';
-if((s.split(oldVisible).length-1)!==1) throw new Error("unexpected_visible_accounting_marker");
-s=s.replace(oldVisible,'visibleArtifactTokens:visible');
-fs.writeFileSync(target,s);
-
-console.log("CHALLENGER_SCREEN_GATE="+JSON.stringify({
+console.log("CHALLENGER_SCREEN_GATE="+JSON.stringify {
   screenStatus:"OPEN",
   contract:expectedContract,
   contractDigest:expectedDigest,
@@ -119,7 +146,9 @@ console.log("CHALLENGER_SCREEN_GATE="+JSON.stringify({
   cognitionProviderCompletionMaxTokens:2000,
   visibleArtifactMaxTokens:2000,
   challengerOutputCostPolicy:"COMPACT_INTERNAL_ARTIFACT_ONLY",
+  dots3EnableThinking:false,
+  dots3SynthesisMaxOutputTokens:1536,
 }));
 
-const result=spawnSync(process.execPath,[target],{stdio:"inherit",env:process.env});
+const result=spawnSync(process.execPath,[source],{stdio:"inherit",env:process.env});
 process.exit(result.status??1);
