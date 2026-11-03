@@ -1,0 +1,148 @@
+name: Stronger Sentient Dots3 Raw Response Diagnostic v1
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: stronger-sentient-dots3-raw-response-diagnostic-v1
+  cancel-in-progress: false
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+  CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
+  CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
+  CONTRACT_DIGEST: sha256:62f98338f60164620a3fe93fd69e7c94b33e8ec4602ba3337c1b06b89651673d
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.BASELINE_SHA }}
+          path: sentient
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.CORPUS_SHA }}
+          path: corpus-source
+          persist-credentials: false
+      - name: Guard frozen inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
+          test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
+          test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build exact accepted baseline
+        working-directory: sentient
+        run: npm install --no-audit --no-fund --package-lock=false && npm run build
+      - name: Instrument existing measurement fetch wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require("fs");
+          const p="scripts/stronger-sentient-cognition-artifact-v1.mjs";
+          let s=fs.readFileSync(p,"utf8");
+          const old='let calls=0,events=[];\nconst F=async(...a)=>{if(calls>=M)throw Error("call_ceiling");const n=++calls,z=Date.now(),res=await fetch(...a);events.push({n,status:res.status,latencyMs:Date.now()-z});return res};';
+          if((s.split(old).length-1)!==1) throw Error("fetch_wrapper_anchor_mismatch");
+          const replacement=`let calls=0,events=[];
+          const safeHash=v=>createHash("sha256").update(String(v)).digest("hex");
+          const safeDesc=v=>{
+            if(v===null)return {type:"null"};
+            if(v===undefined)return {type:"undefined"};
+            if(typeof v==="string")return {type:"string",length:v.length,sha256:safeHash(v)};
+            if(Array.isArray(v))return {type:"array",length:v.length,parts:v.map(x=>{
+              if(x&&typeof x==="object"&&!Array.isArray(x)){
+                const o={type:"object",keys:Object.keys(x).sort()};
+                if(typeof x.type==="string")o.partType=x.type;
+                if(typeof x.text==="string")o.text={length:x.text.length,sha256:safeHash(x.text)};
+                return o;
+              }
+              return safeDesc(x);
+            })};
+            if(typeof v==="object")return {type:"object",keys:Object.keys(v).sort()};
+            return {type:typeof v};
+          };
+          const num=v=>Number.isFinite(v)?v:null;
+          const F=async(...a)=>{
+            if(calls>=M)throw Error("call_ceiling");
+            const n=++calls,z=Date.now(),res=await fetch(...a);
+            let safe={n,httpStatus:res.status,latencyMs:Date.now()-z,parseError:false};
+            try{
+              const body=await res.clone().json();
+              const choices=Array.isArray(body?.choices)?body.choices:[];
+              const choice=choices[0]??null;
+              const msg=choice?.message&&typeof choice.message==="object"&&!Array.isArray(choice.message)?choice.message:null;
+              const u=body?.usage&&typeof body.usage==="object"?body.usage:{};
+              const d=u?.completion_tokens_details&&typeof u.completion_tokens_details==="object"?u.completion_tokens_details:{};
+              const providerSpecific={};
+              if(msg)for(const [k,v] of Object.entries(msg)){
+                if(["content","reasoning","reasoning_content","tool_calls"].includes(k))continue;
+                providerSpecific[k]=safeDesc(v);
+              }
+              safe={...safe,
+                responseIdPresent:typeof body?.id==="string"&&body.id.length>0,
+                choiceCount:choices.length,
+                finishReason:typeof choice?.finish_reason==="string"?choice.finish_reason:null,
+                messageKeys:msg?Object.keys(msg).sort():[],
+                content:safeDesc(msg?.content),
+                reasoning:safeDesc(msg?.reasoning),
+                reasoningContent:safeDesc(msg?.reasoning_content),
+                toolCalls:{type:Array.isArray(msg?.tool_calls)?"array":typeof msg?.tool_calls,count:Array.isArray(msg?.tool_calls)?msg.tool_calls.length:0},
+                providerSpecific,
+                usage:{
+                  input_tokens:num(u?.input_tokens),
+                  prompt_tokens:num(u?.prompt_tokens),
+                  output_tokens:num(u?.output_tokens),
+                  completion_tokens:num(u?.completion_tokens),
+                  total_tokens:num(u?.total_tokens),
+                  reasoning_tokens:num(d?.reasoning_tokens)??num(u?.reasoning_tokens)
+                }
+              };
+            }catch{safe.parseError=true}
+            console.log("DOTS3_RAW_SAFE="+JSON.stringify(safe));
+            events.push({n,status:res.status,latencyMs:Date.now()-z});
+            return res;
+          };`;
+          s=s.replace(old,replacement);
+          fs.writeFileSync(p,s);
+          NODE
+          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'DOTS3_RAW_SAFE=' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-artifact-v1.mjs
+      - name: Run exact five-task Dots3 synthesis with raw-safe instrumentation
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          BASELINE_SHA: ${{ env.BASELINE_SHA }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
+          CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
+          EXPERIMENT_OUT: ${{ runner.temp }}/dots3-raw-diagnostic-v1.json
+        run: node scripts/stronger-sentient-cognition-artifact-v1.mjs
+      - name: Guard immutable baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo "SENTIENT_SOURCE_CHANGE=false"
+          echo "CHALLENGER_CALLS=0"
+          echo "PRODUCTION_DEPLOYMENT=false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-dots3-raw-response-diagnostic-v1
+          path: ${{ runner.temp }}/dots3-raw-diagnostic-v1.json
+          retention-days: 14
+          if-no-files-found: error
