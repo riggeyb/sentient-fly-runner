@@ -1,0 +1,57 @@
+name: Stronger Sentient DeepSeek Readiness Diagnostic v1
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: stronger-sentient-deepseek-readiness-diagnostic-v1
+  cancel-in-progress: false
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.BASELINE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+      - name: Guard accepted baseline
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build accepted baseline
+        working-directory: sentient
+        run: npm install --no-audit --no-fund --package-lock=false && npm run build
+      - name: Validate diagnostic
+        run: node --check scripts/stronger-sentient-deepseek-readiness-diagnostic-v1.mjs
+      - name: Run exactly one DeepSeek raw-readiness replay
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          BASELINE_SHA: ${{ env.BASELINE_SHA }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
+          DIAGNOSTIC_OUT: ${{ runner.temp }}/deepseek-readiness-diagnostic-v1.json
+        run: node scripts/stronger-sentient-deepseek-readiness-diagnostic-v1.mjs
+      - name: Guard one-call envelope
+        run: |
+          jq -e '.providerCalls==1 and .challengerCalls==0 and .sentientSourceChange==false and .productionDeployment==false' "$RUNNER_TEMP/deepseek-readiness-diagnostic-v1.json" >/dev/null
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$BASELINE_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stronger-sentient-deepseek-readiness-diagnostic-v1
+          path: ${{ runner.temp }}/deepseek-readiness-diagnostic-v1.json
+          retention-days: 14
