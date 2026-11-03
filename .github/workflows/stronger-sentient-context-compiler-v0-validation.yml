@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+env:
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -30,9 +34,9 @@ jobs:
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: sentient
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Guard candidate identity
+      - name: Guard candidate identity and source scope
         working-directory: sentient
         env:
           EXPECTED_SHA: ${{ inputs.sha }}
@@ -41,6 +45,22 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git show -s --format=%T HEAD)" = "$EXPECTED_TREE"
+          git cat-file -e "$BASELINE_SHA^{commit}"
+          test "$(git show -s --format=%T "$BASELINE_SHA")" = "$BASELINE_TREE"
+
+          git diff --name-only "$BASELINE_SHA" "$EXPECTED_SHA" | sort > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/expected.txt" <<'SCOPE'
+          src/retrieval/context-compiler.ts
+          src/retrieval/context-compressor.ts
+          src/retrieval/index.ts
+          src/runtime/sentient-runtime.ts
+          test/context-compiler-v0.test.ts
+          SCOPE
+          sed -i 's/^          //' "$RUNNER_TEMP/expected.txt"
+          sort -o "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+
+          git diff --exit-code "$BASELINE_SHA" "$EXPECTED_SHA" --             src/model             src/state             src/deployment-governor             src/production             src/action-fabric
 
       - uses: actions/setup-node@v4
         with:
@@ -49,19 +69,19 @@ jobs:
       - name: Install and build
         working-directory: sentient
         run: |
+          set -euo pipefail
           npm install --no-audit --no-fund --package-lock=false
           npm run build
 
       - name: Run Context Compiler V0 proofs
         working-directory: sentient
-        run: |
-          node --test             dist/test/context-compiler-v0.test.js             dist/test/context-shadow-v0.test.js
+        run: node --test dist/test/context-compiler-v0.test.js
 
       - name: Run full repository tests
         working-directory: sentient
         run: npm test
 
-      - name: Guard invariants
+      - name: Guard invariants and emit receipt
         working-directory: sentient
         run: |
           set -euo pipefail
@@ -69,6 +89,9 @@ jobs:
           test "$(git show -s --format=%T HEAD)" = "${{ inputs.tree }}"
           test -z "$(git status --porcelain --untracked-files=no)"
           echo "CONTEXT_COMPILER_V0_VALIDATION=PASS"
-          echo "SENTIENT_SOURCE_CHANGE=VALIDATION_ONLY"
+          echo "SHADOW_MODE_VALIDATED=true"
+          echo "COGNITION_ARTIFACT_V1_CHANGED=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
           echo "PROVIDER_CALLS=0"
           echo "PRODUCTION_DEPLOYMENT=false"
