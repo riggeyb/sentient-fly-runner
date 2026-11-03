@@ -22,7 +22,7 @@ const r=spawnSync(process.execPath,["scripts/stronger-sentient-cognition-challen
 if(r.status!==0) process.exit(r.status??1);
 if(!fs.existsSync(out)) throw new Error("static_receipt_missing");
 const receipt=JSON.parse(fs.readFileSync(out,"utf8"));
-if(receipt.fairnessGateStaticUalidation!=="PASS" || receipt.providerCalls!==0 || receipt.challengerCalls!==0) {
+if(receipt.fairnessGateStaticValidation!=="PASS" || receipt.providerCalls!==0 || receipt.challengerCalls!==0) {
   throw new Error("static_receipt_invalid");
 }
 console.log("ADAPTIVE_READINESS_STATIC_RECEIPT="+JSON.stringify(receipt));
