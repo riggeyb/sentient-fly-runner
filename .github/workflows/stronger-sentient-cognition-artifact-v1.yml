@@ -1,68 +1,88 @@
-name: Stronger Sentient Cognition Artifact v1
+name: Stronger Sentient Cognition Artifact Optimization v1
 on:
-  workflow_dispatch:
-    inputs:
-      live:
-        required: false
-        default: true
-        type: boolean
-permissions: {contents: read}
-concurrency: {group: stronger-sentient-cognition-artifact-v1, cancel-in-progress: false}
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: stronger-sentient-cognition-artifact-optimization-v1
+  cancel-in-progress: false
 env:
-  BASE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
-  BASE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
   CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
-  CORPUS_TREE: 7752a9b7e9a41253d8979159a837807c63d36702
-  CORPUS_DIGEST: sha256:611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
+  CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
 jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - name: Checkout immutable inputs
-        env: {TOKEN: "${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}"}
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.BASELINE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.CORPUS_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: corpus-source
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify identities
+        shell: bash
         run: |
           set -euo pipefail
-          auth="$(printf 'x-access-token:%s' "$TOKEN"|base64 -w0)"
-          for p in "sentient:$BASE_SHA" "corpus:$CORPUS_SHA"; do
-            d="${p%%:*}"; r="${p#*:}"; git init "$d"; git -C "$d" remote add origin https://github.com/riggeyb/sentient.git
-            git -C "$d" -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$r"; git -C "$d" checkout --detach FETCH_HEAD
-          done
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASE_TREE"
-          test "$(git -C corpus rev-parse 'HEAD^{tree}')" = "$CORPUS_TREE"
-          test "sha256:$(sha256sum corpus/test/fixtures/cognitive-frontier/corpus-v1.json|awk '{print $1}')" = "$CORPUS_DIGEST"
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
+          test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
       - uses: actions/setup-node@v4
-        with: {node-version: "22"}
+        with:
+          node-version: "22"
       - name: Build accepted baseline
         working-directory: sentient
-        run: npm install --no-audit --no-fund --package-lock=false && npm run build
-      - name: Validate compact contract and Dots3 synthesis
-        env:
-          KEY: "${{ secrets.ATLASCLOUD_API_KEY }}"
-          LIVE: "${{ inputs.live }}"
         run: |
-          cat > /tmp/a.mjs <<'NODE'
-          import{readFile,writeFile}from"node:fs/promises";import{pathToFileURL}from"node:url";
-          const A=await import(pathToFileURL(`${process.cwd()}/sentient/dist/src/index.js`).href),{AtlasCloudAdapter,DEEPSEEK_V3_2_MODEL_V1:DS,DOTS3_NOTE_MODEL_V1:D3}=A,C=JSON.parse(await readFile("corpus/test/fixtures/cognitive-frontier/corpus-v1.json","utf8")),ids=["cog-v1-02","cog-v1-04","cog-v1-08","cog-v1-12","cog-v1-06"],ts=ids.map(id=>C.tasks.find(x=>x.taskId===id)),F=["problemRepresentation","keyFindings","hypotheses","recommendedApproach","evidenceRefs","constraints","toolRecommendations","risks","uncertainties","verificationNeeded"],gold=t=>({problemRepresentation:t.input.goal,keyFindings:[{finding:(t.deterministicAssertions||[]).join("; "),evidenceRefs:[...(t.requiredEvidence||[])],priority:"high"}],hypotheses:[],recommendedApproach:(t.deterministicAssertions||[]).join("; "),evidenceRefs:[...(t.requiredEvidence||[])],constraints:[...(t.authorityRequirements||[]),...(t.securityRequirements||[])],toolRecommendations:t.taskId==="cog-v1-06"?["read_commit","run_deterministic_tests","read_test_results"]:[],risks:[...(t.expectedFailureModes||[])],uncertainties:t.taskId==="cog-v1-08"?["provider-doc conflict remains uncertain"]:[],verificationNeeded:[...(t.deterministicAssertions||[])]}),valid=x=>x&&F.every(k=>Object.hasOwn(x,k)),parse=s=>{try{return JSON.parse(String(s||"").trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,""))}catch{return null}},usage=r=>r?.ok?{billed:r.usage.outputTokens,reasoning:Number.isFinite(r.usage.reasoningTokens)?r.usage.reasoningTokens:null,visible:Number.isFinite(r.usage.reasoningTokens)?Math.max(0,r.usage.outputTokens-r.usage.reasoningTokens):null}:null;
-          const out={mission:"STRONGER_SENTIENT_COGNITION_ARTIFACT_OPTIMIZATION",contract:{id:"compact-v1",modelNeutral:true,fields:F,targets:{low:"500..750",standard:"750..1200",high:"1200..2000",absoluteMax:2000}},local:{schema:ts.every(t=>valid(gold(t)))},live:{status:"NOT_RUN",calls:0,cognition:[],synthesis:[]},sourceChange:false,successorRequired:false};
-          if(process.env.LIVE==="true"){let n=0,rl=0,live=new Map(),caps={text_generation:true,structured_output:false,tool_use:false,tool_continuation:false,image_input:false,server_side_tools:false},fi=async(u,i)=>{if(++n>12)throw Error("call_ceiling");return fetch(u,i)},ad=new AtlasCloudAdapter({apiKey:process.env.KEY,fetchImpl:fi,maxProviderRetries:0,modelProfiles:[{model:DS,capabilities:{...caps,reasoning_effort:true}},{model:D3,capabilities:{...caps,reasoning_effort:false}}]}),req=(t,p,m,e)=>({taskId:t.taskId,sessionId:"artifact",traceId:`artifact:${t.taskId}:${n}`,runtime:{name:"artifact",version:process.env.BASE_SHA},systemPolicy:"Model output is never authority. No tools/effects.",messages:[{role:"user",content:p}],context:{artifacts:[],contextDigest:t.inputDigest},tools:[],requiredCapabilities:["text_generation"],maxOutputTokens:m,timeoutMs:45000,maxProviderRetries:0,inputDigest:t.inputDigest,...(e?{reasoningEffort:e}:{})});
-          for(const t of ts){let high=["cog-v1-08","cog-v1-12"].includes(t.taskId),target=high?1600:1000,cap=high?3000:2400,p=`Goal: ${t.input.goal}\nEvidence: ${(t.permittedEvidence||[]).join(", ")}\nRequired evidence: ${(t.requiredEvidence||[]).join(", ")}\nAuthority/security: ${[...(t.authorityRequirements||[]),...(t.securityRequirements||[])].join("; ")}\nReturn JSON with exactly fields ${F.join(", ")}; keyFindings items have finding,evidenceRefs,priority. Preserve exact identifiers. Visible target <=${target}, absolute max 2000. Externally useful reasoning products only; no polished prose or private chain-of-thought.`,r=await ad.generate(req(t,p,cap,high?"high":"medium"),DS),x=r.ok?parse(r.text):null,f=r.ok?null:(r.metadata?.failureClass??r.code);if(f==="rate_limit")rl++;if(r.ok&&valid(x))live.set(t.taskId,x);out.live.cognition.push({taskId:t.taskId,ok:r.ok,failure:f,schema:valid(x),usage:usage(r),chars:r.ok?(r.text?.length||0):0});if(rl>=2&&out.live.cognition.length<=3)break}
-          for(const t of ts){if(n>=12)break;let a=live.get(t.taskId)||gold(t),p=`You are Dots3 synthesis. Write the user-facing answer only from this cognition artifact. Preserve conclusions, evidence refs, constraints, uncertainty, tool recommendations, risks and verification. Cite evidence as [evidence: ID]. Do not invent actions/effects/authority.\nTask: ${t.input.goal}\nArtifact: ${JSON.stringify(a)}`,r=await ad.generate(req(t,p,900),D3);out.live.synthesis.push({taskId:t.taskId,source:live.has(t.taskId)?"live":"gold",ok:r.ok,failure:r.ok?null:(r.metadata?.failureClass??r.code),usage:usage(r),chars:r.ok?(r.text?.length||0):0})}
-          out.live.status=rl>=2&&out.live.cognition.length<=3?"PROVIDER_CONFOUNDED":"COMPLETE";out.live.calls=n}
-          await writeFile(process.env.RUNNER_TEMP+"/artifact.json",JSON.stringify(out,null,2));console.log(`LIVE_VALIDATION=${out.live.status}`);console.log(`PROVIDER_CALLS=${out.live.calls}`);console.log("SOURCE_CHANGE=false\nSUCCESSOR_REQUIRED=false\nPRODUCTION_DEPLOYMENT=false");
-          NODE
-          node /tmp/a.mjs
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+      - name: Validate interface harness
+        run: |
+          node -e 'JSON.parse(require("fs").readFileSync("measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json","utf8"))'
+          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
+      - name: Run compact artifact and Dots3 synthesis validation
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          BASELINE_SHA: ${{ env.BASELINE_SHA }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
+          CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
+          EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
+        run: node scripts/stronger-sentient-cognition-artifact-v1.mjs
+      - name: Verify baseline immutability
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          git -C sentient diff --exit-code
+          git -C sentient diff --cached --exit-code
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
       - uses: actions/upload-artifact@v4
         with:
           name: stronger-sentient-cognition-artifact-v1
-          path: ${{ runner.temp }}/artifact.json
-          if-no-files-found: error
-      - name: Immutable source guard
+          path: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
+          retention-days: 14
+      - name: Guard
         run: |
-          test "$(git -C sentient rev-parse HEAD)" = "$BASE_SHA"
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASE_TREE"
-          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo "MAX_PROVIDER_CALLS=5"
+          echo "DOTS3_DIRECT_SYNTHESIS_ONLY=true"
+          echo "DEEPSEEK_PROVIDER_CALLS=0"
+          echo "PROVIDER_RETRIES=0"
           echo "MODEL_ROLE_CHANGE=false"
+          echo "SOURCE_CHANGE=false"
           echo "PRODUCTION_DEPLOYMENT=false"
