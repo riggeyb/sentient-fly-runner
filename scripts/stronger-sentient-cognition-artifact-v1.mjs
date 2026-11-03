@@ -78,15 +78,9 @@ for(const t of tasks){
   const instructions=[
     `Goal: ${t.input.goal}`,
     `Cognition artifact: ${JSON.stringify(art)}`,
-    `Write a concise, clear user-facing answer in ordinary prose. Do not output JSON and do not add a separate audit block.`,
-    `Preserve every important artifact item once, using compact inline tags so Sentient can verify retention externally:`,
-    `- each finding clause must include its zero-based ${tag("finding","N")} tag`,
-    `- cite every evidence reference exactly as [evidence: ID]`,
-    `- each constraint clause must include ${tag("constraint","N")}`,
-    `- each uncertainty clause must include ${tag("uncertainty","N")}`,
-    `- each tool recommendation must include [tool: TOOL_NAME]`,
-    `- each verification requirement must include ${tag("verify","N")}`,
-    `The prose itself must state the substance of each tagged item, not merely list tags.`,
+    `Write a concise, clear user-facing answer in ordinary prose, ideally no more than 350 words. Do not output JSON and do not add a separate audit block.`,
+    `Preserve every important finding, constraint, uncertainty, required tool recommendation, and verification need from the artifact, but express them naturally rather than as audit tags.`,
+    `Cite every evidence reference exactly as [evidence: ID]. Mention each required tool by its exact tool name and explain its rationale naturally.`,
     `Do not claim any action/effect was performed. Do not add authority, evidence, certainty, or facts not present in the artifact. No private chain-of-thought.`
   ].join("\n");
   const ctx=await retrieval.sha256Text(`ctx:${t.taskId}`), input=await retrieval.sha256Text(instructions);
@@ -97,12 +91,12 @@ for(const t of tasks){
     verifier:{verifierId:t.verifierDefinition,configuration:{}},inputDigest:input};
   const z=Date.now(),ex=await R.execute(q,{provider:"atlascloud",model:DOTS3_NOTE_MODEL_V1}),r=ex.result;
   const text=r.ok?String(r.text??""):"";
-  const findings=art.keyFindings.every((v,i)=>text.includes(tag("finding",i))&&overlap(text,v.claim));
-  const constraints=art.constraints.every((v,i)=>text.includes(tag("constraint",i))&&overlap(text,v));
+  const findings=art.keyFindings.every(v=>overlap(text,v.claim));
+  const constraints=art.constraints.every(v=>overlap(text,v));
   const evidence=art.evidenceRefs.every(e=>text.includes(evidenceTag(e)));
-  const uncertainty=art.uncertainties.every((v,i)=>text.includes(tag("uncertainty",i))&&overlap(text,v));
-  const toolRetention=art.toolRecommendations.every(v=>text.includes(toolTag(v.tool))&&overlap(text,v.rationale));
-  const verification=art.verificationNeeded.every((v,i)=>text.includes(tag("verify",i))&&overlap(text,v));
+  const uncertainty=art.uncertainties.every(v=>overlap(text,v));
+  const toolRetention=art.toolRecommendations.every(v=>text.includes(v.tool)&&overlap(text,v.rationale));
+  const verification=art.verificationNeeded.every(v=>overlap(text,v));
   const complete=text.trim().length>40;
   const noInventedActions=!forbiddenAction.test(text);
   const authoritySafe=!authorityExpansion.test(text);
@@ -123,7 +117,7 @@ const report={schemaVersion:"stronger-sentient-cognition-artifact-optimization/v
   tokenAccounting:{visibleArtifact:"ceil(UTF-8 bytes/4) deterministic estimate here; challenger screen uses cognition-call usage.outputTokens",
     reasoning:"provider usage.reasoningTokens when reported; UNMEASURED here",billedOutput:"cognition provider output/cost metadata when available; Dots3 synthesis recorded separately"},
   phase1:{status:phase1Pass?"PASS":"FAIL",rows:phase1,averageCompressionRatio:ratio},
-  phase2:{model:DOTS3_NOTE_MODEL_V1,responseFormat:"user-facing-prose-with-inline-retention-tags",directDots3Only:true,deepSeekFallback:false,
+  phase2:{model:DOTS3_NOTE_MODEL_V1,responseFormat:"user-facing-prose-external-semantic-verification",directDots3Only:true,deepSeekFallback:false,
     maxOutputTokens:1536,actualProviderCalls:calls,http429:events.filter(e=>e.status===429).length,providerConfounded:conf,
     dots3SynthesisValidation:dots,verifiedRate:vr,rows,events},
   qualityLossObserved:phase1Pass?false:true,sourceChange:false,successorRequired:false,modelRoleChange:false,
