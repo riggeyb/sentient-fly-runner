@@ -1,8 +1,7 @@
 name: Stronger Sentient Cognition Artifact Optimization v1
 on:
   workflow_dispatch: {}
-permissions:
-  contents: read
+permissions: {contents: read}
 concurrency:
   group: stronger-sentient-cognition-artifact-optimization-v1
   cancel-in-progress: false
@@ -17,15 +16,13 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+        with: {persist-credentials: false}
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: ${{ env.BASELINE_SHA }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: sentient
-          fetch-depth: 1
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -33,58 +30,48 @@ jobs:
           ref: ${{ env.CORPUS_SHA }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: corpus-source
-          fetch-depth: 1
           persist-credentials: false
-      - name: Verify identities
-        shell: bash
+      - name: Guard inputs
         run: |
-          set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
           test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
           test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
       - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+        with: {node-version: "22"}
       - name: Build accepted baseline
         working-directory: sentient
-        run: |
-          npm install --no-audit --no-fund --package-lock=false
-          npm run build
-      - name: Validate interface harness
+        run: npm install --no-audit --no-fund --package-lock=false && npm run build
+      - name: Validate harness
         run: |
           node -e 'JSON.parse(require("fs").readFileSync("measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json","utf8"))'
           node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
           grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-artifact-v1.mjs
-      - name: Run compact artifact and Dots3 synthesis validation
+      - name: Run validation
         env:
-          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCloud_API_KEY }}
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
           BASELINE_TREE: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
         run: node scripts/stronger-sentient-cognition-artifact-v1.mjs
-      - name: Verify baseline immutability
-        shell: bash
+      - name: Guard immutable baseline
         run: |
-          set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASE_TREE"
-          git -C sentient diff --exit-code
-          git -C sentient diff --cached --exit-code
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
       - uses: actions/upload-artifact@v4
         with:
           name: stronger-sentient-cognition-artifact-v1
           path: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
           retention-days: 14
-      - name: Guard
+      - name: Guard receipt
         run: |
-          echo "MAX_PROVIDER_CALLS=5"
-          echo "DOTS3_DIRECT_SYNTHESIS_ONLY=true"
-          echo "DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1E36"
-          echo "DEEPSEEK_PROVIDER_CALLS=0"
-          echo "PROVIDER_RETRIES=0"
-          echo "MODEL_ROLE_CHANGE=false"
-          echo "SOURCE_CHANGE=false"
-          echo "PRODUCTION_DEPLOYMENT=false"
+          echo MAX_PROVIDER_CALLS=5
+          echo DOTS3_DIRECT_SYNTHESIS_ONLY=true
+          echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536
+          echo DEEPSEEK_PROVIDER_CALLS=0
+          echo PROVIDER_RETRIES=0
+          echo MODEL_ROLE_CHANGE=false
+          echo SOURCE_CHANGE=false
+          echo PRODUCTION_DEPLOYMENT=false
