@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BASDINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
+  BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
   BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
   CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
   CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASDINE_TREE"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
           test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
           test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
           test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
@@ -66,7 +66,7 @@ jobs:
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
-          BASELINE_TREE: ${{ env.BASDINE_TREE }}
+          BASELINE_TREE: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/normalized-report.json
           RAW_SHAPES_OUT: ${{ runner.temp }}/raw-shapes.jsonl
