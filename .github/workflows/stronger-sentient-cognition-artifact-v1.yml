@@ -1,117 +1,104 @@
 name: Stronger Sentient Cognition Artifact Optimization v1
+
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        required: false
-        default: artifact_validation
-        type: choice
-        options: [artifact_validation, challenger_screen]
-permissions: {contents: read}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
 concurrency:
   group: stronger-sentient-cognition-artifact-optimization-v1
   cancel-in-progress: false
+
 env:
   BASELINE_SHA: c05ebe9ffed7254bb749cee1c72a965f970def7c
   BASELINE_TREE: 00296d7129fa8ab7f3254943a57df444591ad1ab
   CORPUS_SHA: 9c037505f65663ae6b7e8990ae969639572860d9
   CORPUS_DIGEST: 611acebce942ad9228618a42154efe56d3064c188b30cf13ec7893ef6cee6f51
   CONTRACT_DIGEST: sha256:62f98338f60164620a3fe93fd69e7c94b33e8ec4602ba3337c1b06b89651673d
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
-      - uses: "actions/checkout\u0040v4"
-        with: {persist-credentials: false}
-      - uses: "actions/checkout\u0040v4"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: ${{ env.BASELINE_SHA }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: sentient
           persist-credentials: false
-      - uses: "actions/checkout\u0040v4"
+
+      - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
           ref: ${{ env.CORPUS_SHA }}
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: corpus-source
           persist-credentials: false
+
       - name: Guard frozen inputs
+        shell: bash
         run: |
+          set -euo pipefail
           test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
           test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
           test "$(git -C corpus-source rev-parse HEAD)" = "$CORPUS_SHA"
           test "$(sha256sum corpus-source/test/fixtures/cognitive-frontier/corpus-v1.json | awk '{print $1}')" = "$CORPUS_DIGEST"
           test "sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | awk '{print $1}')" = "$CONTRACT_DIGEST"
-      - uses: "actions/setup-node\u0040v4"
-        with: {node-version: "22"}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Build exact accepted baseline
         working-directory: sentient
         run: npm install --no-audit --no-fund --package-lock=false && npm run build
-      - name: Run artifact validation
-        if: ${{ inputs.mode != 'challenger_screen' }}
+
+      - name: Validate canonical prose-synthesis harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e 'JSON.parse(require("fs").readFileSync("measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json","utf8"))'
+          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-artifact-v1.mjs
+          grep -q 'user-facing answer in ordinary prose' scripts/stronger-sentient-cognition-artifact-v1.mjs
+
+      - name: Run canonical artifact validation
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           BASELINE_SHA: ${{ env.BASELINE_SHA }}
           BASELINE_TREE: ${{ env.BASELINE_TREE }}
           CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
           EXPERIMENT_OUT: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
+        run: node scripts/stronger-sentient-cognition-artifact-v1.mjs
+
+      - name: Guard immutable baseline
+        shell: bash
         run: |
-          node -e 'JSON.parse(require("fs").readFileSync("measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json","utf8"))'
-          grep -q 'maxOutputTokens:768' scripts/stronger-sentient-cognition-artifact-v1.mjs
-          sed -i 's/maxOutputTokens:768/maxOutputTokens:3072/' scripts/stronger-sentient-cognition-artifact-v1.mjs
-          node --check scripts/stronger-sentient-cognition-artifact-v1.mjs
-          node scripts/stronger-sentient-cognition-artifact-v1.mjs
-      - name: Upload artifact validation
-        if: ${{ inputs.mode != 'challenger_screen' }}
-        uses: "actions/upload-artifact\u0040v4"
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+
+      - uses: actions/upload-artifact@v4
         with:
           name: stronger-sentient-cognition-artifact-v1
           path: ${{ runner.temp }}/stronger-sentient-cognition-artifact-v1.json
           retention-days: 14
-      - name: Run bounded challenger screen
-        if: ${{ inputs.mode == 'challenger_screen' }}
-        env:
-          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
-          BASELINE_SHA: ${{ env.BASELINE_SHA }}
-          BASELINE_TREE: ${{ env.BASELINE_TREE }}
-          CORPUS_DIGEST: ${{ env.CORPUS_DIGEST }}
-          CONTRACT_DIGEST: ${{ env.CONTRACT_DIGEST }}
-          EXPERIMENT_OUT: ${{ runner.temp }}/challenger-screen-v1.json
+
+      - name: Guard receipt
         run: |
-          grep -q 'maxOutputTokens:1536' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          sed -i 's/maxOutputTokens:1536/maxOutputTokens:3072/' scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          node --check scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-          node scripts/stronger-sentient-cognition-challenger-screen-v1.mjs
-      - name: Upload challenger screen
-        if: ${{ inputs.mode == 'challenger_screen' }}
-        uses: "actions/upload-artifact\u0040v4"
-        with:
-          name: stronger-sentient-cognition-challenger-screen-v1
-          path: ${{ runner.temp }}/challenger-screen-v1.json
-          retention-days: 14
-      - name: Guard immutable baseline
-        run: |
-          test "$(git -C sentient rev-parse HEAD)" = "$BASELINE_SHA"
-          test "$(git -C sentient rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
-          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
-      - name: Receipt
-        run: |
-          if [ "${{ inputs.mode }}" = "challenger_screen" ]; then
-            echo MAX_PROVIDER_CALLS=24
-            echo COGNITION_MODELS=4
-            echo COGNITION_TASKS=3
-            echo COGNITION_ARTIFACT_MAX_OUTPUT_TOKENS=2000
-            echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=3072
-            echo MODEL_PROMOTION=false
-          else
-            echo MAX_PROVIDER_CALLS=5
-            echo DOTS3_DIRECT_SYNTHESIS_ONLY=true
-            echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=3072
-            echo DEEPSEEK_PROVIDER_CALLS=0
-          fi
+          echo MAX_PROVIDER_CALLS=5
+          echo DOTS3_DIRECT_SYNTHESIS_ONLY=true
+          echo DOTS3_SYNTHESIS_RESPONSE_FORMAT=USER_FACING_PROSE
+          echo DOTS3_SYNTHESIS_MAX_OUTPUT_TOKENS=1536
+          echo DEEPSEEK_PROVIDER_CALLS=0
           echo PROVIDER_RETRIES=0
           echo MODEL_ROLE_CHANGE=false
           echo SOURCE_CHANGE=false
