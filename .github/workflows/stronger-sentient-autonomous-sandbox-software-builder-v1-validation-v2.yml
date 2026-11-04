@@ -1,0 +1,93 @@
+name: Stronger Sentient Autonomous Sandbox Software Builder V1 Validation V2
+on:
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      parent_sha: {required: true, type: string}
+      parent_tree: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CANDIDATE_SHA: ${{ inputs.sha }}
+      CANDIDATE_TREE: ${{ inputs.tree }}
+      PARENT_SHA: ${{ inputs.parent_sha }}
+      PARENT_TREE: ${{ inputs.parent_tree }}
+      TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+    steps:
+      - name: Checkout exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=30 origin "$CANDIDATE_SHA" "$PARENT_SHA"
+          git -C sentient checkout --detach "$CANDIDATE_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+      - name: Fence identity lineage and scope
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          test "$(git show -s --format=%T "$PARENT_SHA")" = "$PARENT_TREE"
+          git merge-base --is-ancestor "$PARENT_SHA" "$CANDIDATE_SHA"
+          git diff --name-only "$PARENT_SHA" "$CANDIDATE_SHA" | sort > "$RUNNER_TEMP/actual"
+          printf '%s\n'             src/runtime/autonomous-sandbox-software-builder-v1.ts             test/autonomous-sandbox-software-builder-v1.test.ts | sort > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+          git diff --exit-code "$PARENT_SHA" "$CANDIDATE_SHA" --             src/cognition src/retrieval src/action-fabric src/governor.ts src/sentient.ts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install and strict build
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+      - name: Focused Stage 2 Stage 3 Stage 4 proofs
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test             dist/test/integrated-smarter-sentient-shadow-benchmark-v1.test.js             dist/test/bounded-smarter-path-activation-v1.test.js             dist/test/autonomous-sandbox-software-builder-v1.test.js             2>&1 | tee "$RUNNER_TEMP/focused.log"
+          grep -F 'AUTONOMOUS_SANDBOX_SOFTWARE_BUILDER_V1_ACCEPTANCE>' "$RUNNER_TEMP/focused.log"
+          grep -F '"SENTIENT_COMPLETES_REAL_SOFTWARE_OBJECTIVE_WITH_VERIFIED_RESULT":true' "$RUNNER_TEMP/focused.log"
+          grep -F '"OBJECTIVES_ATTEMPTED":1' "$RUNNER_TEMP/focused.log"
+          grep -F '"OBJECTIVES_COMPLETED":1' "$RUNNER_TEMP/focused.log"
+          grep -F '"VERIFIED_SUCCESS_RATE":1' "$RUNNER_TEMP/focused.log"
+          grep -F '"REPAIR_CYCLES":1' "$RUNNER_TEMP/focused.log"
+          grep -F '"UNPRODUCTIVE_RECURSION":0' "$RUNNER_TEMP/focused.log"
+          grep -F '"PROVIDER_CALLS":0' "$RUNNER_TEMP/focused.log"
+          grep -F '"EXACT_EVIDENCE_RETAINED":true' "$RUNNER_TEMP/focused.log"
+          grep -F '"ISOLATED_WORKSPACE":true' "$RUNNER_TEMP/focused.log"
+          grep -F '"WRITEBACK_POLICY":"NONE"' "$RUNNER_TEMP/focused.log"
+          grep -F '"PRODUCTION_MUTATIONS":0' "$RUNNER_TEMP/focused.log"
+          grep -F '"AUTHORITY_VIOLATIONS":0' "$RUNNER_TEMP/focused.log"
+          grep -F '"TERMINAL":"VERIFIED"' "$RUNNER_TEMP/focused.log"
+      - name: Canonical repository regression
+        working-directory: sentient
+        run: npm test
+      - name: Clean source and receipt
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "AUTONOMOUS_SANDBOX_SOFTWARE_BUILDER_V1_VALIDATION=PASS"
+          echo "INDEPENDENT_EXACT_SHA_TREE=PASS"
+          echo "STRICT_TYPESCRIPT_BUILD=PASS"
+          echo "SMARTER_SENTIENT_LINEAGE_REGRESSION=PASS"
+          echo "FULL_REPOSITORY_REGRESSION=PASS"
+          echo "PRODUCTION_MUTATION=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
