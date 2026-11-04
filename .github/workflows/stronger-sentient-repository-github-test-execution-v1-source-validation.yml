@@ -1,0 +1,105 @@
+name: Stronger Sentient Repository GitHub Test Execution V1 Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      parent_sha: {required: true, type: string}
+      parent_tree: {required: true, type: string}
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: ${{ inputs.sha }}
+  CANDIDATE_TREE: ${{ inputs.tree }}
+  PARENT_SHA: ${{ inputs.parent_sha }}
+  PARENT_TREE: ${{ inputs.parent_tree }}
+  SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact candidate and parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=50 origin "$CANDIDATE_SHA" "$PARENT_SHA"
+          git -C sentient checkout --detach "$CANDIDATE_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          unset auth
+          test "$(git -C sentient rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          test "$(git -C sentient show -s --format=%T "$PARENT_SHA")" = "$PARENT_TREE"
+          git -C sentient merge-base --is-ancestor "$PARENT_SHA" "$CANDIDATE_SHA"
+
+      - name: Guard exact Stage 7 source scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C sentient diff --name-only "$PARENT_SHA" "$CANDIDATE_SHA" | sort > "$RUNNER_TEMP/actual"
+          printf '%s\n' \
+            src/runtime/repository-github-test-execution-v1.ts \
+            test/repository-github-test-execution-v1.test.ts | sort > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+          test -z "$(git -C sentient diff --name-only "$PARENT_SHA" "$CANDIDATE_SHA" -- src/cognition src/retrieval src/action-fabric src/governor)"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Strict build and focused Stage 7 proofs
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+          node --test dist/test/repository-github-test-execution-v1.test.js 2>&1 | tee "$RUNNER_TEMP/stage7.log"
+          grep 'REPOSITORY_GITHUB_TEST_EXECUTION_V1_ACCEPTANCE>' "$RUNNER_TEMP/stage7.log"
+          grep '"EXACT_SOURCE_IDENTITY":true' "$RUNNER_TEMP/stage7.log"
+          grep '"ISOLATED_REPOSITORY_EXECUTION":true' "$RUNNER_TEMP/stage7.log"
+          grep '"WRITEBACK_POLICY":"NONE"' "$RUNNER_TEMP/stage7.log"
+          grep '"REVIEWABLE_DIFF_PRODUCED":true' "$RUNNER_TEMP/stage7.log"
+          grep '"TEST_BRANCH_PUBLISHES":2' "$RUNNER_TEMP/stage7.log"
+          grep '"TEST_PR_CREATED":true' "$RUNNER_TEMP/stage7.log"
+          grep '"CI_OBSERVED":2' "$RUNNER_TEMP/stage7.log"
+          grep '"CI_REPAIR_CYCLES":1' "$RUNNER_TEMP/stage7.log"
+          grep '"VERIFIED_CI":true' "$RUNNER_TEMP/stage7.log"
+          grep '"MERGE_PERFORMED":false' "$RUNNER_TEMP/stage7.log"
+          grep '"RELEASE_PERFORMED":false' "$RUNNER_TEMP/stage7.log"
+          grep '"PRODUCTION_MUTATION":false' "$RUNNER_TEMP/stage7.log"
+          grep '"AUTHORITY_EXPANSION":false' "$RUNNER_TEMP/stage7.log"
+          grep '"GOVERNOR_BYPASS":false' "$RUNNER_TEMP/stage7.log"
+
+      - name: Full repository regression
+        working-directory: sentient
+        run: npm test
+
+      - name: Clean source and exact identity receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo "REPOSITORY_GITHUB_TEST_EXECUTION_V1_VALIDATION=PASS"
+          echo "INDEPENDENT_EXACT_SHA_TREE=PASS"
+          echo "PARENT_LINEAGE=PASS"
+          echo "EXPECTED_TWO_FILE_SCOPE=PASS"
+          echo "STRICT_TYPESCRIPT_BUILD=PASS"
+          echo "FOCUSED_STAGE7_PROOFS=PASS"
+          echo "FULL_REPOSITORY_REGRESSION=PASS"
+          echo "CLEAN_TRACKED_SOURCE=PASS"
+          echo "MERGE_PERFORMED=false"
+          echo "RELEASE_PERFORMED=false"
+          echo "PRODUCTION_MUTATION=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
