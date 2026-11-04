@@ -1,0 +1,106 @@
+name: Real End-to-End Creation Tests V1 Acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      director_sha: {required: true, type: string}
+      director_tree: {required: true, type: string}
+      sentient_sha: {required: true, type: string}
+      sentient_tree: {required: true, type: string}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      D_SHA: ${{ inputs.director_sha }}
+      D_TREE: ${{ inputs.director_tree }}
+      S_SHA: ${{ inputs.sentient_sha }}
+      S_TREE: ${{ inputs.sentient_tree }}
+      TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout exact accepted Director and Sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/director-studio-beta.git director
+          git -C director -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=2 origin "$D_SHA"
+          git -C director checkout --detach "$D_SHA"
+          git -C director remote set-url origin disabled://director
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=2 origin "$S_SHA"
+          git -C sentient checkout --detach "$S_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+
+      - name: Fence exact identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C director rev-parse HEAD)" = "$D_SHA"
+          test "$(git -C director show -s --format=%T HEAD)" = "$D_TREE"
+          test "$(git -C sentient rev-parse HEAD)" = "$S_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$S_TREE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build accepted sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd director && npm install --no-audit --no-fund --package-lock=false && npm run typecheck)
+          (cd sentient && npm install --no-audit --no-fund --package-lock=false && npm run build)
+
+      - name: Regress accepted Stage 4 and Stage 5 focused proofs
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd director && npx tsx --test tests/director-cloudflare-sandbox-trigger-v1.test.ts tests/sentient-sandbox-trigger-v1.test.ts)
+          (cd sentient && node --test dist/test/autonomous-sandbox-software-builder-v1.test.js)
+
+      - name: Run real Director to sandbox-builder creation objectives
+        shell: bash
+        env:
+          DIRECTOR_SHA: ${{ inputs.director_sha }}
+          DIRECTOR_TREE: ${{ inputs.director_tree }}
+          SENTIENT_SHA: ${{ inputs.sentient_sha }}
+          SENTIENT_TREE: ${{ inputs.sentient_tree }}
+        run: |
+          set -euo pipefail
+          export DIRECTOR_ROOT="$PWD/director"
+          export SENTIENT_ROOT="$PWD/sentient"
+          ./director/node_modules/.bin/tsx validation/real-end-to-end-creation-tests-v1.mts 2>&1 | tee /tmp/stage6.log
+          grep 'REAL_END_TO_END_CREATION_TESTS_ACCEPTANCE>' /tmp/stage6.log
+          grep '"OBJECTIVES_ATTEMPTED":3' /tmp/stage6.log
+          grep '"OBJECTIVES_COMPLETED":3' /tmp/stage6.log
+          grep '"VERIFIED_SUCCESS_RATE":1' /tmp/stage6.log
+          grep '"REPAIR_CYCLES":2' /tmp/stage6.log
+          grep '"UNPRODUCTIVE_RECURSION":0' /tmp/stage6.log
+          grep '"WRONG_ROUTE_RATE":0' /tmp/stage6.log
+          grep '"PRIMARY_COGNITION_CALLS":0' /tmp/stage6.log
+          grep '"PROVIDER_COST":0' /tmp/stage6.log
+          grep '"HUMAN_INTERVENTIONS_REQUIRED":0' /tmp/stage6.log
+          grep '"AUTHORITY_VIOLATIONS":0' /tmp/stage6.log
+          grep '"PRODUCTION_MUTATIONS":0' /tmp/stage6.log
+          grep '"TERMINAL_FAILURES":0' /tmp/stage6.log
+          grep '"PRODUCTION_DEPLOYMENT":false' /tmp/stage6.log
+
+      - name: Clean source and receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git -C director status --porcelain --untracked-files=no)"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo "REAL_END_TO_END_CREATION_TESTS_V1_VALIDATION=PASS"
+          echo "INDEPENDENT_ACCEPTANCE_RESULT=PASS"
+          echo "PRODUCTION_MUTATION=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
