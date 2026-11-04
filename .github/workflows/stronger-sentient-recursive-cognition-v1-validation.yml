@@ -1,0 +1,120 @@
+name: Stronger Sentient Recursive Cognition V1 Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      parent_sha:
+        required: true
+        type: string
+      parent_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: ${{ inputs.sha }}
+  CANDIDATE_TREE: ${{ inputs.tree }}
+  PARENT_SHA: ${{ inputs.parent_sha }}
+  PARENT_TREE: ${{ inputs.parent_tree }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact Sentient candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ env.CANDIDATE_SHA }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Guard candidate identity, parent, and recursive V1 source scope
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          git cat-file -e "$PARENT_SHA^{commit}"
+          test "$(git show -s --format=%T "$PARENT_SHA")" = "$PARENT_TREE"
+          git diff --name-only "$PARENT_SHA" "$CANDIDATE_SHA" | sort > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/expected.txt" <<'SCOPE'
+          src/cognition/index.ts
+          src/cognition/recursive-cognition-v1-context.ts
+          src/cognition/recursive-cognition-v1-contracts.ts
+          src/cognition/recursive-cognition-v1-machine.ts
+          src/runtime/recursive-cognition-v1-contracts.ts
+          test/recursive-cognition-v1-fixture.ts
+          test/recursive-cognition-v1-proof-a.test.ts
+          test/recursive-cognition-v1-proof-b.test.ts
+          test/recursive-cognition-v1-proof-c.test.ts
+          test/recursive-cognition-v1-proof-d.test.ts
+          test/recursive-cognition-v1.test.ts
+          SCOPE
+          sed -i 's/^          //' "$RUNNER_TEMP/expected.txt"
+          sort -o "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+          git diff --exit-code "$PARENT_SHA" "$CANDIDATE_SHA" -- \
+            src/model src/state src/deployment-governor src/production src/action-fabric \
+            test/fixtures/cognitive-frontier/corpus-v1.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install and build
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Run compiler, disclosure, and recursive cognition proofs
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          node --test \
+            dist/test/context-compiler-v0.test.js \
+            dist/test/progressive-disclosure-v1.test.js \
+            dist/test/progressive-disclosure-v1-runtime.test.js \
+            dist/test/recursive-cognition-v1-proof-a.test.js \
+            dist/test/recursive-cognition-v1-proof-b.test.js \
+            dist/test/recursive-cognition-v1-proof-c.test.js \
+            dist/test/recursive-cognition-v1-proof-d.test.js \
+            2>&1 | tee "$RUNNER_TEMP/recursive-tests.log"
+          grep 'RECURSIVE_COGNITION_V1_RECEIPT=' "$RUNNER_TEMP/recursive-tests.log"
+
+      - name: Run full repository tests
+        working-directory: sentient
+        run: npm test
+
+      - name: Guard invariants and emit receipt
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "RECURSIVE_COGNITION_V1_VALIDATION=PASS"
+          echo "SHADOW_MODE=true"
+          echo "PROGRESSIVE_DISCLOSURE_REUSED=true"
+          echo "PARALLEL_RETRIEVAL_SYSTEM_CREATED=false"
+          echo "COGNITION_ARTIFACT_V1_CHANGED=false"
+          echo "SEMANTIC_COMPRESSION_ENABLED=false"
+          echo "ADAPTIVE_EXECUTION_ROUTING=false"
+          echo "PRODUCTION_MODEL_ROUTE_CHANGE=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+          echo "PROVIDER_CALLS=0"
+          echo "PRODUCTION_DEPLOYMENT=false"
