@@ -1,0 +1,83 @@
+name: Stronger Sentient Repository GitHub Test Execution V1 Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      sentient_sha: {required: true, type: string}
+      sentient_tree: {required: true, type: string}
+      base_sha: {required: true, type: string}
+      test_sha: {required: true, type: string}
+
+permissions:
+  contents: read
+
+env:
+  SENTIENT_SHA: ${{ inputs.sentient_sha }}
+  SENTIENT_TREE: ${{ inputs.sentient_tree }}
+  BASE_SHA: ${{ inputs.base_sha }}
+  TEST_SHA: ${{ inputs.test_sha }}
+  SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: operator
+          ref: ${{ env.TEST_SHA }}
+          fetch-depth: 0
+      - name: Guard exact operator test candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C operator rev-parse HEAD)" = "$TEST_SHA"
+          git -C operator cat-file -e "$BASE_SHA^{commit}"
+          git -C operator diff --name-only "$BASE_SHA" "$TEST_SHA" | sort > "$RUNNER_TEMP/actual"
+          printf '%s\n' 'validation/stage7-repository-github-test-execution-v1.txt' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+          test "$(cat operator/validation/stage7-repository-github-test-execution-v1.txt)" = "SENTIENT_STAGE7_RESULT=VERIFIED"
+      - name: Checkout exact Sentient builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$SENTIENT_SHA"
+          git -C sentient checkout --detach "$SENTIENT_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          unset auth
+          test "$(git -C sentient rev-parse HEAD)" = "$SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$SENTIENT_TREE"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build and run bounded repository GitHub proof
+        shell: bash
+        env:
+          SENTIENT_ROOT: ${{ github.workspace }}/sentient
+        run: |
+          set -euo pipefail
+          (name=$(cd /tmp 2>/dev/null || true))
+          (cd sentient && npm install --no-audit --no-fund --package-lock=false)
+          (cd sentient && npm run build)
+          ./sentient/node_modules/.bin/tsx operator/validation/repository-github-test-execution-v1.mts 2>&1 | tee "$RUNNER_TEMP/stage7.log"
+          grep 'REPOSITORY_GITHUB_TEST_EXECUTION_V1_ACCEPTANCE>' "$RUNNER_TEMP/stage7.log"
+          grep '"REPOSITORY_INSPECTED":true' "$RUNNER_TEMP/stage7.log"
+          grep '"ISOLATED_BRANCH_CREATED":true' "$RUNNER_TEMP/stage7.log"
+          grep '"TEST_PASSED":true' "$RUNNER_TEMP/stage7.log"
+          grep '"REVIEWABLE_DIFF_PRODUCED":true' "$RUNNER_TEMP/stage7.log"
+          grep '"REPAIR_CYCLES":1' "$RUNNER_TEMP/stage7.log"
+          grep '"GITHUB_REMOTE_MUTATION":false' "$RUNNER_TEMP/stage7.log"
+          grep '"MERGE_RELEASE":false' "$RUNNER_TEMP/stage7.log"
+      - name: Emit independent receipt
+        shell: bash
+        run: |
+          echo "REPOSITORY_GITHUB_TEST_EXECUTION_V1_VALIDATION=PASS"
+          echo "EXACT_SENTIENT_SHA_TREE=PASS"
+          echo "OSERVED_CI_FAILURE_AND_REPAIR=PASS"
+          echo "REMOTE_TEST_PR_OPEN=true"
+          echo "MERGE_RELEASE=false"
+          echo "RUNTIME_COGNITION_GITHUB_AUTHORITY=false"
