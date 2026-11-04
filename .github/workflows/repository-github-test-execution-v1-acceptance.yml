@@ -63,22 +63,22 @@ jobs:
         run: |
           set -euo pipefail
           export SENTIENT_ROOT="$PWD/sentient"
-          ./sentient/node_modules/.bin/tsx validation/repository-github-test-execution-v1.mts 2>&1 | tee /tmp/stage7.log
+          node --experimental-strip-types validation/repository-github-test-execution-v1.mts 2>&1 | tee /tmp/stage7.log
           grep 'REPOSITORY_GITHUB_TEST_EXECUTION_V1_ACCEPTANCE>' /tmp/stage7.log
           grep '"REPOSITORY_INSPECTED":true' /tmp/stage7.log
-          grep '"ISOLATED_BRANCH_CREATED":true' /tmp/stage7.log
+          grep  '"ISOLATED_BRANCH_CREATED":true' /tmp/stage7.log
           grep '"TEST_PASSED":true' /tmp/stage7.log
-          grep '"REVIEWABLE_DIFF_PRODUCED":true' /tmp/stage7.log
-          grep '"RECURSIVE_REPAIR":true' /tmp/stage7.log
+          grep  '"REVIEWABLE_DIFF_PRODUCED":true' /tmp/stage7.log
+          grep  '"RECURSIVE_REPAIR":true' /tmp/stage7.log
           grep '"CI_EXECUTION_ENVIRONMENT":true' /tmp/stage7.log
-          grep '"GITHUB_REMOTE_MUTATION":false' /tmp/stage7.log
+          grep  '"GITHUB_REMOTE_MUTATION":false' /tmp/stage7.log
           grep '"TEST_PR_CREATED":false' /tmp/stage7.log
           grep '"MERGE_RELEASE":false' /tmp/stage7.log
-          grep '"PRODUCTION_MUTATION":false' /tmp/stage7.log
+          grep  '"PRODUCTION_MUTATION":false' /tmp/stage7.log
           grep '"AUTHORITY_EXPANSION":false' /tmp/stage7.log
-          grep '"GOVERNOR_BYPASS":false' /tmp/stage7.log
+          grep  '"GOVERNOR_BYPASS":false' /tmp/stage7.log
           grep '"WRITEBACK_POLICY":"NONE"' /tmp/stage7.log
-          grep '"PROVIDER_CALLS":0' /tmp/stage7.log
+          grep  '"PROVIDER_CALLS":0' /tmp/stage7.log
 
       - name: Clean source and receipt
         shell: bash
