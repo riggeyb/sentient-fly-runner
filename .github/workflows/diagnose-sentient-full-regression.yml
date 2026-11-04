@@ -41,5 +41,8 @@ jobs:
           set +e
           node --test dist/test/*.test.js > /tmp/full-regression.log 2>&1
           code=$?
-          tail -n 220 /tmp/full-regression.log
+          echo "FAILURE_INDEX>"
+          grep -n -E '(^not ok|failureType:|error:|code:|actual:|expected:|stack:)' /tmp/full-regression.log | tail -n 180 || true
+          echo "FAILURE_TAIL>"
+          tail -n 80 /tmp/full-regression.log
           exit "$code"
