@@ -46,14 +46,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: Build and full regression
+      - name: Build and canonical repository regression
         working-directory: sentient
         shell: bash
         run: |
           set -euo pipefail
           npm install --no-audit --no-fund --package-lock=false
           npm run build
-          node --test dist/test/*.test.js
+          npm test
 
       - name: Run repository GitHub test execution proof
         shell: bash
@@ -85,6 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          test "$(git -C sentient rev-parse HEAD)" = "$SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$SENTIENT_TREE"
           echo "REPOSITORY_GITHUB_TEST_EXECUTION_V1_VALIDATION=PASS"
           echo "INDEPENDENT_ACCEPTANCE_RESULT=PASS"
           echo "CI_OBSERVED=true"
