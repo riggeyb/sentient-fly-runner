@@ -67,7 +67,10 @@ jobs:
           SENTIENT_ROOT: ${{ github.workspace }}/sentient
         run: |
           set -euo pipefail
-          ./director/node_modules/.bin/tsx operator/scripts/real-end-to-end-creation-tests-v1.ts 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          ln -s "$GITHUB_WORKSPACE/director" operator/director
+          ln -s "$GITHUB_WORKSPACE/sentient" operator/sentient
+          cp operator/scripts/real-end-to-end-creation-tests-v1.ts operator/scripts/real-end-to-end-creation-tests-v1.mts
+          ./director/node_modules/.bin/tsx operator/scripts/real-end-to-end-creation-tests-v1.mts 2>&1 | tee "$RUNNER_TEMP/e2e.log"
           grep 'REAL_END_TO_END_CREATION_TESTS_V1_ACCEPTANCE>' "$RUNNER_TEMP/e2e.log"
           grep '"OBJECTIVES_ATTEMPTED":3' "$RUNNER_TEMP/e2e.log"
           grep '"OBJECTIVES_COMPLETED":3' "$RUNNER_TEMP/e2e.log"
