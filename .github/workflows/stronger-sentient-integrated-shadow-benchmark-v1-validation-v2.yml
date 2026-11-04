@@ -1,0 +1,107 @@
+name: Stronger Sentient Integrated Shadow Benchmark V1 Validation V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      parent_sha: {required: true, type: string}
+      parent_tree: {required: true, type: string}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CANDIDATE_SHA: ${{ inputs.sha }}
+      CANDIDATE_TREE: ${{ inputs.tree }}
+      PARENT_SHA: ${{ inputs.parent_sha }}
+      PARENT_TREE: ${{ inputs.parent_tree }}
+      TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+    steps:
+      - name: Checkout exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=20 origin "$CANDIDATE_SHA" "$PARENT_SHA"
+          git -C sentient checkout --detach "$CANDIDATE_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+      - name: Fence identity lineage and scope
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          test "$(git show -s --format=%T "$PARENT_SHA")" = "$PARENT_TREE"
+          git merge-base --is-ancestor "$PARENT_SHA" "$CANDIDATE_SHA"
+          git diff --name-only "$PARENT_SHA" "$CANDIDATE_SHA" | sort > /tmp/actual
+          printf '%s\n' \
+            test/integrated-smarter-sentient-shadow-benchmark-v1.test.ts \
+            test/lab/integrated-smarter-sentient-shadow-benchmark-v1-fixture.ts \
+            test/lab/integrated-smarter-sentient-shadow-benchmark-v1.test.ts | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          git diff --exit-code "$PARENT_SHA" "$CANDIDATE_SHA" -- src
+          test "$(cat test/lab/integrated-smarter-sentient-shadow-benchmark-v1.test.ts)" = "export {};"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Strict build
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+      - name: Focused lineage and benchmark proofs
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            dist/test/context-compiler-v0.test.js \
+            dist/test/progressive-disclosure-v1.test.js \
+            dist/test/progressive-disclosure-v1-runtime.test.js \
+            dist/test/recursive-cognition-v1-proof-a.test.js \
+            dist/test/recursive-cognition-v1-proof-b.test.js \
+            dist/test/recursive-cognition-v1-proof-c.test.js \
+            dist/test/recursive-cognition-v1-proof-d.test.js \
+            dist/test/adaptive-execution-routing-v1.test.js \
+            dist/test/semantic-compression-v1.test.js \
+            dist/test/integrated-smarter-sentient-shadow-benchmark-v1.test.js 2>&1 | tee /tmp/focused.log
+          grep 'INTEGRATED_SMARTER_SENTIENT_SHADOW_BENCHMARK_V1_ACCEPTANCE>' /tmp/focused.log
+          grep '"OBJECTIVES_COMPLETED":1' /tmp/focused.log
+          grep '"VERIFIED_SUCCESS_RATE":1' /tmp/focused.log
+          grep '"WRONG_ROUTE_RATE":0' /tmp/focused.log
+          grep '"PROVIDER_CALLS":0' /tmp/focused.log
+          grep '"RECURSIVE_RECOVERY":true' /tmp/focused.log
+          grep '"TERMINATION_REASON":"COMPLETE"' /tmp/focused.log
+          grep '"AUTHORITY_VIOLATIONS":0' /tmp/focused.log
+          grep '"PRODUCTION_MUTATIONS":0' /tmp/focused.log
+          grep '"PRODUCTION_MODEL_ROUTE_CHANGE":false' /tmp/focused.log
+          grep '"PRODUCTION_DEPLOYMENT":false' /tmp/focused.log
+      - name: Full compiled repository regression
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test dist/test/*.test.js
+      - name: Clean source and receipt
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "INTEGRATED_SMARTER_SENTIENT_SHADOW_BENCHMARK_V1_VALIDATION=PASS"
+          echo "INDEPENDENT_ACCEPTANCE_RESULT=PASS"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+          echo "NEW_COPILOT_USAGE=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
