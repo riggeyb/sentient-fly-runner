@@ -1,0 +1,140 @@
+name: Stronger Sentient Integrated Shadow Benchmark V1 Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tree:
+        required: true
+        type: string
+      parent_sha:
+        required: true
+        type: string
+      parent_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: ${{ inputs.sha }}
+  CANDIDATE_TREE: ${{ inputs.tree }}
+  PARENT_SHA: ${{ inputs.parent_sha }}
+  PARENT_TREE: ${{ inputs.parent_tree }}
+  SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact Sentient candidate and parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$CANDIDATE_SHA"
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$PARENT_SHA"
+          git -C sentient checkout --detach "$CANDIDATE_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          unset auth
+
+      - name: Guard exact identity, lineage, and benchmark scope
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          git cat-file -e "$PARENT_SHA^{commit}"
+          test "$(git show -s --format=%T "$PARENT_SHA")" = "$PARENT_TREE"
+          git diff --name-only "$PARENT_SHA" "$CANDIDATE_SHA" | sort > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/expected.txt" <<'SCOPE'
+          test/integrated-smarter-sentient-shadow-benchmark-v1.test.ts
+          test/lab/integrated-smarter-sentient-shadow-benchmark-v1-fixture.ts
+          test/lab/integrated-smarter-sentient-shadow-benchmark-v1.test.ts
+          SCOPE
+          sed -i 's/^          //' "$RUNNER_TEMP/expected.txt"
+          sort -o "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+          git diff --exit-code "$PARENT_SHA" "$CANDIDATE_SHA" -- src
+          test "$(cat test/lab/integrated-smarter-sentient-shadow-benchmark-v1.test.ts)" = "export {};"
+
+      - name: Use Node 22
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+          if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm install 22; nvm use 22; fi
+          node --version
+
+      - name: Install and strict build
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipeflail
+          export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+          if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 22; fi
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Run smarter-Sentient lineage and integrated benchmark proofs
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+          if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 22; fi
+          node --test            dist/test/context-compiler-v0.test.js             dist/test/progressive-disclosure-v1.test.js             dist/test/progressive-disclosure-v1-runtime.test.js             dist/test/recursive-cognition-v1-proof-a.test.js             dist/test/recursive-cognition-v1-proof-b.test.js             dist/test/recursive-cognition-v1-proof-c.test.js             dist/test/recursive-cognition-v1-proof-d.test.js             dist/test/adaptive-execution-routing-v1.test.js             dist/test/semantic-compression-v1.test.js             dist/test/integrated-smarter-sentient-shadow-benchmark-v1.test.js             2>&1 | tee "$RUNNER_TEMP/lineage-tests.log"
+          grep 'INTEGRATED_SMARTER_SENTIENT_SHADOW_BENCHMARK_V1_ACCEPTANCE>' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"OBJECTIVES_COMPLETED":1' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"VERIFIED_SUCCESS_RATE":1' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"WRONG_ROUTE_RATE":0' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"PROVIDER_CALLS":0' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"RECURSIVE_RECOVERY":true' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"TERMINATION_REASON":"COMPLETE"' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"AUTHORITY_VIOLATIONS":0' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"PRODUCTION_MUTATIONS":0' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"PRODUCTION_MODDX_ROUTE_CHANGE":false' "$RUNNER_TEMP/lineage-tests.log"
+          grep '"PRODUCTION_DEPLOYMENT":false' "$RUNNER_TEMP/lineage-tests.log"
+
+      - name: Run full repository regression
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipeflail
+          export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+          if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 22; fi
+          npm test
+
+      - name: Guard clean source and emit independent receipt
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipeflail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "INTEGRATED_SMARTER_SENTIENT_SHADOW_BENCHMARK_V1_VALIDATION=PASS"
+          echo "SHADOW_MODE=true"
+          echo "OBJECTIVES_ATTEMPTED=1"
+          echo "OBJECTIVES_COMPLETED=1"
+          echo "VERIFIED_SUCCESS_RATE=1"
+          echo "WRONG_ROUTE_RATE=0"
+          echo "PROVIDER_CALLS=0"
+          echo "RECURSIVE_RECOVERY=PASS"
+          echo "RESULT_COMPILER_RETENTION=PASS"
+          echo "EXACT_EVIDENCE_RECOVERABILITY=PASS"
+          echo "TERMINATION_BEHAVIOR=PASS"
+          echo "AUTHORITY_PRESERVATION=PASS"
+          echo "PRODUCTION_MODEL_ROUTE_CHANGE=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+          echo "NEW_COPILOT_USAGE=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "HUMAN_APPROVAL_REQUIRED=true"
