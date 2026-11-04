@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
-          auth="$(printf 'x-access-tokel:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
           git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/director-studio-beta.git director
           git -C director -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$DIRECTOR_SHA"
           git -C director checkout --detach "$DIRECTOR_SHA"
@@ -81,7 +81,7 @@ jobs:
           grep '"AUTHORITY_VIOLATIONS":0' "$RUNNER_TEMP/e2e.log"
           grep '"TERMINAL_FAILURES":0' "$RUNNER_TEMP/e2e.log"
           grep '"PRODUCTION_MUTATIONS":0' "$RUNNER_TEMP/e2e.log"
-          grep '"WRITEBPACK_POLICY":"NONE"' "$RUNNER_TEMP/e2e.log"
+          grep '"WRITEBACK_POLICY":"NONE"' "$RUNNER_TEMP/e2e.log"
           grep '"PRODUCTION_DEPLOYMENT":false' "$RUNNER_TEMP/e2e.log"
 
       - name: Guard accepted sources unchanged and emit receipt
