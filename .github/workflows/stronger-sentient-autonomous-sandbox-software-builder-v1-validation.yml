@@ -3,18 +3,10 @@ name: Stronger Sentient Autonomous Sandbox Software Builder V1 Validation
 on:
   workflow_dispatch:
     inputs:
-      sha:
-        required: true
-        type: string
-      tree:
-        required: true
-        type: string
-      parent_sha:
-        required: true
-        type: string
-      parent_tree:
-        required: true
-        type: string
+      sha: {required: true, type: string}
+      tree: {required: true, type: string}
+      parent_sha: {required: true, type: string}
+      parent_tree: {required: true, type: string}
 
 permissions:
   contents: read
@@ -59,7 +51,6 @@ jobs:
           set -euo pipefail
           export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
           if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm install 22; nvm use 22; fi
-          node --version
           npm install --no-audit --no-fund --package-lock=false
           npm run build
           node --test \
@@ -67,6 +58,7 @@ jobs:
             dist/test/bounded-smarter-path-activation-v1.test.js \
             dist/test/autonomous-sandbox-software-builder-v1.test.js \
             2>&1 | tee "$RUNNER_TEMP/focused.log"
+
           grep 'AUTONOMOUS_SANDBOX_SOFTWARE_BUILDER_V1_ACCEPTANCE>' "$RUNNER_TEMP/focused.log"
           grep '"SENTIENT_COMPLETES_REAL_SOFTWARE_OBJECTIVE_WITH_VERIFIED_RESULT":true' "$RUNNER_TEMP/focused.log"
           grep '"OBJECTIVES_COMPLETED":1' "$RUNNER_TEMP/focused.log"
@@ -74,12 +66,13 @@ jobs:
           grep '"REPAIR_CYCLES":1' "$RUNNER_TEMP/focused.log"
           grep '"UNPRODUCTIVE_RECURSION":0' "$RUNNER_TEMP/focused.log"
           grep '"PROVIDER_CALLS":0' "$RUNNER_TEMP/focused.log"
-          grep '"EZACT_EVIDENCE_RETAINED":true' "$RUNNER_TEMP/focused.log" || grep '"EXACT_EVIDENCE_RETAINED":true' "$RUNNER_TEMP/focused.log"
+          grep '"EXACT_EVIDENCE_RETAINED":true' "$RUNNER_TEMP/focused.log"
           grep '"ISOLATED_WORKSPACE":true' "$RUNNER_TEMP/focused.log"
-          grep '"WRITEB_ACK_POLICY":"NONE"' "$RUNNER_TEMP/focused.log"
+          grep '"WRITEBACK_POLICY":"NONE"' "$RUNNER_TEMP/focused.log"
           grep '"PRODUCTION_MUTATIONS":0' "$RUNNER_TEMP/focused.log"
           grep '"AUTHORITY_VIOLATIONS":0' "$RUNNER_TEMP/focused.log"
           grep '"TERMINAL":"VERIFIED"' "$RUNNER_TEMP/focused.log"
+
           grep 'BOUNDED_SMARTER_PATH_ACTIVATION_V1_ACCEPTANCE>' "$RUNNER_TEMP/focused.log"
           grep '"PRODUCTION_REQUEST_PATH_CHANGED":false' "$RUNNER_TEMP/focused.log"
           grep '"PRODUCTION_MODEL_ROUTE_CHANGE":false' "$RUNNER_TEMP/focused.log"
@@ -87,12 +80,13 @@ jobs:
           grep '"CONSEQUENTIAL_EFFECTS_AUTHORIZED":false' "$RUNNER_TEMP/focused.log"
           grep '"AUTHORITY_EXPANDED":false' "$RUNNER_TEMP/focused.log"
           grep '"GOVERNOR_BYPASS":false' "$RUNNER_TEMP/focused.log"
-          grep '"PROVIDER_CALLS":0' "$RUNNER_TEMP/focused.log"
+
           grep 'INTEGRATED_SMARTER_SENTIENT_SHADOW_BENCHMARK_V1_ACCEPTANCE>' "$RUNNER_TEMP/focused.log"
           grep '"AUTHORITY_VIOLATIONS":0' "$RUNNER_TEMP/focused.log"
           grep '"PRODUCTION_MUTATIONS":0' "$RUNNER_TEMP/focused.log"
           grep '"PRODUCTION_MODEL_ROUTE_CHANGE":false' "$RUNNER_TEMP/focused.log"
           grep '"PRODUCTION_DEPLOYMENT":false' "$RUNNER_TEMP/focused.log"
+
           npm test
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
