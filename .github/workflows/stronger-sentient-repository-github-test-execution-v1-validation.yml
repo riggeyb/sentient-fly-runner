@@ -60,10 +60,9 @@ jobs:
           SENTIENT_ROOT: ${{ github.workspace }}/sentient
         run: |
           set -euo pipefail
-          (name=$(cd /tmp 2>/dev/null || true))
           (cd sentient && npm install --no-audit --no-fund --package-lock=false)
           (cd sentient && npm run build)
-          ./sentient/node_modules/.bin/tsx operator/validation/repository-github-test-execution-v1.mts 2>&1 | tee "$RUNNER_TEMP/stage7.log"
+          node --experimental-strip-types operator/validation/repository-github-test-execution-v1.mts 2>&1 | tee "$RUNNER_TEMP/stage7.log"
           grep 'REPOSITORY_GITHUB_TEST_EXECUTION_V1_ACCEPTANCE>' "$RUNNER_TEMP/stage7.log"
           grep '"REPOSITORY_INSPECTED":true' "$RUNNER_TEMP/stage7.log"
           grep '"ISOLATED_BRANCH_CREATED":true' "$RUNNER_TEMP/stage7.log"
@@ -77,7 +76,7 @@ jobs:
         run: |
           echo "REPOSITORY_GITHUB_TEST_EXECUTION_V1_VALIDATION=PASS"
           echo "EXACT_SENTIENT_SHA_TREE=PASS"
-          echo "OSERVED_CI_FAILURE_AND_REPAIR=PASS"
+          echo "OBSERVED_CI_FAILURE_AND_REPAIR=PASS"
           echo "REMOTE_TEST_PR_OPEN=true"
           echo "MERGE_RELEASE=false"
           echo "RUNTIME_COGNITION_GITHUB_AUTHORITY=false"
