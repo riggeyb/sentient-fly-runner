@@ -1,0 +1,33 @@
+name: Repository GitHub Test Execution V1 PR CI
+
+on:
+  pull_request:
+    paths:
+      - "validation/stage7-repository-github-test-execution-v1.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout:v4
+        with:
+          fetch-depth: 2
+      - name: Validate bounded Stage 7 test diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${GITHUB_HEAD_REF}" in
+            sentient-stage7-test-*) :;
+            *) echo "unauthorized_stage7_branch:${GITHUB_HEAD_REF}" >&2; exit 1;;
+          esac
+          git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" | sort > "$RUNNER_TEMP/actual"
+          printf '%s\n' 'validation/stage7-repository-github-test-execution-v1.txt' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+          test "$(cat validation/stage7-repository-github-test-execution-v1.txt)" = "SENTIENT_STAGE7_RESULT=VERIFIED"
+          echo "REPOSITORY_GITHUB_TEST_EXECUTION_V1_PR_CI=PASS"
+          echo "RUNTIME_COGNITION_GITHUB_AUTHORITY=false"
+          echo "PRODUCTION_MUTATION=false"
+          echo "MERGE_AUTHORIZED=false"
