@@ -46,14 +46,14 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C director rev-parse HEAD)" = "$DIRECTOR_SHA"
-          test "$(git -C director show -s --format=%T "DIRECTOR_SHA")" = "$DIRECTOR_TREE"
-          test "$(git -C director show -s --format=%T "DIRECTOR_PARENT_SHA")" = "$DIRECTOR_PARENT_TREE"
+          test "$(git -C director show -s --format=%T "$DIRECTOR_SHA")" = "$DIRECTOR_TREE"
+          test "$(git -C director show -s --format=%T "$DIRECTOR_PARENT_SHA")" = "$DIRECTOR_PARENT_TREE"
           git -C director merge-base --is-ancestor "$DIRECTOR_PARENT_SHA" "$DIRECTOR_SHA"
           test "$(git -C sentient rev-parse HEAD)" = "$SENTIENT_SHA"
           test "$(git -C sentient show -s --format=%T HEAD)" = "$SENTIENT_TREE"
           git -C director diff --name-only "$DIRECTOR_PARENT_SHA" "$DIRECTOR_SHA" | sort > "$RUNNER_TEMP/actual"
           printf '%s\n' \
-            app/api/sentient/sandbox-objectives/[objectiveId]/route.ts \
+            'app/api/sentient/sandbox-objectives/[objectiveId]/route.ts' \
             app/api/sentient/sandbox-objectives/route.ts \
             lib/sentient-orchestrator/sandbox-trigger-v1.ts \
             tests/director-cloudflare-sandbox-trigger-v1.test.ts \
@@ -62,7 +62,7 @@ jobs:
           grep -F "$SENTIENT_SHA" director/lib/sentient-orchestrator/sandbox-trigger-v1.ts
           grep -F "$SENTIENT_TREE" director/lib/sentient-orchestrator/sandbox-trigger-v1.ts
           grep -F "sentientMutation" director/app/api/sentient/sandbox-objectives/route.ts
-          grep -F "sentientRead" director/app/api/sentient/sandbox-objectives/[objectiveId]/route.ts
+          grep -F "sentientRead" 'director/app/api/sentient/sandbox-objectives/[objectiveId]/route.ts'
 
       - uses: actions/setup-node@v4
         with:
@@ -85,7 +85,7 @@ jobs:
           grep '"BROWSER_PRIVILEGED_EXECUTION":false' "$RUNNER_TEMP/focused.log"
           grep '"SENTIENT_AUTHORITATIVE_OBJECTIVE_STATE":true' "$RUNNER_TEMP/focused.log"
           grep '"VISIBLE_OBJECTIVE_PROGRESS":true' "$RUNNER_TEMP/focused.log"
-          grep '"VERFIFIED_COMPLETION_RESULT":true' "$RUNNER_TEMP/focused.log"
+          grep '"VERIFIED_COMPLETION_RESULT":true' "$RUNNER_TEMP/focused.log"
           grep '"ISOLATED_EXECUTION":true' "$RUNNER_TEMP/focused.log"
           grep '"PRODUCTION_MUTATION":false' "$RUNNER_TEMP/focused.log"
           grep '"AUTHORITY_EXPANSION":false' "$RUNNER_TEMP/focused.log"
@@ -95,13 +95,25 @@ jobs:
         working-directory: director
         run: npm test
 
+      - name: Accepted Sentient builder proof
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+          node --test dist/test/autonomous-sandbox-software-builder-v1.test.js
+
       - name: Clean source and receipt
         shell: bash
         run: |
           set -euo pipefail
           test "$(git -C director rev-parse HEAD)" = "$DIRECTOR_SHA"
           test "$(git -C director show -s --format=%T HEAD)" = "$DIRECTOR_TREE"
+          test "$(git -C sentient rev-parse HEAD)" = "$SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$SENTIENT_TREE"
           test -z "$(git -C director status --porcelain --untracked-files=no)"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
           echo "DIRECTOR_CLOUDFLARE_SANDBOX_TRIGGER_V1_VALIDATION=PASS"
           echo "DIRECTOR_EXACT_SHA_TREE=PASS"
           echo "SENTIENT_STAGE4_EXACT_SHA_TREE=PASS"
