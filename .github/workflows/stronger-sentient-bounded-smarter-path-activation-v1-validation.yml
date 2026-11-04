@@ -60,7 +60,7 @@ jobs:
           grep '"EXECUTION_AUTHORIZED":false' "$RUNNER_TEMP/focused.log"
           grep '"CONSEQUENTIAL_EFFECTS_AUTHORIZED":false' "$RUNNER_TEMP/focused.log"
           grep '"PROVIDER_CALLS":0' "$RUNNER_TEMP/focused.log"
-          grep '"EZACT_EVIDENCE_RECOVERABILITY":"PASS"' "$RUNNER_TEMP/focused.log"
+          grep '"EXACT_EVIDENCE_RECOVERABILITY":"PASS"' "$RUNNER_TEMP/focused.log"
           npm test
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
