@@ -1,0 +1,108 @@
+name: Stronger Sentient Director Cloudflare Sandbox Trigger V1 Validation V4
+
+on:
+  workflow_dispatch:
+    inputs:
+      director_sha: {required: true, type: string}
+      director_tree: {required: true, type: string}
+      director_parent_sha: {required: true, type: string}
+      director_parent_tree: {required: true, type: string}
+      sentient_sha: {required: true, type: string}
+      sentient_tree: {required: true, type: string}
+permissions:
+  contents: read
+env:
+  DIRECTOR_SHA: ${{ inputs.director_sha }}
+  DIRECTOR_TREE: ${{ inputs.director_tree }}
+  DIRECTOR_PARENT_SHA: ${{ inputs.director_parent_sha }}
+  DIRECTOR_PARENT_TREE: ${{ inputs.director_parent_tree }}
+  SENTIENT_SHA: ${{ inputs.sentient_sha }}
+  SENTIENT_TREE: ${{ inputs.sentient_tree }}
+  SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/director-studio-beta.git director
+          git -C director -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=20 origin "$DIRECTOR_SHA" "$DIRECTOR_PARENT_SHA"
+          git -C director checkout --detach "$DIRECTOR_SHA"
+          git -C director remote set-url origin disabled://director
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$SENTIENT_SHA"
+          git -C sentient checkout --detach "$SENTIENT_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          unset auth
+
+      - name: Guard exact identities and scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C director rev-parse HEAD)" = "$DIRECTOR_SHA"
+          test "$(git -C director show -s --format=%T "$DIRECTOR_SHA")" = "$DIRECTOR_TREE"
+          test "$(git -C director show -s --format=%T "$DIRECTOR_PARENT_SHA")" = "$DIRECTOR_PARENT_TREE"
+          git -C director merge-base --is-ancestor "$DIRECTOR_PARENT_SHA" "$DIRECTOR_SHA"
+          test "$(git -C sentient rev-parse HEAD)" = "$SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$SENTIENT_TREE"
+          git -C director diff --name-only "$DIRECTOR_PARENT_SHA" "$DIRECTOR_SHA" | sort > "$RUNNER_TEMP/actual"
+          printf '%s\n' \
+            app/api/sentient/sandbox-objectives/[objectiveId]/route.ts \
+            app/api/sentient/sandbox-objectives/route.ts \
+            lib/sentient-orchestrator/sandbox-trigger-v1.ts \
+            tests/director-cloudflare-sandbox-trigger-v1.test.ts \
+            tests/sentient-sandbox-trigger-v1.test.ts | sort > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+          grep -F "$SENTIENT_SHA" director/lib/sentient-orchestrator/sandbox-trigger-v1.ts
+          grep -F "$SENTIENT_TREE" director/lib/sentient-orchestrator/sandbox-trigger-v1.ts
+          grep -F "sentientMutation" director/app/api/sentient/sandbox-objectives/route.ts
+          grep -F "sentientRead" director/app/api/sentient/sandbox-objectives/[objectiveId]/route.ts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Director typecheck and focused proofs
+        working-directory: director
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run typecheck
+          node --import tsx --test \
+            tests/director-cloudflare-sandbox-trigger-v1.test.ts \
+            tests/sentient-sandbox-trigger-v1.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/focused.log"
+          grep 'DIRECTOR_CLOUDFLARE_SANDBOX_TRIGGER_V1_ACCEPTANCE>' "$RUNNER_TEMP/focused.log"
+          grep '"AUTHENTICATED_OBJECTIVE_SUBMISSION": true' "$RUNNER_TEMP/focused.log"
+          grep '"SERVER_SIDE_SENTIENT_REQUEST": true' "$RUNNER_TEMP/focused.log"
+          grep '"BROWSER_PRIVILEGED_EXECUTION": false' "$RUNNER_TEMP/focused.log"
+          grep '"SENTIENT_AUTHORITATIVE_OBJECTIVE_STATE": true' "$RUNNER_TEMP/focused.log"
+          grep '"VISIBLE_OBJECTIVE_PROGRESS": true' "$RUNNER_TEMP/focused.log"
+          grep '"VERIFIED_COMPLETION_RESULT": true' "$RUNNER_TEMP/focused.log"
+          grep '"ISOLATED_EXECUTION": true' "$RUNNER_TEMP/focused.log"
+          grep '"PRODUCTION_MUTATION": false' "$RUNNER_TEMP/focused.log"
+          grep '"AUTHORITY_EXPANSION": false' "$RUNNER_TEMP/focused.log"
+          grep '"GOVERNOR_BYPASS": false' "$RUNNER_TEMP/focused.log"
+      - name: Director full test regression
+        working-directory: director
+        run: npm test
+      - name: Clean source and receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git -C director status --porcelain --untracked-files=no)"
+          echo "DIRECTOR_CLOUDFLARE_SANDBOX_TRIGGER_V1_VALIDATION=PASS"
+          echo "EXACT_CORES_IDENTITIE=PASS"
+          echo "STRICT_TYPESCRIPT_BUILD=PASS"
+          echo "DIRECTOR_FULL_REGRESSION=PASS"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+          echo "PRODUCTION_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
