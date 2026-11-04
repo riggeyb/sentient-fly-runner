@@ -1,0 +1,33 @@
+name: Resolve Sentient Ref Identity
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve immutable identity
+        shell: bash
+        env:
+          SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          SOURCE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --filter=blob:none --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$SOURCE_REF"
+          sha="$(git -C sentient rev-parse FETCH_HEAD)"
+          tree="$(git -C sentient show -s --format=%T "$sha")"
+          echo "SOURCE_REF=$SOURCE_REF"
+          echo "SOURCE_SHA=$sha"
+          echo "SOURCE_TREE=$tree"
