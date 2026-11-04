@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: 9abbe86209f2af503885a3ec94cda4ebd321ba91
-  CANDIDATE_TREE: 8e4bec198df34c274fcc1bc145330a030ccb1eb5
+  CANDIDATE_SHA: 0860e5aae3f06c13bf836da0b538288d5116dab0
+  CANDIDATE_TREE: 01ff4f4405735b4f7c71ea7c72f48dc6b6238d06
   PARENT_SHA: 19b1881f8be86d63cf25c6e72af002d83c0bb8f3
   PARENT_TREE: 7849cad0d2db4b465cdead76539deaa5e6d1c781
   VALIDATION_MODE: recursive_cognition_v1
@@ -28,13 +28,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: 9abbe86209f2af503885a3ec94cda4ebd321ba91
+          ref: 0860e5aae3f06c13bf836da0b538288d5116dab0
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           path: sentient
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Guard candidate identity, parent, and Recursive Cognition V1 source scope
+      - name: Guard exact identity and recursive cognition scope
         working-directory: sentient
         shell: bash
         run: |
