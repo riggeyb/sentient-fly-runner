@@ -1,0 +1,96 @@
+name: Director Sandbox Trigger V1 Acceptance V2
+on:
+  workflow_dispatch:
+    inputs:
+      director_sha: {required: true, type: string}
+      director_tree: {required: true, type: string}
+      director_parent_sha: {required: true, type: string}
+      director_parent_tree: {required: true, type: string}
+      sentient_sha: {required: true, type: string}
+      sentient_tree: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      D_SHA: ${{ inputs.director_sha }}
+      D_TREE: ${{ inputs.director_tree }}
+      D_PARENT: ${{ inputs.director_parent_sha }}
+      D_PARENT_TREE: ${{ inputs.director_parent_tree }}
+      S_SHA: ${{ inputs.sentient_sha }}
+      S_TREE: ${{ inputs.sentient_tree }}
+      TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+    steps:
+      - name: Checkout exact sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          for repo in director-studio-beta sentient; do
+            git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout "https://github.com/riggeyb/$repo.git" "$repo"
+          done
+          git -C director-studio-beta -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=30 origin "$D_SHA" "$D_PARENT"
+          git -C director-studio-beta checkout --detach "$D_SHA"
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=2 origin "$S_SHA"
+          git -C sentient checkout --detach "$S_SHA"
+          git -C director-studio-beta remote set-url origin disabled://director
+          git -C sentient remote set-url origin disabled://sentient
+      - name: Fence exact identity lineage scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          d=director-studio-beta
+          test "$(git -C "$d" rev-parse HEAD)" = "$D_SHA"
+          test "$(git -C "$d" show -s --format=%T HEAD)" = "$D_TREE"
+          test "$(git -C "$d" show -s --format=%T "$D_PARENT")" = "$D_PARENT_TREE"
+          git -C "$d" merge-base --is-ancestor "$D_PARENT" "$D_SHA"
+          git -C "$d" diff --name-only "$D_PARENT" "$D_SHA" | sort > /tmp/actual
+          printf '%s\n'             'app/api/sentient/sandbox-objectives/[objectiveId]/route.ts'             'app/api/sentient/sandbox-objectives/route.ts'             'lib/sentient-orchestrator/sandbox-trigger-v1.ts'             'tests/director-cloudflare-sandbox-trigger-v1.test.ts'             'tests/sentient-sandbox-trigger-v1.test.ts' | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test "$(git -C sentient rev-parse HEAD)" = "$S_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$S_TREE"
+          grep -F "$S_SHA" "$d/lib/sentient-orchestrator/sandbox-trigger-v1.ts"
+          grep -F "$S_TREE" "$d/lib/sentient-orchestrator/sandbox-trigger-v1.ts"
+          grep -F sentientMutation "$d/app/api/sentient/sandbox-objectives/route.ts"
+          grep -F sentientRead "$d/app/api/sentient/sandbox-objectives/[objectiveId]/route.ts"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Director strict checks
+        working-directory: director-studio-beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run typecheck
+          npx tsx --test tests/director-cloudflare-sandbox-trigger-v1.test.ts tests/sentient-sandbox-trigger-v1.test.ts 2>&1 | tee /tmp/s5
+          grep 'DIRECTOR_CLOUDFLARE_SANDBOX_TRIGGER_V1_ACCEPTANCE>' /tmp/s5
+          grep '"AUTHENTICATED_OBJECTIVE_SUBMISSION":true' /tmp/s5
+          grep '"BROWSER_PRIVILEGED_EXECUTION":false' /tmp/s5
+          grep '"PRODUCTION_MUTATION":false' /tmp/s5
+          grep '"AUTHORITY_EXPANSION":false' /tmp/s5
+          grep '"GOVERNOR_BYPASS":false' /tmp/s5
+          npm test
+      - name: Accepted builder proof
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+          node --test dist/test/autonomous-sandbox-software-builder-v1.test.js
+      - name: Receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git -C director-studio-beta status --porcelain --untracked-files=no)"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo DIRECTOR_CLOUDFLARE_SANDBOX_TRIGGER_V1_VALIDATION=PASS
+          echo INDEPENDENT_ACCEPTANCE_RESULT=PASS
+          echo PRODUCTION_MUTATION=false
+          echo AUTHORITY_EXPANSION=false
+          echo GOVERNOR_BYPASS=false
+          echo PRODUCTION_DEPLOYMENT=false
