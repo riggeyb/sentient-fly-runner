@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
           auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
-          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --filter=blob:none --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
           git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$CANDIDATE_SHA"
           git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$PARENT_SHA"
           git -C sentient checkout --detach "$CANDIDATE_SHA"
@@ -133,7 +133,7 @@ jobs:
           if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 22; fi
           npm test
 
-      - name: Guard clean source and emit receipt
+      - name: Guard clean source and emit acceptance receipt
         working-directory: sentient
         shell: bash
         run: |
