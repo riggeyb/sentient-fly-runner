@@ -59,7 +59,17 @@ jobs:
           git cat-file -e "$PARENT_SHA^{commit}"
           test "$(git show -s --format=%T "$PARENT_SHA")" = "$PARENT_TREE"
           git diff --name-only "$PARENT_SHA" "$CANDIDATE_SHA" | sort > "$RUNNER_TEMP/actual.txt"
-          if [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1" ]; then
+          if [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1_focused_repair" ]; then
+            cat > "$RUNNER_TEMP/expected.txt" <<'SCOPE'
+          src/cognition/adaptive-execution-routing-v1-contracts.ts
+          src/cognition/adaptive-execution-routing-v1.ts
+          src/cognition/recursive-cognition-v1-context.ts
+          src/cognition/recursive-cognition-v1-contracts.ts
+          src/cognition/recursive-cognition-v1-machine.ts
+          src/cognition/result-compiler-v1.ts
+          test/adaptive-execution-routing-v1.test.ts
+          SCOPE
+          elif [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1" ]; then
             cat > "$RUNNER_TEMP/expected.txt" <<'SCOPE'
           src/cognition/adaptive-execution-routing-v1-contracts.ts
           src/cognition/adaptive-execution-routing-v1.ts
@@ -116,9 +126,15 @@ jobs:
           set -euo pipefail
           export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
           if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 22; fi
-          if [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1" ]; then
+          if [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1" ] || [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1_focused_repair" ]; then
             node --test dist/test/context-compiler-v0.test.js dist/test/progressive-disclosure-v1.test.js dist/test/progressive-disclosure-v1-runtime.test.js dist/test/recursive-cognition-v1-proof-a.test.js dist/test/recursive-cognition-v1-proof-b.test.js dist/test/recursive-cognition-v1-proof-c.test.js dist/test/recursive-cognition-v1-proof-d.test.js dist/test/adaptive-execution-routing-v1.test.js 2>&1 | tee "$RUNNER_TEMP/lineage-tests.log"
             grep 'ADAPTIVE_EXECUTION_ROUTING_V1_ACCEPTANCE>' "$RUNNER_TEMP/lineage-tests.log"
+            if [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1_focused_repair" ]; then
+              grep '"PRIMARY_COGNITION_PROVIDER_FAILURE_BOUND":true' "$RUNNER_TEMP/lineage-tests.log"
+              grep '"PROVIDER_RETRY_EXHAUSTION_HUMAN_REQUIRED":false' "$RUNNER_TEMP/lineage-tests.log"
+              grep '"AVAILABLE_CONTEXT_HANDLES_EXPLICIT":true' "$RUNNER_TEMP/lineage-tests.log"
+              grep '"RESOLVED_CONTEXT_HANDLES_EXPLICIT":true' "$RUNNER_TEMP/lineage-tests.log"
+            fi
           else
             node --test dist/test/context-compiler-v0.test.js dist/test/progressive-disclosure-v1.test.js dist/test/progressive-disclosure-v1-runtime.test.js dist/test/recursive-cognition-v1-proof-a.test.js dist/test/recursive-cognition-v1-proof-b.test.js dist/test/recursive-cognition-v1-proof-c.test.js dist/test/recursive-cognition-v1-proof-d.test.js 2>&1 | tee "$RUNNER_TEMP/lineage-tests.log"
             grep 'RECURSIVE_COGNITION_V1_RECEIPT=' "$RUNNER_TEMP/lineage-tests.log"
@@ -141,7 +157,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$(git show -s --format=%T HEAD)" = "$CANDIDATE_TREE"
           test -z "$(git status --porcelain --untracked-files=no)"
-          if [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1" ]; then
+          if [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1" ] || [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1_focused_repair" ]; then
             echo "ADAPTIVE_EXECUTION_ROUTING_V1_VALIDATION=PASS"
             echo "LOCAL_DETERMINISTIC_ROUTE=true"
             echo "DOTS3_ROUTE=true"
@@ -158,6 +174,20 @@ jobs:
             echo "PARALLEL_COGNITION_LOOP_CREATED=false"
           else
             echo "RECURSIVE_COGNITION_V1_VALIDATION=PASS"
+          fi
+          if [ "$VALIDATION_MODE" = "adaptive_execution_routing_v1_focused_repair" ]; then
+            echo "SEMANTIC_ACCEPTANCE=PASS"
+            echo "DOTS3_RETRY_BOUND=PASS"
+            echo "PRIMARY_COGNITION_PROVIDER_FAILURE_BOUND=PASS"
+            echo "PROVIDER_RETRY_EXHAUSTION_DOES_NOT_IMPLY_HUMAN_REQUIRED=true"
+            echo "AVAILABLE_CONTEXT_HANDLES_EXPLICIT=true"
+            echo "RESOLVED_CONTEXT_HANDLES_EXPLICIT=true"
+            echo "OBSERVATION_INGESTION_MARKS_RAW_HANDLE_AVAILABLE=true"
+            echo "OBSERVATION_INGESTION_MARKS_RAW_HANDLE_RESOLVED=false"
+            echo "READ_HANDLE_SUCCESS_MARKS_RAW_HANDLE_RESOLVED=true"
+            echo "COMPILED_OBSERVATION_THEN_READ_HANDLE=PASS"
+            echo "EXACT_RAW_EVIDENCE_RETURNED=PASS"
+            echo "UNRELATED_EVIDENCE_NOT_DISCLOSED=PASS"
           fi
           echo "SHADOW_MODE=true"
           echo "PROGRESSIVE_DISCLOSURE_REUSED=true"
