@@ -1,0 +1,99 @@
+name: Stronger Sentient Real End-to-End Creation Tests V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      director_sha: {required: true, type: string}
+      director_tree: {required: true, type: string}
+      sentient_sha: {required: true, type: string}
+      sentient_tree: {required: true, type: string}
+
+permissions:
+  contents: read
+
+env:
+  DIRECTOR_SHA: ${{ inputs.director_sha }}
+  DIRECTOR_TREE: ${{ inputs.director_tree }}
+  SENTIENT_SHA: ${{ inputs.sentient_sha }}
+  SENTIENT_TREE: ${{ inputs.sentient_tree }}
+  SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: operator
+
+      - name: Checkout exact Director and Sentient sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-tokel:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/director-studio-beta.git director
+          git -C director -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$DIRECTOR_SHA"
+          git -C director checkout --detach "$DIRECTOR_SHA"
+          git -C director remote set-url origin disabled://director
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$SENTIENT_SHA"
+          git -C sentient checkout --detach "$SENTIENT_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          unset auth
+          test "$(git -C director rev-parse HEAD)" = "$DIRECTOR_SHA"
+          test "$(git -C director show -s --format=%T HEAD)" = "$DIRECTOR_TREE"
+          test "$(git -C sentient rev-parse HEAD)" = "$SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$SENTIENT_TREE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install exact-source dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd director && npm install --no-audit --no-fund --package-lock=false)
+          (cd sentient && npm install --no-audit --no-fund --package-lock=false)
+          (cd director && npm run typecheck)
+          (cd sentient && npm run build)
+
+      - name: Run real Director-to-Sentient creation objectives
+        shell: bash
+        env:
+          DIRECTOR_ROOT: ${{ github.workspace }}/director
+          SENTIENT_ROOT: ${{ github.workspace }}/sentient
+        run: |
+          set -euo pipefail
+          ./director/node_modules/.bin/tsx operator/scripts/real-end-to-end-creation-tests-v1.ts 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          grep 'REAL_END_TO_END_CREATION_TESTS_V1_ACCEPTANCE>' "$RUNNER_TEMP/e2e.log"
+          grep '"OBJECTIVES_ATTEMPTED":3' "$RUNNER_TEMP/e2e.log"
+          grep '"OBJECTIVES_COMPLETED":3' "$RUNNER_TEMP/e2e.log"
+          grep '"VERIFIED_SUCCESS_RATE":1' "$RUNNER_TEMP/e2e.log"
+          grep '"REPAIR_CYCLES":3' "$RUNNER_TEMP/e2e.log"
+          grep '"UNPRODUCTIVE_RECURSION":0' "$RUNNER_TEMP/e2e.log"
+          grep '"WRONG_ROUTE_RATE":0' "$RUNNER_TEMP/e2e.log"
+          grep '"PRIMARY_COGNITION_CALLS":0' "$RUNNER_TEMP/e2e.log"
+          grep '"PROVIDER_COST":0' "$RUNNER_TEMP/e2e.log"
+          grep '"HUMAN_INTERVENTIONS_REQUIRED":0' "$RUNNER_TEMP/e2e.log"
+          grep '"AUTHORITY_VIOLATIONS":0' "$RUNNER_TEMP/e2e.log"
+          grep '"TERMINAL_FAILURES":0' "$RUNNER_TEMP/e2e.log"
+          grep '"PRODUCTION_MUTATIONS":0' "$RUNNER_TEMP/e2e.log"
+          grep '"WRITEBPACK_POLICY":"NONE"' "$RUNNER_TEMP/e2e.log"
+          grep '"PRODUCTION_DEPLOYMENT":false' "$RUNNER_TEMP/e2e.log"
+
+      - name: Guard accepted sources unchanged and emit receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git -C director status --porcelain --untracked-files=no)"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo "REAL_END_TO_END_CREATION_TESTS_V1_VALIDATION=PASS"
+          echo "EXACT_DIRECTOR_STAGE5_IDENTITY=PASS"
+          echo "EXACT_SENTIENT_STAGE4_IDENTITY=PASS"
+          echo "PRODUCTION_MUTATION=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
