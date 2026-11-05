@@ -1,0 +1,59 @@
+name: Gate 2 Atlas Kimi Compatibility Audit
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ATLAS_TELEMETRY: "0"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Atlas Cloud CLI
+        run: npm install -g atlascloud-cli
+
+      - name: Authenticate for zero-cost model discovery
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ATLASCLOUD_API_KEY"
+          atlas auth login --token "$ATLASCLOUD_API_KEY" >/dev/null
+
+       - name: Get Kimi K3.1 Pro model metadata only
+        run: |
+          set -euo pipefail
+          atlas models get moonshotai/kimi-k3.1-pro --json > kimi-k3.1-pro-model.json
+          test -s kimi-k3.1-pro-model.json
+          jq '. | {
+id: (.id // .model_id // .name),
+supported_apis: (.supported_apis // .apis // .protocols),
+capabilities: (.capabilities // .features),
+supported_sampling_parameters: (.supported_sampling_parameters // .sampling_parameters),
+parameters: (.parameters // .schema ?? null)
+}' kimi-k3.1-pro-model.json
+          echo "MODEL_DISCOVERY_ONLY=true"
+          echo "PAID_PROVIDER_CALLS=0"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gate2-atlas-kimi-compatibility
+          path: kimi-k3.1-pro-model.json
+
+      - name: Reassert no-spend boundary
+        run: |
+          echo "STOP_PAID_COGNITION=true"
+          echo "GATE_3_AUTHORIZED=false"
+          echo "GATE_3_PROVIDER_CALLS_STARTED=0"
+          echo "GATE_3_PROVIDER_SPEND_USD=0"
