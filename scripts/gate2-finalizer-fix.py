@@ -1,4 +1,11 @@
 from pathlib import Path
+runtime=Path("gate2-second-runtime.mjs")
+rs=runtime.read_text()
+if '"../sentient/' in rs:
+    rs=rs.replace('"../sentient/','"./sentient/')
+if '"./sentient/' not in rs:
+    raise SystemExit("missing corrected second-runtime Sentient import")
+runtime.write_text(rs)
 p=Path("scripts/gate2-finalize-second-call.mjs")
 s=p.read_text()
 for bad in ("p[k]==?0","finishReasonCaptured:!!c.finishReasonlrawResponseEvidencePreserved"):
@@ -15,3 +22,4 @@ for anchor in required:
     if anchor not in s:
         raise SystemExit("missing corrected finalizer anchor: "+anchor)
 print("GATE2_FINALIZER_FIX=PASS_ALREADY_CORRECT")
+print("GATE2_SECOND_RUNTIME_IMPORT_FIX=PASS")
