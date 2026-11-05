@@ -1,0 +1,58 @@
+name: Gate 2 Zero-Cost Evidence Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gate2-live-cognition-artifact-quality-final
+          path: evidence
+          run-id: 42047845592
+          github-token: ${{ github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Inspect artifact structure without provider calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require("fs"),crypto=require("crypto");
+          const text=fs.readFileSync("evidence/gate2-model-text.txt","utf8");
+          const digest="sha256:"+crypto.createHash("sha256").update(text).digest("hex");
+          let a=null;
+          try{a=JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,""))}catch{}
+          console.log("MODEL_TEXT_DIGEST="+digest);
+          console.log("MODEL_TEXT_BYTES="+Buffer.byteLength(text));
+          console.log("ARTIFACT_JSON_PARSE="+(a?"PASS":"FAIL"));
+          if(a){
+            console.log("TOP_LEVEL_KEYS="+JSON.stringify(Object.keys(a)));
+            console.log("TOOL_RECOMMENDATIONS_VALUE="+JSON.stringify(a.toolRecommendations));
+            console.log("TOOL_RECOMMENDATIONS_IS_ARRAY="+Array.isArray(a.toolRecommendations));
+            if(Array.isArray(a.toolRecommendations)){
+              console.log("TOOL_RECOMMENDATION_ITEM_KEYS="+JSON.stringify(a.toolRecommendations.map(x=>x&&typeof x==="object"?Object.keys(x):typeof x)));
+              console.log("TOOL_RECOMMENDATION_ITEM_TYPES="+JSON.stringify(a.toolRecommendations.map(x=>({item:typeof x,tool:typeof x?.tool,rationale:typeof x?.rationale}))));
+            }
+          }
+          const r=JSON.parse(fs.readFileSync("evidence/gate2-receipt.json","utf8"));
+          console.log("LIVE_VALIDATION_ERRORS="+JSON.stringify(r.validationErrors??null));
+          console.log("LIVE_FINISH_REASON="+JSON.stringify(r.finishReason));
+          console.log("LIVE_OUTPUT_TOKENS="+r.providerBilledOutputTokens);
+          console.log("LIVE_SECOND_CALL_SPEND_USD="+r.secondCallProviderSpendUsd);
+          const f=JSON.parse(fs.readFileSync("evidence/gate2-receipt-final.json","utf8"));
+          console.log("FINAL_GATE_RESULT="+f.gateResult);
+          console.log("FINAL_TERMINAL_STATE="+f.terminalState);
+          console.log("FINAL_GATE2_SPEND_USD="+f.actualProviderSpendUsd);
+          console.log("FINAL_CUMULATIVE_PILOT_SPEND_USD="+f.cumulativePilotProviderSpendUsd);
+          NODE
+          echo "PROVIDER_CALLS=0"
+          echo "ZERO_COST_AUDIT=PASS"
