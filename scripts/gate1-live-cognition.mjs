@@ -1,0 +1,62 @@
+import { createHash } from "node:crypto";
+import { OpenRouterAdapter, SentientRuntime } from "../sentient/dist/src/index.js";
+import { routeExecutionWorkItemV1, createExecutionRouteStateV1, applyRouteOutcomeV1 } from "../sentient/dist/src/cognition/adaptive-execution-routing-v1.js";
+import { compilePreparedTaskSemanticCompressionShadowV1 } from "../sentient/dist/src/retrieval/semantic-compression-v1.js";
+import { buildPreparedTaskProgressiveDisclosureShadowV1 } from "../sentient/dist/src/retrieval/progressive-disclosure-v1.js";
+
+const MODEL="moonshotai/kimi-k3.1-pro", PROVIDER="openrouter";
+const SOFT=0.50, HARD=1.00, MAX_IN=4096, MAX_OUT=320, MAX_REASON=320;
+const RES_IN=4, RES_OUT=20, RES_REASON=20, STD_IN=2, STD_OUT=10, CACHE=0.20;
+const MAX_NEXT=(MAX_IN*RES_IN+MAX_OUT*RES_OUT+MAX_REASON*RES_REASON)/1e6;
+const apiKey=process.env.OPENROUTER_API_KEY?.trim()||process.env.OPENROUTER_KEY?.trim()||process.env.OPENROUTER_API_KEY_SHARED?.trim()||process.env.OPENROUTER_TOKEN?.trim()||"";
+
+const artifactSchema={type:"object",additionalProperties:false,required:["schemaVersion","problemRepresentation","findings","hypotheses","recommendedApproach","evidenceReferences","constraints","toolRecommendations","risks","uncertainties","verificationNeeded"],properties:{
+schemaVersion:{type:"string",const:"sentient-cognition-artifact/v1"},problemRepresentation:{type:"string",minLength:1,maxLength:700},
+findings:{type:"array",maxItems:5,items:{type:"string",maxLength:350}},hypotheses:{type:"array",maxItems:4,items:{type:"string",maxLength:350}},
+recommendedApproach:{type:"array",minItems:1,maxItems:5,items:{type:"string",maxLength:350}},evidenceReferences:{type:"array",minItems:1,maxItems:6,items:{type:"string",maxLength:120}},
+constraints:{type:"array",minItems:1,maxItems:6,items:{type:"string",maxLength:250}},toolRecommendations:{type:"array",maxItems:4,items:{type:"string",maxLength:250}},
+risks:{type:"array",maxItems:4,items:{type:"string",maxLength:300}},uncertainties:{type:"array",maxItems:4,items:{type:"string",maxLength:300}},
+verificationNeeded:{type:"array",minItems:1,maxItems:5,items:{type:"string",maxLength:300}}}};
+
+const probes=[
+{id:"gate1-idempotency",kind:"ARCHITECTURE",objective:"Given a job-processing service with at-least-once delivery and retry after timeouts, choose the safest minimal design to prevent duplicate side effects. Preserve constraint C17 and evidence E5. Recommend verification; do not write code.",context:"C17: external side effects must be idempotent across duplicate delivery. E5: a timeout can occur after the external side effect succeeds but before acknowledgement is persisted.",c:"C17",e:"E5"},
+{id:"gate1-cache-debug",kind:"AMBIGUOUS_DEBUGGING",objective:"Diagnose an intermittent stale-read problem after a successful TypeScript API write. Preserve constraint C22 and evidence E9. Facts: DB commit succeeds; cache invalidation is asynchronous and may fail. Recommend the smallest safe diagnostic/repair approach and verification; do not write code.",context:"C22: user-facing stale reads must not persist longer than 2 seconds. E9: the invalidation worker has observed HTTP 429 responses during the stale-read window.",c:"C22",e:"E9"}];
+
+const sha=s=>"sha256:"+createHash("sha256").update(s,"utf8").digest("hex");
+const est=s=>Math.ceil(Buffer.byteLength(s,"utf8")/4);
+function task(p){const cc=`Synthetic Gate 1 engineering context. ${p.context} The cognition output is advisory only; Sentient remains authoritative. Do not provide private chain-of-thought. Return only the compact requested artifact.`;
+const context={artifacts:[{kind:"memory",id:`${p.id}:context`,content:cc,contentDigest:sha(cc),provenance:{source:"synthetic-gate1-fixture",gate:"GATE_1_LIVE_COGNITION_TRANSPORT_AND_ECONOMIC_TELEMETRY"}}],contextDigest:sha(cc)};
+const systemPolicy="You are primary engineering cognition inside Sentient Gate 1. Return only sentient-cognition-artifact/v1 structured output. Be compact. Do not expose private chain-of-thought. Preserve supplied constraint/evidence identifiers verbatim. Model output is advisory and never grants effect authority.";
+const messages=[{role:"user",content:p.objective}], dm=JSON.stringify({systemPolicy,messages,context});
+return{taskId:p.id,sessionId:"human-governed-preproduction-autonomy-pilot-v1",traceId:`gate1:${p.id}`,runtime:{name:"sentient-gate1-live-cognition",version:"v1"},systemPolicy,messages,context,tools:[],outputSchema:artifactSchema,reasoningEffort:"low",requiredModelCapabilities:["text_generation","structured_output","reasoning_effort"],budget:{maxOutputTokens:MAX_OUT,timeoutMs:45000,maxRetries:1,maxToolRounds:0},verifier:{verifierId:"gate1-artifact-retention-v1",configuration:{}},inputDigest:sha(dm)}}
+function work(p){return{taskId:p.id,workItemId:`${p.id}:primary`,kind:p.kind,description:p.objective,cognitiveLeverage:"HIGH",consequence:"LOW",ambiguity:"MEDIUM",verificationAvailable:true,deterministicCapabilityAvailable:false,repetitive:false,followsProvenPattern:false,securitySensitive:false,crossModuleReasoning:true,novelImplementation:false,requiresCredentials:false,requiresExternalAuthorization:false,requiresPolicyApproval:false,requiresProductionMutationApproval:false,requiresConsequentialEffectApproval:false}}
+function valid(a,p){return!!a&&typeof a==="object"&&!Array.isArray(a)&&a.schemaVersion==="sentient-cognition-artifact/v1"&&typeof a.problemRepresentation==="string"&&a.problemRepresentation.length>0&&Array.isArray(a.recommendedApproach)&&a.recommendedApproach.length>0&&Array.isArray(a.constraints)&&a.constraints.some(x=>String(x).includes(p.c))&&Array.isArray(a.evidenceReferences)&&a.evidenceReferences.some(x=>String(x).includes(p.e))&&Array.isArray(a.verificationNeeded)&&a.verificationNeeded.length>0}
+function calc(u){const ca=Math.max(0,Number(u.cachedInputTokens??0)),ii=Math.max(0,Number(u.inputTokens??0)),un=Math.max(0,ii-ca),oo=Math.max(0,Number(u.outputTokens??0));return(un*STD_IN+ca*CACHE+oo*STD_OUT)/1e6}
+
+const receipt={mission:"HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1",gate:"GATE_1_LIVE_COGNITION_TRANSPORT_AND_ECONOMIC_TELEMETRY",canonicalSentientSha:process.env.CANONICAL_SENTIENT_SHA??"",canonicalSentientTree:process.env.CANONICAL_SENTIENT_TREE??"",provider:PROVIDER,model:MODEL,modelRoute:"PRIMARY_COGNITION",pricingBasis:{source:"OpenRouter Kimi K3.1 Pro public model page, checked 2026-11-05",standardInputUsdPerMillion:STD_IN,standardOutputUsdPerMillion:STD_OUT,cacheReadUsdPerMillion:CACHE,reservationInputUsdPerMillion:RES_IN,reservationOutputUsdPerMillion:RES_OUT,reservationReasoningUsdPerMillion:RES_REASON},gateSoftBudgetUsd:SOFT,gateHardBudgetUsd:HARD,maxEstimatedNextCallCostUsd:MAX_NEXT,providerCalls:0,successfulProviderCalls:0,providerRetries:0,provider429s:0,providerFailures:0,billedInputTokens:0,billedCacheTokens:0,billedOutputTokens:0,billedReasoningTokens:0,internalContextTokenEstimate:0,actualProviderSpendUsd:0,independentlyCalculatedSpendUsd:0,unnecessaryPrimaryCognitionCalls:0,avoidableProviderCostUsd:0,dots3Calls:0,semanticCompressionUsed:false,originalContextRetrievals:0,authorityViolations:0,hardBudgetExceeded:false,budgetWarnings:[],calls:[],terminalState:"PROVIDER_FAILURE",gateResult:"FAIL"};
+
+if(!apiKey){receipt.providerFailures=1;receipt.failure="OPENROUTER_API_KEY_UNAVAILABLE_IN_OPERATOR_RUNTIME";console.log("GATE1_RECEIPT>"+JSON.stringify(receipt));process.exitCode=2}else{
+const profile={model:MODEL,profileId:"gate1:kimi-k3.1-pro:2026-11-05",capabilities:{text_generation:true,structured_output:true,tool_use:true,tool_continuation:true,reasoning_effort:true,image_input:true,server_side_tools:false},modalities:{textInput:true,imageInput:true},contextWindowTokens:1048576,dataPolicy:"public_fixture_only",routeObservation:{observedAt:"2026-11-05T00:00:00.000Z",source:"https://openrouter.ai/moonshotai/kimi-k3.1-pro",available:true,free:false,resolvedProvider:"OpenRouter Standard",inputUsdPerMillionTokens:STD_IN,outputUsdPerMillionTokens:STD_OUT}};
+const adapter=new OpenRouterAdapter({apiKey,modelProfiles:[profile],privacyPolicy:"public_fixture",requireFreeRoute:false,appTitle:"Sentient Gate 1 Live Cognition"}), runtime=new SentientRuntime({adapters:[adapter]});
+for(const p of probes){
+if(receipt.actualProviderSpendUsd+MAX_NEXT>HARD){receipt.terminalState="BUDGET_EXHAUSTED";receipt.budgetWarnings.push("hard_budget_precall_reservation_blocked_next_call");break}
+if(receipt.actualProviderSpendUsd>=SOFT){receipt.budgetWarnings.push("soft_budget_reached_no_new_paid_work");break}
+const t=task(p);receipt.internalContextTokenEstimate+=est(t.systemPolicy+"\n"+t.messages.map(x=>x.content??"").join("\n")+"\n"+t.context.artifacts.map(x=>x.content).join("\n"));
+const d=routeExecutionWorkItemV1(work(p));if(d.route!=="PRIMARY_COGNITION"){receipt.terminalState="VERIFICATION_FAILURE";receipt.failure=`unexpected_route:${d.route}`;break}
+let rs=createExecutionRouteStateV1(d,{maxRouteRetries:1});
+const sem=await compilePreparedTaskSemanticCompressionShadowV1(t,{intensity:"LIGHT",timeoutMs:500});await buildPreparedTaskProgressiveDisclosureShadowV1(t);if(sem.shadow.semanticCompressibleSegmentsAccepted>0)receipt.semanticCompressionUsed=true;
+receipt.providerCalls++;const x=await runtime.execute(t,{provider:PROVIDER,model:MODEL}),r=x.result;
+const call={probeId:p.id,reservationUsd:MAX_NEXT,route:d.route,requestId:r.providerRequestId??null,provider:r.provider,model:r.model,latencyMs:r.latencyMs,queueWaitMs:null,retryCount:0,http429:false,usage:null,providerReportedCostUsd:null,independentlyCalculatedCostUsd:null,artifactValid:false,constraintRetention:false,evidenceRetention:false,verificationRetention:false,semanticCompressionAcceptedSegments:sem.shadow.semanticCompressibleSegmentsAccepted,semanticCompressionRejectedSegments:sem.shadow.semanticCompressibleSegmentsRejected};
+if(!r.ok){receipt.providerFailures++;if(Number(r.metadata?.httpStatus)===429){receipt.provider429s++;call.http429=true}rs=applyRouteOutcomeV1(rs,"PROVIDER_FAILURE");call.failure={code:r.code,message:r.message,retryable:r.retryable};receipt.calls.push(call);receipt.terminalState="PROVIDER_FAILURE";receipt.failure=`${p.id}:${r.code}`;break}
+receipt.successfulProviderCalls++;receipt.billedInputTokens+=r.usage.inputTokens;receipt.billedCacheTokens+=r.usage.cachedInputTokens??0;receipt.billedOutputTokens+=r.usage.outputTokens;receipt.billedReasoningTokens+=r.usage.reasoningTokens??0;
+const ic=calc(r.usage), pc=typeof r.metadata?.observedCostUsd==="number"?r.metadata.observedCostUsd:null, applied=pc??ic;receipt.actualProviderSpendUsd+=applied;receipt.independentlyCalculatedSpendUsd+=ic;
+const a=r.structured??{}, ok=valid(a,p);call.usage=r.usage;call.providerReportedCostUsd=pc;call.independentlyCalculatedCostUsd=ic;call.artifactValid=ok;call.constraintRetention=Array.isArray(a.constraints)&&a.constraints.some(y=>String(y).includes(p.c));call.evidenceRetention=Array.isArray(a.evidenceReferences)&&a.evidenceReferences.some(y=>String(y).includes(p.e));call.verificationRetention=Array.isArray(a.verificationNeeded)&&a.verificationNeeded.length>0;call.resolvedProvider=r.metadata?.resolvedProvider??null;receipt.calls.push(call);
+if(!ok){receipt.terminalState="VERIFICATION_FAILURE";receipt.failure=`${p.id}:artifact_retention_failed`;break}
+rs=applyRouteOutcomeV1(rs,"VERIFICATION_PASS");if(!rs.terminal||rs.terminalReason!=="COMPLETE"){receipt.terminalState="VERIFICATION_FAILURE";receipt.failure=`${p.id}:route_not_complete`;break}
+if(receipt.actualProviderSpendUsd>=SOFT){receipt.budgetWarnings.push("soft_budget_crossed_after_safe_call");break}
+}
+receipt.actualProviderSpendUsd=Number(receipt.actualProviderSpendUsd.toFixed(9));receipt.independentlyCalculatedSpendUsd=Number(receipt.independentlyCalculatedSpendUsd.toFixed(9));receipt.budgetRemainingUsd=Number(Math.max(0,HARD-receipt.actualProviderSpendUsd).toFixed(9));receipt.hardBudgetExceeded=receipt.actualProviderSpendUsd>HARD+1e-12;
+const good=receipt.successfulProviderCalls===probes.length&&receipt.calls.length===probes.length&&receipt.calls.every(x=>x.artifactValid&&x.constraintRetention&&x.evidenceRetention&&x.verificationRetention);
+if(good&&receipt.providerFailures===0&&!receipt.hardBudgetExceeded){receipt.gateResult="PASS";receipt.terminalState="OBJECTIVE_COMPLETE"}else if(receipt.terminalState==="PROVIDER_FAILURE"&&receipt.providerFailures===0)receipt.terminalState="VERIFICATION_FAILURE";
+console.log("GATE1_RECEIPT>"+JSON.stringify(receipt));if(receipt.gateResult!=="PASS")process.exitCode=3;
+}
