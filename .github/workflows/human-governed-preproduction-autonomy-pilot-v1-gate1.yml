@@ -53,70 +53,111 @@ jobs:
           npm install --no-audit --no-fund --package-lock=false
           npm run build
 
-      - name: Zero-cost syntax and economic admission check
+      - name: Zero-cost syntax, transport wiring, and economic admission check
         shell: bash
         run: |
           set -euo pipefail
-          node --check scripts/gate1-live-cognition.mjs
+          node --check scripts/gate1-live-cognition-v2.mjs
           python - <<'PY'
           from pathlib import Path
-          s=Path("scripts/gate1-live-cognition.mjs").read_text()
+          s=Path("scripts/gate1-live-cognition-v2.mjs").read_text()
           assert 'const SOFT=0.50, HARD=1.00' in s
           assert 'MAX_IN=4096, MAX_OUT=320, MAX_REASON=320' in s
+          assert 'MAX_INPUT_RATE=4.00, MAX_OUTPUT_RATE=30.177, MAX_REASON_RATE=30.177' in s
           assert 'if(receipt.actualProviderSpendUsd+MAX_NEXT>HARD)' in s
-          print("ZERO_COST_GATE1_ADMISSION=PASS")
+          print("ZERO_COST_GATE1_ADMISSION_SOURCE=PASS")
           PY
           node - <<'NODE'
-          const MAX_IN=4096, MAX_OUT=320, MAX_REASON=320, RES_IN=4, RES_OUT=20, RES_REASON=20;
-          const maxNext=(MAX_IN*RES_IN+MAX_OUT*RES_OUT+MAX_REASON*RES_REASON)/1e6;
-          if (Math.abs(maxNext-0.029184)>1e-12) throw new Error("reservation mismatch");
-          if (maxNext*2>0.50) throw new Error("planned exposure crosses soft budget");
-          if (maxNext*2>1.00) throw new Error("planned exposure crosses hard budget");
+          const maxNext=(4096*4+320*30.177+320*30.177)/1e6;
+          if(Math.abs(maxNext-0.03569728)>1e-12)throw new Error("reservation mismatch");
+          if(maxNext*2>0.50)throw new Error("maximum planned exposure crosses soft budget");
+          if(maxNext*2>1.00)throw new Error("maximum planned exposure crosses hard budget");
           console.log(JSON.stringify({maxEstimatedNextCallCostUsd:maxNext,maximumPlannedExposureUsd:maxNext*2,providerCalls:0}));
           NODE
+          set +e
+          OPENROUTER_API_KEY= node scripts/gate1-live-cognition-v2.mjs > "$RUNNER_TEMP/gate1-nokey.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 2
+          grep 'OPENROUTER_API_KEY_UNAVAILABLE' "$RUNNER_TEMP/gate1-nokey.log"
+          echo "ZERO_COST_NO_KEY_TRANSPORT_PREFLIGHT=PASS"
 
       - name: Live cognition within Gate 1 envelope
+        id: live
         shell: bash
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
-          OPENROUTER_API_KEY_SHARED: ${{ secrets.OPENROUTER_API_KEY_SHARED }}
-          OPENROUTER_TOKEN: ${{ secrets.OPENROUTER_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.OPENROUTER_KEY || secrets.OPENROUTER_API_KEY_SHARED || secrets.OPENROUTER_TOKEN }}
         run: |
           set -euo pipefail
-          node scripts/gate1-live-cognition.mjs | tee "$RUNNER_TEMP/gate1-live.log"
+          set +e
+          node scripts/gate1-live-cognition-v2.mjs 2>&1 | tee "$RUNNER_TEMP/gate1-live.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "$status" > "$RUNNER_TEMP/gate1-live-status.txt"
           grep '^GATE1_RECEIPT>' "$RUNNER_TEMP/gate1-live.log" > "$RUNNER_TEMP/gate1-receipt-line.txt"
+          echo "live_exit_code=$status"
 
-      - name: Independently validate Gate 1 receipt
+      - name: Independently validate and enrich Gate 1 receipt
         shell: bash
         run: |
           set -euo pipefail
           node - "$RUNNER_TEMP/gate1-receipt-line.txt" <<'NODE'
           const fs=require("fs");
           const line=fs.readFileSync(process.argv[2],"utf8").trim();
+          if(!line.startsWith("GATE1_RECEIPT>"))throw new Error("missing Gate 1 receipt");
           const r=JSON.parse(line.slice("GATE1_RECEIPT>".length));
-          const same=(k,v)=>{if(r[k]!==v)throw new Error(`${k}=${JSON.stringify(r[k])} expected ${JSON.stringify(v)}`)};
-          same("gateResult","PASS");
-          same("terminalState","OBJECTIVE_COMPLETE");
-          same("canonicalSentientSha",process.env.CANONICAL_SENTIENT_SHA);
-          same("canonicalSentientTree",process.env.CANONICAL_SENTIENT_TREE);
-          same("provider","openrouter");
-          same("model","moonshotai/kimi-k3.1-pro");
-          same("providerCalls",2);
-          same("successfulProviderCalls",2);
-          same("providerFailures",0);
-          same("providerRetries",0);
-          same("hardBudgetExceeded",false);
-          same("authorityViolations",0);
+          const eq=(k,v)=>{if(r[k]!==v)throw new Error(`${k}=${JSON.stringify(r[k])} expected ${JSON.stringify(v)}`)};
+          eq("canonicalSentientSha",process.env.CANONICAL_SENTIENT_SHA);
+          eq("canonicalSentientTree",process.env.CANONICAL_SENTIENT_TREE);
+          eq("provider","openrouter");
+          eq("model","moonshotai/kimi-k3.1-pro");
+          eq("modelRoute","PRIMARY_COGNITION");
+          eq("gateSoftBudgetUsd",0.50);
+          eq("gateHardBudgetUsd",1.00);
+          if(Math.abs(r.maxEstimatedNextCallCostUsd-0.03569728)>1e-12)throw new Error("incorrect worst-case pre-call reservation");
           if(!(r.actualProviderSpendUsd<=1.00))throw new Error("hard budget exceeded");
-          if(!(r.maxEstimatedNextCallCostUsd<=1.00))throw new Error("reservation exceeds hard budget");
-          if(!r.calls.every(c=>c.requestId&&c.artifactValid&&c.constraintRetention&&c.evidenceRetention&&c.verificationRetention))throw new Error("call telemetry/artifact retention incomplete");
-          if(!r.calls.every(c=>Number.isFinite(c.latencyMs)&&c.usage&&Number.isFinite(c.independentlyCalculatedCostUsd)))throw new Error("usage/cost telemetry incomplete");
-          console.log("GATE_1_LIVE_COGNITION_TRANSPORT_AND_ECONOMIC_TELEMETRY_VALIDATION=PASS");
-          console.log("GATE1_ACCEPTED_RECEIPT>"+JSON.stringify(r));
+          if(r.hardBudgetExceeded)throw new Error("hard budget exceeded flag");
+          if(r.providerRetries!==0)throw new Error("unexpected provider retries");
+          if(r.authorityViolations!==0)throw new Error("authority violation");
+          if(r.gateResult==="PASS"){
+            eq("terminalState","OBJECTIVE_COMPLETE");
+            eq("providerCalls",2);
+            eq("successfulProviderCalls",2);
+            eq("providerFailures",0);
+            if(!(r.billedInputTokens>0&&r.billedOutputTokens>0))throw new Error("provider token telemetry missing");
+            if(!r.calls.every(c=>c.requestId&&c.usage&&Number.isFinite(c.latencyMs)&&Number.isFinite(c.providerReportedCostUsd)))throw new Error("provider call telemetry incomplete");
+            if(!r.calls.every(c=>c.artifactValid&&c.constraintRetention&&c.evidenceRetention&&c.verificationRetention))throw new Error("artifact retention failed");
+            const sum=r.calls.reduce((n,c)=>n+c.providerReportedCostUsd,0);
+            if(Math.abs(sum-r.actualProviderSpendUsd)>1e-6)throw new Error("provider cost ledger mismatch");
+          }
+          const latencies=r.calls.filter(c=>Number.isFinite(c.latencyMs)).map(c=>c.latencyMs);
+          const enriched={
+            ...r,
+            tokenAccountingSources:{
+              billedInput:"PROVIDER_REPORTED",
+              billedCache:"PROVIDER_REPORTED",
+              billedOutput:"PROVIDER_REPORTED",
+              billedReasoning:"PROVIDER_REPORTED",
+              internalContext:"INTERNAL_ESTIMATE"
+            },
+            costCalculationMethod:"PROVIDER_REPORTED_USAGE_COST",
+            latencySummary:latencies.length?{minMs:Math.min(...latencies),maxMs:Math.max(...latencies),sumMs:latencies.reduce((a,b)=>a+b,0)}:null,
+            queueWaitSummary:"UNAVAILABLE_PROVIDER_NOT_EXPOSED",
+            unboundedRetries:false,
+            productionModelRouteChange:false,
+            productionMutation:false,
+            productionDeployment:false,
+            unboundedGithubAuthority:false,
+            stopPaidCognition:true,
+            nextGate:"GATE_2_LIVE_COGNITION_ARTIFACT_QUALITY",
+            nextGateAuthorized:false
+          };
+          console.log("GATE1_ACCEPTED_RECEIPT>"+JSON.stringify(enriched));
+          if(r.gateResult!=="PASS")process.exit(3);
           NODE
 
       - name: Re-fence immutable source and stop paid cognition
+        if: always()
         working-directory: sentient
         shell: bash
         run: |
@@ -125,4 +166,8 @@ jobs:
           test "$(git show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
           test -z "$(git status --porcelain --untracked-files=no)"
           echo "STOP_PAID_COGNITION=true"
+          echo "PRESERVE_STATE=true"
           echo "NEXT_GATE_AUTHORIZED=false"
+          echo "PRODUCTION_MODDR_ROUTE_CHANGE=false"
+          echo "PRODUCTION_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
