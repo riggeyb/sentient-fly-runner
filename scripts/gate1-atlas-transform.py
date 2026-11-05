@@ -23,5 +23,6 @@ r("queueWaitMs:null,retryCount:0","queueWaitMs:Number(r.metadata?.queueWaitMs??0
 r("const a=r.structured??{}, ok=valid(a,p);",'let a={};try{a=JSON.parse(String(r.text??"").trim().replace(/^```(?:json)?\\s*/i,"").replace(/\\s*```$/,""))}catch{} const ok=valid(a,p);')
 r("a.evidenceReferences","a.evidenceRefs")
 r('receipt.providerCalls++;const x=await runtime.execute(t,{provider:PROVIDER,model:MODEL}),r=x.result;','receipt.providerCalls++;const x=await runtime.execute(t,{provider:PROVIDER,model:MODEL}),r=x.result;receipt.providerRetries+=Number(r.metadata?.retryCount??0);')
+r('"../sentient/','"./sentient/')
 Path("gate1-atlas-runtime.mjs").write_text(s)
 print("ATLAS_GATE1_TRANSFORM=PASS")
