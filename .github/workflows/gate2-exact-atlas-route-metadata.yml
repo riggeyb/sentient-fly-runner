@@ -1,0 +1,41 @@
+name: Gate 2 Exact Atlas Route Metadata Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query Atlas model metadata with GET only
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ATLASCLOUD_API_KEY"
+          base="https://api.atlascloud.ai/v1"
+          curl -sS -D list.headers -o list.json             -H "Authorization: Bearer $ATLASCLOUD_API_KEY"             -H "Accept: application/json"             "$base/models"
+          jq -e '.data | type == "array"' list.json >/dev/null
+          jq -e '.data[] | select(.id == "moonshotai/kimi-k3.1-pro")' list.json > exact-route.json
+          test -s exact-route.json
+          status="$(curl -sS -o detail.json -w '%{http_code}'             -H "Authorization: Bearer $ATLASCLOUD_API_KEY"             -H "Accept: application/json"             "$base/models/moonshotai%2Fkimi-k3.1-pro")"
+          printf '%s\n' "$status" > detail.status
+          jq '.' exact-route.json
+          echo "DETAIL_HTTP_STATUS=$status"
+          if [ "$status" = "200" ]; then jq '.' detail.json; fi
+          echo "HTTP_METHODS_USED=GET_ONLY"
+          echo "GENERATION_CALLS=0"
+          echo "NEW_PROVIDER_SPEND_USD=0"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gate2-exact-atlas-route-metadata
+          path: |
+            exact-route.json
+            detail.json
+            detail.status
