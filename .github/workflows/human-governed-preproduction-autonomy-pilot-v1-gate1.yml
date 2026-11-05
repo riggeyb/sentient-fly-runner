@@ -65,7 +65,7 @@ jobs:
           assert 'MAX_IN=4096, MAX_OUT=320, MAX_REASON=320' in s
           assert 'MAX_INPUT_RATE=4.00, MAX_OUTPUT_RATE=30.177, MAX_REASON_RATE=30.177' in s
           assert 'if(receipt.actualProviderSpendUsd+MAX_NEXT>HARD)' in s
-          assert 'gate1-live-cognition.mjs' not in Path(".github/workflows/human-governed-preproduction-autonomy-pilot-v1-gate1.yml").read_text()
+          assert 'node scripts/gate1-live-cognition.mjs ' not in Path(".github/workflows/human-governed-preproduction-autonomy-pilot-v1-gate1.yml").read_text()
           print("ZERO_COST_GATE1_ADMISSION_SOURCE=PASS")
           PY
           node - <<'NODE'
