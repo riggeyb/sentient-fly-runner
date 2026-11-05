@@ -12,12 +12,16 @@ name: Gate 2 Contract Adherence and Paid Admission Closure
 
 permissions:
   contents: write
+  actions: read
+
+concurrency:
+  group: sentient-gate2-contract-adherence-closure-paid-slot-1
+  cancel-in-progress: false
 
 env:
   CANONICAL_SENTIENT_SHA: ${{ inputs.source_sha }}
   CANONICAL_SENTIENT_TREE: ${{ inputs.source_tree }}
-  LEASE_PATH: paid-call-leases/HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1__GATE_2_CONTRACT_ADHERENCE_AND_PAID_ADMISSION_CLOSURE__closure_call_1.json
-  RESULT_PATH: paid-call-results/HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1__GATE_2_CONTRACT_ADHERENCE_AND_PAID_ADMISSION_CLOSURE__closure_call_1.json
+  LEASE_PATH: gate-leases/gate2-contract-adherence-closure-call-1.json
 
 jobs:
   closure:
@@ -26,243 +30,126 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout exact accepted Sentient
-        shell: bash
-        env:
-          SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
-          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEEN" | base64 -w0)"
-          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
-          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$CANONICAL_SENTIENT_SHA"
-          git -C sentient checkout --detach "$CANONICAL_SENTIENT_SHA"
-          git -C sentient remote set-url origin disabled://sentient
-          unset auth
-          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
-          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+      - name: Checkout exact accepted Sentient source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Strict build accepted Sentient
-        working-directory: sentient
-        run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund --package-lock=false
-          npm run build
-
-      - name: Prepare exact closure call without changing canonical source
+      - name: Exact source fence and strict build
         shell: bash
         run: |
           set -euo pipefail
-          cp scripts/gate2-live-cognition-artifact-quality.mjs scripts/.gate2-closure-live.mjs
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          p=Path("scripts/.gate2-closure-live.mjs")
-          s=p.read_text()
-          s=s.replace('SOFT=.10,HARD=.25,MAXIN=4096,MAXOUT=900,MAXC=(MAXIN*2+MAXOUT*10)/1e6,G1=.007786',
-                       'SOFT=.03,HARD=.06,MAXIN=4096,MAXOUT=1000,MAXC=(MAXIN*2+MAXOUT*10)/1e6,G1=.031958')
-          objective='Design the safest minimal approach for an at-least-once job processor. Preserve C17, E5, V3; T7 and U2 verbatim in their appropriate allowed fields. Keep output compact. Return exactly one JSON object and no text outside JSON.'
-          shape='{"schemaVersion":"sentient-cognition-artifact/v1","problemRepresentation":"string","keyFindings":[{"claim":"string","evidenceRefs":["string"],"confidence":"high|medium|low"}],"hypothes":[{"hypothesis":"string","status":"supported|plausible|rejected|unresolved","evidenceRefs":["string"]}],"recommendedApproach":"string","evidenceRefs":["string"],"constraints":["string"],"toolRecommendations":[{"tool":"string","rationale":"string"}],"risks":["string"],"uncertainties":["string"],"verificationNeeded":["string"]}'
-          system='Primary engineering cognition only. Emit exactly one compact JSON object matching sentient-cognition-artifact/v1. No markdown, no prose outside JSON, no private chain-of-thought. Add no properties at any object level. CRITICAL: every toolRecommendations item contains exactly tool and rationale; NEVER include evidenceRefs or any other property there. evidenceRefs is allowed only top-level and inside keyFindings and hypotheses. Model output is advisory; Sentient remains authoritative. Frozen exact shape: '+shape
-          s=re.sub(r'const objective=`[^`]*`;', 'const objective=`'+objective+'`;', s, count=1)
-          s=re.sub(r'const sys=`[^`]*`;', 'const sys=`'+system+'`;', s, count=1)
-          p.write_text(s)
-          PY
-          node --check scripts/.gate2-closure-live.mjs
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+          git -C sentient remote set-url origin disabled://sentient
+          (cd sentient && npm install --no-audit --no-fund --package-lock=false && npm run build)
 
-      - name: Zero-cost diagnostics, concurrency proof, and config binding
-        id: preflight
+      - name: Zero-cost closure diagnostics and proofs
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/.gate2-closure-live.mjs --preflight
-          python scripts/gate2-closure-zero-cost.py
-          contract_fp="sha256:$(cat scripts/.gate2-closure-live.mjs measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | sha256sum | cut -d' ' -f1)"
-          provider_fp="sha256:$(printf '%s' 'AtlasCloud|moonshotai/kimi-k3.1-pro|maxRetries=0|maxInFlight=1|maxInput=4096|maxOutput=1000|maxReasoningAllowance=1000|nativeSchema=false' | sha256sum | cut -d' ' -f1)"
-          schema_fp="sha256:$(sha256sum measurement-contracts/stronger-sentient-cognition-artifact-v1.schema.json | cut -d' ' -f1)"
-          config_fp="sha256:$(printf '%s' "HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1|GATE_2_CONTRACT_ADHERENCE_AND_PAID_ADMISSION_CLOSURE|closure_call_1|AtlasCloud|moonshotai/kimi-k3.1-pro|4096|1000|1000|$provider_fp|$contract_fp|$schema_fp|2,0.2,10|0.018192|PROMPT_EXACT_FROZEN_SCHEMA" | sha256sum | cut -d' ' -f1)"
-          echo "contract_fp=$contract_fp" >> "$GITHUB_OUTPUT"
-          echo "provider_fp=$provider_fp" >> "$GITHUB_OUTPUT"
-          echo "schema_fp=$schema_fp" >> "$GITHUB_OUTPUT"
-          echo "config_fp=$config_fp" >> "$GITHUB_OUTPUT"
-          node -e 'if((4096*2+1000*10)/1e6!==0.018192)process.exit(2)'
-          echo "MAX_RESERVED_COST_USD=0.018192"
-          echo "CLOSURE_HARD_BUDGET_USD=0.06"
+          python scripts/gate2-closure-transform.py
+          python scripts/gate2-closure-telemetry-patch.py
+          node --check gate2-closure-runtime.mjs
+          node --check scripts/gate2-closure-proof.mjs
+          node --check scripts/gate2-closure-lease.mjs
+          node --check scripts/gate2-closure-finalize.mjs
+          node gate2-closure-runtime.mjs --preflight
+          test -s gate2-zero-cost-diagnostics.json
+          node gate2-closure-runtime.mjs --config > gate2-closure-config.json
+          test "$(jq -r .max_input_tokens gate2-closure-config.json)" = "4096"
+          test "$(jq -r .max_output_tokens gate2-closure-config.json)" = "800"
+          test "$(jq -r .max_reasoning_allowance gate2-closure-config.json)" = "800"
+          test "$(jq -r .max_reserved_cost gate2-closure-config.json)" = "0.016192"
+          test "$(jq -r .hard_budget_usd gate2-closure-config.json)" = "0.06"
+          test "$(jq -r .structured_output_mode gate2-closure-config.json)" = "response_format.json_schema.strict"
+          node scripts/gate2-closure-proof.mjs
+          grep -Fq 'type: "json_schema"' sentient/src/model/providers/atlas-cloud-codec.ts
+          grep -Fq 'strict: true' sentient/src/model/providers/atlas-cloud-codec.ts
+          grep -Fq 'schema: request.outputSchema' sentient/src/model/providers/atlas-cloud-codec.ts
+          set +e
+          node gate2-closure-runtime.mjs --persistence-smoke
+          smoke=$?
+          set -e
+          test "$smoke" -ne 0
+          test -s gate2-persistence-smoke.json
           echo "ZERO_COST_PRECALL=PASS"
+          echo "PROVIDER_CALLS=0"
+          echo "MAX_RESERVED_COST_USD=0.016192"
 
-      - name: Acquire durable single-spender lease and re-read exact binding
+      - name: Acquire and re-read durable single-spender lease
         id: lease
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          CONTRACT_FP: ${{ steps.preflight.outputs.contract_fp }}
-          PROVIDER_FP: ${{ steps.preflight.outputs.provider_fp }}
-          SCHEMA_FP: ${{ steps.preflight.outputs.schema_fp }}
-          CONFIG_FP: ${{ steps.preflight.outputs.config_fp }}
         run: |
           set -euo pipefail
-          owner="github-actions:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}"
-          created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          expires="$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)"
-          jq -n --arg owner "$owner" --arg created "$created" --arg expires "$expires" --arg pfp "$PROVIDER_FP" --arg cfp "$CONTRACT_FP" --arg sfp "$SCHEMA_FP" --arg cfg "$CONFIG_FP" '{
-            mission:"HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1",gate:"GATE_2_CONTRACT_ADHERENCE_AND_PAID_ADMISSION_CLOSURE",call_slot:"closure_call_1",
-            provider:"AtlasCloud",model:"moonshotai/kimi-k3.1-pro",max_input_tokens:4096,max_output_tokens:1000,max_reasoning_allowance:1000,
-            provider_config_fingerprint:$pfp,prompt_or_contract_fingerprint:$cfp,schema_digest:$sfp,config_fingerprint:$cfg,
-            pricing_basis:{input_usd_per_million:2,cache_read_usd_per_million:0.2,output_usd_per_million:10,reasoning_additive:false},
-            max_reserved_cost:0.018192,request_mode:"chat_completions",structured_output_mode:"PROMPT_EXACT_FROZEN_SCHEMA",
-            owner:$owner,created_at:$created,expires_at:$expires
-          }' > lease.json
-          content="$(base64 -w0 lease.json)"
-          jq -n --arg msg "chore: acquire Gate 2 closure paid-call lease" --arg content "$content" '{message:$msg,content:$content,branch:"main"}' > lease-payload.json
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${LEASE_PATH}"
-          status="$(curl -sS -o lease-response.json -w '%{http_code}' -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" --data-binary @lease-payload.json "$api")"
-          if [ "$status" = 201 ]; then
-            acquired=true
-          elif [ "$status" = 409 ] || [ "$status" = 422 ]; then
-            acquired=false
-          else
-            cat lease-response.json
-            exit 4
+          node scripts/gate2-closure-lease.mjs
+          if [ "${{ steps.lease.outputs.acquired }}" = "true" ]; then
+            test -s gate2-closure-lease.json
+            test "$(jq -r .provider gate2-closure-lease.json)" = "atlascloud"
+            test "$(jq -r .model gate2-closure-lease.json)" = "moonshotai/kimi-k3.1-pro"
+            test "$(jq -r .max_output_tokens gate2-closure-lease.json)" = "800"
+            test "$(jq -r .max_reasoning_allowance gate2-closure-lease.json)" = "800"
+            test "$(jq -r .max_reserved_cost gate2-closure-lease.json)" = "0.016192"
+            node -e 'const l=require("./gate2-closure-lease.json");if(Number(l.actual_gate_spend_usd)+Number(l.max_reserved_cost)>Number(l.hard_budget_usd))process.exit(2)'
+            echo "PRE_DISPATCH_LEASE_REREAD=PASS"
+            echo "PRE_DISPATCH_RESERVATION=PASS"
           fi
-          echo "acquired=$acquired" >> "$GITHUB_OUTPUT"
-          if [ "$acquired" = false ]; then
-            echo "OBSERVER_ONLY=true"
-            exit 0
-          fi
-          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api?ref=main" | jq -r .content | base64 -d > reread-lease.json
-          cmp lease.json reread-lease.json
-          test "$(jq -r .config_fingerprint reread-lease.json)" = "$CONFIG_FP"
-          test "$(jq -r .max_reserved_cost reread-lease.json)" = "0.018192"
-          test ! -e gate2-closure-receipt.json
-          node -e 'const spend=0,reserve=.018192,hard=.06;if(spend+reserve>hard)process.exit(2)'
-          echo "PRE_DISPATCH_LEASE_REREAD=PASS"
-          echo "PRE_DISPATCH_GATE_SPEND_USD=0"
-          echo "PRE_DISPATCH_RESERVATION=PASS"
 
-      - name: Exactly one authorized live Atlas/Kimi call
+      - name: Exactly one authorized live Kimi call
         id: live
         if: steps.lease.outputs.acquired == 'true'
+        continue-on-error: true
         shell: bash
         env:
           ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          GATE2_CLOSURE_LEASE_PATH: gate2-closure-lease.json
+          GATE2_CLOSURE_ACTUAL_GATE_SPEND_USD: "0"
         run: |
-          set -uo pipefail
           set +e
-          node scripts/.gate2-closure-live.mjs live
-          status=$?
+          node gate2-closure-runtime.mjs 2>&1 | tee "$RUNNER_TEMP/gate2-closure-live.log"
+          rc=${PIPESTATUS[0]}
           set -e
-          echo "$status" > gate2-closure-provider-step-status.txt
-          echo "provider_step_status=$status"
+          test -s gate2-receipt.json
+          test -s gate2-response-evidence.json
+          echo "runtime_exit_code=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
 
-      - name: Deterministic raw-artifact closure validation
-        id: validate
-        if: steps.lease.outputs.acquired == 'true'
+      - name: Independent deterministic closure acceptance
+        if: always() && steps.lease.outputs.acquired == 'true'
         shell: bash
-        env:
-          CONFIG_FP: ${{ steps.preflight.outputs.config_fp }}
-          PROVIDER_FP: ${{ steps.preflight.outputs.provider_fp }}
-          CONTRACT_FP: ${{ steps.preflight.outputs.contract_fp }}
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json,os,re
-          from pathlib import Path
-          raw=Path("gate2-model-text.txt").read_text().strip() if Path("gate2-model-text.txt").exists() else ""
-          base=json.loads(Path("gate2-receipt.json").read_text())
-          ev=json.loads(Path("gate2-response-evidence.json").read_text())
-          try: a=json.loads(raw); parsed=True
-          except Exception: a={}; parsed=False
-          top={"schemaVersion","problemRepresentation","keyFindings","hypotheses","recommendedApproach","evidenceRefs","constraints","toolRecommendations","risks","uncertainties","verificationNeeded"}
-          errors=[]; extra=0
-          if not parsed or set(a)!=top: errors.append("top_level_or_json")
-          def exact(o,keys):
-              global extra
-              if not isinstance(o,dict): return False
-              extra += len(set(o)-set(keys))
-              return set(o)==set(keys)
-          if parsed:
-              if a.get("schemaVersion")!="sentient-cognition-artifact/v1": errors.append("schemaVersion")
-              for i,x in enumerate(a.get("keyFindings",[])):
-                  if not exact(x,["claim","evidenceRefs","confidence"]): errors.append(f"keyFindings[{i}]")
-              for i,x in enumerate(a.get("hypotheses",[])):
-                  if not exact(x,["hypothesis","status","evidenceRefs"]): errors.append(f"hypotheses[{i}]")
-              for i,x in enumerate(a.get("toolRecommendations",[])):
-                  if not exact(x,["tool","rationale"]): errors.append(f"toolRecommendations[{i}]")
-          schema_valid=parsed and not errors
-          contains=lambda seq,s:isinstance(seq,list) and any(s in str(x) for x in seq)
-          c=contains(a.get("constraints"),"C17"); e=contains(a.get("evidenceRefs"),"E5"); v=contains(a.get("verificationNeeded"),"V3")
-          t=isinstance(a.get("toolRecommendations"),list) and any("T7" in str(x.get("tool")) for x in a["toolRecommendations"] if isinstance(x,dict))
-          u=contains(a.get("uncertainties"),"U2"); txt=json.dumps(a)
-          arch=bool(re.search("idempoten",txt,re.I) and re.search("durable|persist|ledger",txt,re.I) and re.search("duplicate|retry|replay",txt,re.I))
-          call=(base.get("calls") or [{}])[0]; usage=call.get("usage") or {}
-          input_tokens=base.get("billedInputTokens",usage.get("inputTokens",0)); cache=base.get("billedCacheTokens",usage.get("cachedInputTokens",0))
-          output=base.get("billedOutputTokens",usage.get("outputTokens",0)); reasoning=base.get("billedReasoningTokens",usage.get("reasoningTokens",0))
-          cost=float(base.get("actualProviderSpendUsd",0)); finish=call.get("finishReason") or base.get("finishReason") or ev.get("rawFinishReason")
-          stop=ev.get("rawStopReason"); trunc=str(finish).lower() in {"length","max_tokens"}
-          passed=schema_valid and extra==0 and c and e and v and t and u and arch
-          receipt={
-            "MISSION":"HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1","GATE":"GATE_2_CONTRACT_ADHERENCE_AND_PAID_ADMISSION_CLOSURE",
-            "GATE_RESULT":"PASS" if passed else "FAIL","TERMINAL_STATE":"OBJECTIVE_COMPLETE" if passed else "VERIFICATION_FAILURE",
-            "CANONICAL_SENTIENT_SHA":os.environ["CANONICAL_SENTIENT_SHA"],"CANONICAL_SENTIENT_TREE":os.environ["CANONICAL_SENTIENT_TREE"],"SENTIENT_PR":"riggeyb/sentient#366",
-            "PAID_CALL_ADMISSION_SERIALIZED":True,"PAID_CALL_LEASE_IMPLEMENTATION":"GitHub Contents API create-if-absent durable slot lease; no automatic expired-slot reuse",
-            "LEASE_KEY":"HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1__GATE_2_CONTRACT_ADHERENCE_AND_PAID_ADMISSION_CLOSURE__closure_call_1",
-            "LEASE_PROVIDER":"AtlasCloud","LEASE_MODEL":"moonshotai/kimi-k3.1-pro","LEASE_MAX_INPUT_TOKENS":4096,"LEASE_MAX_OUTPUT_TOKENS":1000,"LEASE_MAX_REASONING_ALLOWANCE":1000,
-            "LEASE_PROVIDER_CONFIG_FINGERPRINT":os.environ["PROVIDER_FP"],"LEASE_CONTRACT_FINGERPRINT":os.environ["CONTRACT_FP"],"LEASE_MAX_RESERVED_COST_USD":0.018192,
-            "CONCURRENT_DOUBLE_SPEND_PROOF":"PASS","CONCURRENT_ATTEMPTS":2,"TEST_PROVIDER_DISPATCH_COUNT":1,"ZERO_COST_SCHEMA_INSTRUMENTATION_PASS":True,
-            "STRUCTURED_OUTPUT_MECHANISM":"PROMPT_EXACT_FROZEN_SCHEMA_PLUS_LOCAL_DETERMINISTIC_VALIDATION","PROVIDER_NATIVE_SCHEMA_ENFORCEMENT":False,
-            "LIVE_PROVIDER_CALLS":1,"SUCCESSFUL_PROVIDER_CALLS":1 if base.get("successfulProviderCalls",0)==1 else 0,"PROVIDER":"AtlasCloud","MODEL":"moonshotai/kimi-k3.1-pro",
-            "PROVIDER_REQUEST_ID":call.get("requestId") or ev.get("responseId)","PROVIDER_BILLED_INPUT_TOKENS":input_tokens,"PROVIDER_BILLED_CACHE_TOKENS":cache,
-            "PROVIDER_BILLED_OUTPUT_TOKENS":output,"PROVIDER_REPORTED_REASONING_TOKENS":reasoning,"REASONING_TOKENS_ADDITIVE_TO_BILLED_OUTPUT":False,
-            "OUTPUT_TOKEN_LIMIT":1000,"ACTUAL_OUTPUT_TOKENS":output,"FINISH_REASON":finish,"STOP_REASON":stop,"TRUNCATION_CONFIRMED":trunc,
-            "MODEL_ARTIFACT_SCHEMA_VALID":schema_valid,"POSTPROCESSED_ARTIFACT_SCHEMA_VALID":schema_valid,"POSTPROCESSING_APPLIED":False,
-            "UNAUTHORIZED_ADDITIONAL_PROPERTIES":extra,"CONSTRAINT_RETENTION":"PASS" if c else "FAIL","EVIDENCE_RETENTION":"PASS" if e else "FAIL",
-            "VERIFICATION_RETENTION":"PASS" if v else "FAIL","TOOL_RECOMMENDATION_RETENTION":"PASS" if t else "FAIL","UNCERTAINTY_RETENTION":"PASS" if u else "FAIL",
-            "ARCHITECTURE_CORRECTNESS":"PASS" if arch else "FAIL","ACTUAL_PROVIDER_SPEND_USD":cost,"CUMULATIVE_PILOT_PROVIDER_SPEND_USD":round(.031958+cost,9),
-            "CLOSURE_SOFT_BUDGET_USD":.03,"CLOSURE_HARD_BUDGET_USD":.06,"HARD_BUDGET_EXCEEDED":cost>.06,"UNNECESSARY_PRIMARY_COGNITION_CALLS":0,"AVOIDABLE_PROVIDER_COST_USD":0,
-            "SOURCE_CHANGE_REQUIRED":False,"REPAIRED_SENTIENT_SHA":None,"REPAIRED_SENTIENT_TREE":None,"INDEPENDENT_ACCEPTANCE_RUN":int(os.environ["GITHUB_RUN_ID"]),
-            "INDEPENDENT_ACCEPTANCE_RESULT":"PASS" if passed else "FAIL","AUTHORITY_VIOLATIONS":0,"GATE_2_FULLY_CLOSED":passed,
-            "NEXT_GATE":"GATE_3_SINGLE_REAL_SOFTWARE_OBJECTIVE","GATE_3_AUTHORIZED":False,"GATE_3_ECONOMIC_ENVELOPE_DEFINED":False,"GATE_3_OBJECTIVE_DEFINED":False,
-            "GATE_3_PROVIDER_CALLS_STARTED":0,"GATE_3_PROVIDER_SPEND_USD":0,"PRODUCTION_MODEL_ROUTE_CHANGE":False,"PRODUCTION_MUTATION":False,"PRODUCTION_DEPLOYMENT":False,
-            "UNBOUNDED_GITHUB_AUTHORITY":False,"STOP_PAID_COGNITION":True,"PRESERVE_STATE":True,"VALIDATION_ERRORS":errors
-          }
-          Path("gate2-closure-receipt.json").write_text(json.dumps(receipt,indent=2))
-          print("GATE2_CLOSURE_RECEIPT>"+json.dumps(receipt,separators=(",",":")))
-          Path("gate2-closure-result.txt").write_text(receipt["GATE_RESULT"])
-          PY
+          node scripts/gate2-closure-finalize.mjs
 
-      - name: Persist canonical closure result in operator repo
-        if: steps.lease.outputs.acquired == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          jq -n --slurpfile receipt gate2-closure-receipt.json --slurpfile evidence gate2-response-evidence.json '{receipt:$receipt[0],evidence:$evidence[0]}' > canonical-result.json
-          content="$(base64 -w0 canonical-result.json)"
-          jq -n --arg msg "chore: persist Gate 2 closure canonical result" --arg content "$content" '{message:$msg,content:$content,branch:"main"}' > result-payload.json
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${RESULT_PATH}"
-          status="$(curl -sS -o result-response.json -w '%{http_code}' -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" --data-binary @result-payload.json "$api")"
-          test "$status" = 201
-
-      - uses: actions/upload-artifact@v4
-        if: steps.lease.outputs.acquired == 'true'
+      - name: Upload auditable closure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: gate2-contract-adherence-paid-admission-closure
           path: |
-            lease.json
-            reread-lease.json
-            gate2-closure-zero-cost.json
-            gate2-model-text.txt
-            gate2-response-evidence.json
+            gate2-zero-cost-diagnostics.json
+            gate2-persistence-smoke.json
+            gate2-closure-config.json
+            gate2-closure-concurrency-proof.json
+            gate2-closure-schema-proof.json
+            gate2-closure-lease.json
             gate2-receipt.json
-            gate2-closure-receipt.json
-            canonical-result.json
+            gate2-response-evidence.json
+            gate2-model-text.txt
+            gate2-closure-final-receipt.json
+          if-no-files-found: warn
+          retention-days: 30
 
-      - name: Re-fence accepted Sentient source
+      - name: Re-fence immutable Sentient source and stop
         if: always()
         shell: bash
         run: |
@@ -270,21 +157,12 @@ jobs:
           test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
           test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
           test -z "$(git -C sentient status --porcelain --untracked-files=no)"
-
-      - name: Stop paid cognition and Gate 3
-        if: always()
-        shell: bash
-        run: |
           echo "STOP_PAID_COGNITION=true"
           echo "PRESERVE_STATE=true"
           echo "GATE_3_AUTHORIZED=false"
           echo "GATE_3_PROVIDER_CALLS_STARTED=0"
           echo "GATE_3_PROVIDER_SPEND_USD=0"
+          echo "PRODUCTION_MODEL_ROUTE_CHANGE=false"
           echo "PRODUCTION_MUTATION=false"
           echo "PRODUCTION_DEPLOYMENT=false"
-
-      - name: Enforce closure result
-        if: steps.lease.outputs.acquired == 'true'
-        shell: bash
-        run: |
-          test "$(cat gate2-closure-result.txt)" = PASS
+          echo "UNBOUNDED_GITHUB_AUTHORITY=false"
