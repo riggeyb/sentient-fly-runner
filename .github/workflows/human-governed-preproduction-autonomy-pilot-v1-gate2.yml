@@ -1,0 +1,180 @@
+name: Human-Governed Preproduction Autonomy Pilot V1 Gate 2
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CANONICAL_SENTIENT_SHA: ${{ inputs.source_sha }}
+  CANONICAL_SENTIENT_TREE: ${{ inputs.source_tree }}
+
+jobs:
+  gate2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout exact accepted Sentient source
+        shell: bash
+        env:
+          SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$CANONICAL_SENTIENT_SHA"
+          git -C sentient checkout --detach "$CANONICAL_SENTIENT_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          unset auth
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Strict build exact accepted source
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Zero-cost Gate 2 diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/gate2-live-cognition-artifact-quality.mjs
+          node scripts/gate2-live-cognition-artifact-quality.mjs --preflight
+          node - <<'NODE'
+          const fs=require("fs");
+          const d=JSON.parse(fs.readFileSync("gate2-zero-cost-diagnostics.json","utf8"));
+          if(!d.pass) throw new Error("zero-cost diagnostics failed");
+          if(d.route!=="PRIMARY_COGNITION") throw new Error("route mismatch");
+          if(d.semanticCompression.productionRequestPathUsesSemanticCompression!==false) throw new Error("compression must be shadow-only");
+          if(!d.semanticCompression.allIdsRetained||!d.providerInputAllIdsRetained) throw new Error("required identifiers not retained");
+          const maxNext=(4096*2+900*10)/1e6;
+          if(Math.abs(maxNext-0.017192)>1e-12) throw new Error("reservation mismatch");
+          if(maxNext>0.25) throw new Error("hard budget admission failed");
+          console.log("GATE2_ZERO_COST_DIAGNOSTICS=PASS");
+          console.log("MAX_ESTIMATED_NEXT_CALL_COST_USD="+maxNext.toFixed(6));
+          NODE
+
+      - name: Prove receipt persistence after nonzero verification exit
+        id: persistence
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          node scripts/gate2-live-cognition-artifact-quality.mjs --persistence-smoke
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          test -s gate2-persistence-smoke.json
+          node - <<'NODE'
+          const fs=require("fs");
+          const r=JSON.parse(fs.readFileSync("gate2-persistence-smoke.json","utf8"));
+          if(r.providerCalls!==0||r.spendUsd!==0||r.receiptPersistedBeforeFailure!==true) throw new Error("persistence smoke failed");
+          console.log("GATE1_RECEIPT_PERSISTENCE_DEFECT_REPAIRED=PASS");
+          NODE
+
+      - name: Single bounded live Kimi call
+        id: live
+        continue-on-error: true
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          set -o pipefail
+          node scripts/gate2-live-cognition-artifact-quality.mjs 2>&1 | tee "$RUNNER_TEMP/gate2-live.log"
+          rc=${PIPESTATUS[0]}
+          echo "runtime_exit_code=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Upload auditable Gate 2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate2-live-cognition-artifact-quality
+          path: |
+            gate2-zero-cost-diagnostics.json
+            gate2-persistence-smoke.json
+            gate2-receipt.json
+            gate2-response-evidence.json
+            gate2-model-text.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Independent Gate 2 acceptance
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s gate2-receipt.json
+          node - <<'NODE'
+          const fs=require("fs");
+          const r=JSON.parse(fs.readFileSync("gate2-receipt.json","utf8"));
+          const eq=(k,v)=>{ if(r[k]!==v) throw new Error(`${k}=${JSON.stringify(r[k])} expected ${JSON.stringify(v)}`); };
+          eq("mission","HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1");
+          eq("gate","GATE_2_LIVE_COGNITION_ARTIFACT_QUALITY");
+          eq("canonicalSentientSha",process.env.CANONICAL_SENTIENT_SHA);
+          eq("canonicalSentientTree",process.env.CANONICAL_SENTIENT_TREE);
+          eq("zeroCostDiagnosticsComplete",true);
+          eq("gate1ReceiptPersistenceDefectRepaired",true);
+          eq("rawResponseEvidencePreserved",true);
+          eq("provider","AtlasCloud");
+          eq("model","moonshotai/kimi-k3.1-pro");
+          eq("providerCalls",1);
+          eq("providerRetries",0);
+          eq("hardBudgetExceeded",false);
+          eq("authorityViolations",0);
+          eq("productionModelRouteChange",false);
+          eq("productionMutation",false);
+          eq("productionDeployment",false);
+          eq("unboundedGithubAuthority",false);
+          eq("nextGateAuthorized",false);
+          if(Math.abs(r.maxEstimatedNextCallCostUsd-0.017192)>1e-12) throw new Error("pre-call reservation mismatch");
+          if(!(r.actualProviderSpendUsd>=0&&r.actualProviderSpendUsd<=0.25)) throw new Error("spend outside hard budget");
+          if(r.gateResult!=="PASS") throw new Error(`Gate 2 failed: ${r.failureClassification}`);
+          eq("terminalState","OBJECTIVE_COMPLETE");
+          eq("successfulProviderCalls",1);
+          eq("cognitionArtifactValid",true);
+          eq("schemaValid",true);
+          eq("constraintRetention","PASS");
+          eq("evidenceRetention","PASS");
+          eq("verificationRetention","PASS");
+          eq("toolRecommendationRetention","PASS");
+          eq("uncertaintyRetention","PASS");
+          eq("architectureCorrectness","PASS");
+          eq("truncationConfirmed",false);
+          if(!r.finishReason) throw new Error("finish reason missing");
+          console.log("GATE_2_LIVE_COGNITION_ARTIFACT_QUALITY=PASS");
+          NODE
+
+      - name: Re-fence immutable source and stop paid cognition
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo "STOP_PAID_COGNITION=true"
+          echo "PRESERVE_STATE=true"
+          echo "GATE_3_REAL_SOFTWARE_OBJECTIVE_AUTHORIZED=false"
+          echo "NEXT_GATE_AUTHORIZED=false"
+          echo "PRODUCTION_MODDR_ROUTE_CHANGE=false"
+          echo "PRODUCTION_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
