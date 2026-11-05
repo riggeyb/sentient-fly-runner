@@ -103,7 +103,7 @@ const v=validate(a);
 const valid=
   v.schemaValid&&v.constraint&&v.evidence&&v.verification&&v.tool&&v.uncertainty&&v.architecture&&
   c.truncationConfirmed===false&&c.successfulProviderCalls===1;
-const gateSpend=Number((Number(p.actualProviderSpendUsd)+Number(c.actualProviderSpendUsd??0)).toFixed(9));
+const gateSpend=Number((Number(p.actualProviderSpendUsd)+Number(c.secondCallProviderSpendUsd??c.actualProviderSpendUsd??0)).toFixed(9));
 const total=k=>Number(p[k]??0)+Number(c[k]??0);
 
 const final={
@@ -158,7 +158,7 @@ const final={
   gate2HardBudgetUsd:HARD,
   hardBudgetExceeded:gateSpend>HARD,
   maxEstimatedNextCallCostUsd:MAX_NEXT,
-  budgetRemaingUsd:Number(Math.max(0,HARD-gateSpend).toFixed(9)),
+  budgetRemainingUsd:Number(Math.max(0,HARD-gateSpend).toFixed(9)),
   usefulArtifactTokenRatio:Number(c.usefulArtifactTokenRatio??0),
   artifactValidityPerDollar:valid?`ONE_VALID_ARTIFACT_AFTER_${gateSpend.toFixed(6)}_GATE2_USD`:`ZERO_VALID_ARTIFACTS_AFTER_${gateSpend.toFixed(6)}_GATE2_USD`,
   unnecessaryPrimaryCognitionCalls:0,
@@ -176,7 +176,7 @@ const final={
   nextGate:"GATE_3_SINGLE_REAL_SOFTWARE_OBJECTIVE",
   nextGateAuthorized:false,
   secondCallCorrection:"EXACT_FROZEN_JSON_SHAPE_PLUS_FIELD_LIMITS_AND_MINIMAL_900_TO_1000_CEILING_INCREASE",
-  secondCallProviderSpendUsd:Number(c.actualProviderSpendUsd??0),
+  secondCallProviderSpendUsd:Number(c.secondCallProviderSpendUsd??c.actualProviderSpendUsd??0),
   stopPaidCognition:true,
   preserveState:true
 };
