@@ -1,6 +1,6 @@
 name: Gate 2 Zero-Cost Evidence Inspection
 
-on:
+"on":
   workflow_dispatch:
 
 permissions:
@@ -13,13 +13,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: gate2-live-cognition-artifact-quality
+          name: gate2-live-cognition-artifact-quality-final
           path: evidence
           github-token: ${{ github.token }}
           repository: riggeyb/sentient-fly-runner
-          run-id: 42045038659
+          run-id: 42047845592
 
-      - name: Inspect preserved synthetic Gate 2 evidence
+      - name: Inspect final Gate 2 response zero-cost
         shell: bash
         run: |
           set -euo pipefail
@@ -28,7 +28,7 @@ jobs:
           import json, hashlib
           p=Path("evidence/gate2-model-text.txt")
           e=Path("evidence/gate2-response-evidence.json")
-          r=Path("evidence/gate2-receipt.json")
+          r=Path("evidence/gate2-receipt-final.json")
           assert p.exists() and e.exists() and r.exists()
           text=p.read_text()
           meta=json.loads(e.read_text())
@@ -39,6 +39,6 @@ jobs:
           print(text[:5000])
           print("MODEL_TEXT_END")
           print("RESPONSE_META="+json.dumps(meta,sort_keys=True))
-          print("RECEIPT_CLASSIFICATION="+str(receipt.get("failureClassification")))
+          print("RECEIPT_SUMMARY="+json.dumps({k:receipt.get(k) for k in ["gateResult","terminalState","cognitionArtifactValid","schemaValid","secondCallProviderSpendUsd","actualProviderSpendUsd","authorityViolations"]},sort_keys=True))
           print("ZERO_COST_INSPECTION=PASS")
           PY
