@@ -1,0 +1,44 @@
+name: Gate 2 Zero-Cost Evidence Inspection
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gate2-live-cognition-artifact-quality
+          path: evidence
+          github-token: ${{ github.token }}
+          repository: riggeyb/sentient-fly-runner
+          run-id: 42045038659
+
+      - name: Inspect preserved synthetic Gate 2 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json, hashlib
+          p=Path("evidence/gate2-model-text.txt")
+          e=Path("evidence/gate2-response-evidence.json")
+          r=Path("evidence/gate2-receipt.json")
+          assert p.exists() and e.exists() and r.exists()
+          text=p.read_text()
+          meta=json.loads(e.read_text())
+          receipt=json.loads(r.read_text())
+          print("MODEL_TEXT_BYTES="+str(len(text.encode())))
+          print("MODEL_TEXT_SHA256="+hashlib.sha256(text.encode()).hexdigest())
+          print("MODEL_TEXT_BEGIN")
+          print(text[:5000])
+          print("MODEL_TEXT_END")
+          print("RESPONSE_META="+json.dumps(meta,sort_keys=True))
+          print("RECEIPT_CLASSIFICATION="+str(receipt.get("failureClassification")))
+          print("ZERO_COST_INSPECTION=PASS")
+          PY
