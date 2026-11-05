@@ -1,0 +1,141 @@
+name: Human-Governed Preproduction Autonomy Pilot V1 Gate 1 AtlasCloud
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CANONICAL_SENTIENT_SHA: ${{ inputs.source_sha }}
+  CANONICAL_SENTIENT_TREE: ${{ inputs.source_tree }}
+
+jobs:
+  gate1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout exact accepted Sentient source
+        shell: bash
+        env:
+          SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$CANONICAL_SENTIENT_SHA"
+          git -C sentient checkout --detach "$CANONICAL_SENTIENT_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+          unset auth
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Strict build exact accepted source
+        working-directory: sentient
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Zero-cost AtlasCloud transform and economic admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/gate1-atlas-transform.py
+          node --check gate1-atlas-runtime.mjs
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("gate1-atlas-runtime.mjs").read_text()
+          required=[
+            'PROVIDER="atlascloud"',
+            'ATLASCLOUD_API_KEY',
+            'AtlasCloudAdapter',
+            'maxProviderRetries:0',
+            'maxRetries:0',
+            'requiredModelCapabilities:["text_generation"]',
+            'evidenceRefs',
+            'keyFindings',
+            'recommendedApproach',
+            'queueWaitMs:Number(r.metadata?.queueWaitMs??0)',
+            'retryCount:Number(r.metadata?.retryCount??0)',
+          ]
+          for x in required: assert x in s,x
+          assert 'OpenRouterAdapter' not in s
+          assert 'outputSchema:artifactSchema' not in s
+          max_next=(4096*4+700*20+700*20)/1_000_000
+          assert abs(max_next-0.044384)<1e-12
+          assert max_next*2 < 0.50 < 1.00
+          print(f"ZERO_COST_GATE1_ADMISSION=PASS MAX_NEXT={max_next:.6f} MAX_2_CALL_EXPOSURE={max_next*2:.6f} PROVIDER_CALLS=0")
+          PY
+
+      - name: Live Kimi Gate 1 through accepted Sentient runtime
+        id: live
+        continue-on-error: true
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          set -uo pipefail
+          node gate1-atlas-runtime.mjs 2>&1 | tee "$RUNNER_TEMP/gate1-live.log"
+          rc=${PIPESTATUS[0]}
+          line="$(grep '^GATE1_RECEIPT>' "$RUNNER_TEMP/gate1-live.log" | tail -1)"
+          test -n "$line"
+          printf '%s\n' "${line#GATE1_RECEIPT>}" > gate1-receipt.json
+          echo "runtime_exit_code=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Upload gate receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate1-live-cognition-economic-telemetry
+          path: gate1-receipt.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Independent Gate 1 acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require("fs"),r=JSON.parse(fs.readFileSync("gate1-receipt.json","utf8"));
+          const eq=(k,v)=>{if(r[k]!==v)throw new Error(`${k}=${JSON.stringify(r[k])} expected ${JSON.stringify(v)}`)};
+          eq("mission","HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1");
+          eq("gate","GATE_1_LIVE_COGNITION_TRANSPORT_AND_ECONOMIC_TELEMETRY");
+          eq("canonicalSentientSha",process.env.CANONICAL_SENTIENT_SHA);
+          eq("canonicalSentientTree",process.env.CANONICAL_SENTIENT_TREE);
+          eq("provider","atlascloud"); eq("model","moonshotai/kimi-k3.1-pro");
+          eq("gateResult","PASS"); eq("terminalState","OBJECTIVE_COMPLETE");
+          eq("providerCalls",2); eq("successfulProviderCalls",2); eq("providerRetries",0);
+          eq("providerFailures",0); eq("provider429s",0); eq("hardBudgetExceeded",false);
+          eq("authorityViolations",0);
+          if(!(r.actualProviderSpendUsd>=0&&r.actualProviderSpendUsd<=1))throw new Error("spend outside gate envelope");
+          if(!(r.maxEstimatedNextCallCostUsd===0.044384))throw new Error("reservation mismatch");
+          if(!(r.billedInputTokens>0&&r.billedOutputTokens>0))throw new Error("provider usage missing");
+          if(!(r.calls.length===2&&r.calls.every(c=>c.requestId&&Number.isFinite(c.latencyMs)&&Number.isFinite(c.queueWaitMs)&&Number.isFinite(c.retryCount)&&c.artifactValid&&c.constraintRetention&&c.evidenceRetention&&c.verificationRetention)))throw new Error("per-call telemetry/artifact proof incomplete");
+          console.log("GATE_1_LIVE_COGNITION_TRANSPORT_AND_ECONOMIC_TELEMETRY_VALIDATION=PASS");
+          console.log("STOP_PAID_COGNITION=true");
+          console.log("NEXT_GATE_AUTHORIZED=false");
+          NODE
+
+      - name: Re-fence immutable Sentient source
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
