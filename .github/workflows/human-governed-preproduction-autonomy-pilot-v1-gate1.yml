@@ -1,0 +1,128 @@
+name: Human-Governed Preproduction Autonomy Pilot V1 Gate 1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CANONICAL_SENTIENT_SHA: ${{ inputs.source_sha }}
+  CANONICAL_SENTIENT_TREE: ${{ inputs.source_tree }}
+
+jobs:
+  gate1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout independent operator
+        uses: actions/checkout@v4
+
+      - name: Checkout exact accepted Sentient source
+        shell: bash
+        env:
+          SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$CANONICAL_SENTIENT_SHA"
+          git -C sentient checkout --detach "$CANONICAL_SENTIENT_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          unset auth
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Strict build exact accepted Sentient source
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Zero-cost syntax and economic admission check
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/gate1-live-cognition.mjs
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/gate1-live-cognition.mjs").read_text()
+          assert 'const SOFT=0.50, HARD=1.00' in s
+          assert 'MAX_IN=4096, MAX_OUT=320, MAX_REASON=320' in s
+          assert 'if(receipt.actualProviderSpendUsd+MAX_NEXT>HARD)' in s
+          print("ZERO_COST_GATE1_ADMISSION=PASS")
+          PY
+          node - <<'NODE'
+          const MAX_IN=4096, MAX_OUT=320, MAX_REASON=320, RES_IN=4, RES_OUT=20, RES_REASON=20;
+          const maxNext=(MAX_IN*RES_IN+MAX_OUT*RES_OUT+MAX_REASON*RES_REASON)/1e6;
+          if (Math.abs(maxNext-0.029184)>1e-12) throw new Error("reservation mismatch");
+          if (maxNext*2>0.50) throw new Error("planned exposure crosses soft budget");
+          if (maxNext*2>1.00) throw new Error("planned exposure crosses hard budget");
+          console.log(JSON.stringify({maxEstimatedNextCallCostUsd:maxNext,maximumPlannedExposureUsd:maxNext*2,providerCalls:0}));
+          NODE
+
+      - name: Live cognition within Gate 1 envelope
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+          OPENROUTER_API_KEY_SHARED: ${{ secrets.OPENROUTER_API_KEY_SHARED }}
+          OPENROUTER_TOKEN: ${{ secrets.OPENROUTER_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/gate1-live-cognition.mjs | tee "$RUNNER_TEMP/gate1-live.log"
+          grep '^GATE1_RECEIPT>' "$RUNNER_TEMP/gate1-live.log" > "$RUNNER_TEMP/gate1-receipt-line.txt"
+
+      - name: Independently validate Gate 1 receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - "$RUNNER_TEMP/gate1-receipt-line.txt" <<'NODE'
+          const fs=require("fs");
+          const line=fs.readFileSync(process.argv[2],"utf8").trim();
+          const r=JSON.parse(line.slice("GATE1_RECEIPT>".length));
+          const same=(k,v)=>{if(r[k]!==v)throw new Error(`${k}=${JSON.stringify(r[k])} expected ${JSON.stringify(v)}`)};
+          same("gateResult","PASS");
+          same("terminalState","OBJECTIVE_COMPLETE");
+          same("canonicalSentientSha",process.env.CANONICAL_SENTIENT_SHA);
+          same("canonicalSentientTree",process.env.CANONICAL_SENTIENT_TREE);
+          same("provider","openrouter");
+          same("model","moonshotai/kimi-k3.1-pro");
+          same("providerCalls",2);
+          same("successfulProviderCalls",2);
+          same("providerFailures",0);
+          same("providerRetries",0);
+          same("hardBudgetExceeded",false);
+          same("authorityViolations",0);
+          if(!(r.actualProviderSpendUsd<=1.00))throw new Error("hard budget exceeded");
+          if(!(r.maxEstimatedNextCallCostUsd<=1.00))throw new Error("reservation exceeds hard budget");
+          if(!r.calls.every(c=>c.requestId&&c.artifactValid&&c.constraintRetention&&c.evidenceRetention&&c.verificationRetention))throw new Error("call telemetry/artifact retention incomplete");
+          if(!r.calls.every(c=>Number.isFinite(c.latencyMs)&&c.usage&&Number.isFinite(c.independentlyCalculatedCostUsd)))throw new Error("usage/cost telemetry incomplete");
+          console.log("GATE_1_LIVE_COGNITION_TRANSPORT_AND_ECONOMIC_TELEMETRY_VALIDATION=PASS");
+          console.log("GATE1_ACCEPTED_RECEIPT>"+JSON.stringify(r));
+          NODE
+
+      - name: Re-fence immutable source and stop paid cognition
+        working-directory: sentient
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "STOP_PAID_COGNITION=true"
+          echo "NEXT_GATE_AUTHORIZED=false"
