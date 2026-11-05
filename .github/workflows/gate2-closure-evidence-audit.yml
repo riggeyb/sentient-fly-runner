@@ -1,0 +1,25 @@
+name: Gate 2 Closure Evidence Audit
+"on":
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gate2-contract-adherence-paid-admission-closure
+          path: evidence
+          github-token: ${{ github.token }}
+          repository: riggeyb/sentient-fly-runner
+          run-id: 42086804020
+      - name: Print preserved evidence
+        run: |
+          set -euo pipefail
+          echo "POSTCALL_PROVIDER_CALLS=0"
+          cat evidence/gate2-response-evidence.json
+          cat evidence/gate2-receipt.json
+          echo "STOP_PAID_COGNITION=true"
+          echo "GATE_3_AUTHORIZED=false"
