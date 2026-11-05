@@ -1,0 +1,149 @@
+name: Human-Governed Preproduction Autonomy Pilot V1 Gate 2 Canonical Continuation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CANONICAL_SENTIENT_SHA: ${{ inputs.source_sha }}
+  CANONICAL_SENTIENT_TREE: ${{ inputs.source_tree }}
+
+jobs:
+  gate2_continuation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download immutable first-call evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: gate2-live-cognition-artifact-quality
+          path: prior
+          run-id: 42045038659
+          github-token: ${{ github.token }}
+
+      - name: Checkout exact accepted Sentient source
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+          path: sentient
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Exact source fence and strict build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+          git -C sentient remote set-url origin disabled://sentient
+          (cd sentient && npm install --no-audit --no-fund --package-lock=false && npm run build)
+
+      - name: Zero-cost diagnostics persistence and economic admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/gate2-second-call-transform.py
+          python scripts/gate2-finalizer-fix.py
+          node --check gate2-second-runtime.mjs
+          node --check scripts/gate2-finalize-second-call.mjs
+          grep -q 'MAXOUT=1000' gate2-second-runtime.mjs
+          grep -q 'G2P=.009678' gate2-second-runtime.mjs
+          grep -q 'G2P+MAXC>HARD' gate2-second-runtime.mjs
+          grep -q '"./sentient/' gate2-second-runtime.mjs
+          node gate2-second-runtime.mjs --preflight
+          test -s gate2-zero-cost-diagnostics.json
+          set +e
+          node gate2-second-runtime.mjs --persistence-smoke
+          smoke_rc=$?
+          set -e
+          test "$smoke_rc" -ne 0
+          test -s gate2-persistence-smoke.json
+          node scripts/gate2-finalize-second-call.mjs --admission
+
+      - name: Second authorized paid Kimi call
+        id: live
+        continue-on-error: true
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+        run: |
+          set +e
+          node gate2-second-runtime.mjs 2>&1 | tee "$RUNNER_TEMP/gate2-second-live.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          test -s gate2-receipt.json
+          test -s gate2-response-evidence.json
+          test -s gate2-model-text.txt
+          echo "runtime_exit_code=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Aggregate both Gate 2 calls
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          node scripts/gate2-finalize-second-call.mjs
+          rc=$?
+          set -e
+          test -s gate2-receipt-final.json
+          exit "$rc"
+
+      - name: Independent aggregate acceptance
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/gate2-finalize-second-call.mjs --accept
+          echo "STOP_PAID_COGNITION=true"
+          echo "NEXT_GATE_AUTHORIZED=false"
+
+      - name: Upload Gate 2 auditable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate2-live-cognition-artifact-quality-final
+          path: |
+            gate2-zero-cost-diagnostics.json
+            gate2-persistence-smoke.json
+            gate2-receipt-final.json
+            gate2-receipt.json
+            gate2-response-evidence.json
+            gate2-model-text.txt
+            prior/gate2-receipt.json
+            prior/gate2-response-evidence.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Re-fence immutable Sentient source
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+          echo "STOP_PAID_COGNITION=true"
+          echo "PRESERVE_STATE=true"
+          echo "NEXT_GATE_AUTHORIZED=false"
+          echo "GATE_3_REAL_SOFTWARE_OBJECTIVE_AUTHORIZED=false"
+          echo "PRODUCTION_MODEL_ROUTE_CHANGE=false"
+          echo "PRODUCTION_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
+          echo "UNBOUNDED_GITHUB_AUTHORITY=false"
