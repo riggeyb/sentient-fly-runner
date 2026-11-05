@@ -31,18 +31,18 @@ jobs:
           test -n "$ATLASCLOUD_API_KEY"
           atlas auth login --token "$ATLASCLOUD_API_KEY" >/dev/null
 
-       - name: Get Kimi K3.1 Pro model metadata only
+      - name: Get Kimi K3.1 Pro model metadata only
         run: |
           set -euo pipefail
           atlas models get moonshotai/kimi-k3.1-pro --json > kimi-k3.1-pro-model.json
           test -s kimi-k3.1-pro-model.json
-          jq '. | {
-id: (.id // .model_id // .name),
-supported_apis: (.supported_apis // .apis // .protocols),
-capabilities: (.capabilities // .features),
-supported_sampling_parameters: (.supported_sampling_parameters // .sampling_parameters),
-parameters: (.parameters // .schema ?? null)
-}' kimi-k3.1-pro-model.json
+          jq '{
+            id: (.id // .model_id // .name),
+            supported_apis: (.supported_apis // .apis // .protocols),
+            capabilities: (.capabilities // .features),
+            supported_sampling_parameters: (.supported_sampling_parameters // .sampling_parameters),
+            parameters: (.parameters // .schema // null)
+          }' kimi-k3.1-pro-model.json
           echo "MODEL_DISCOVERY_ONLY=true"
           echo "PAID_PROVIDER_CALLS=0"
 
