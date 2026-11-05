@@ -1,0 +1,136 @@
+name: Gate 2 Final Artifact Closure
+
+"on":
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CANONICAL_SENTIENT_SHA: ${{ inputs.source_sha }}
+  CANONICAL_SENTIENT_TREE: ${{ inputs.source_tree }}
+  LEASE_PATH: paid-call-leases/HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1__GATE_2_FINAL_ARTIFACT_CLOSURE__closure-call-2.json
+
+jobs:
+  closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout exact accepted Sentient
+        shell: bash
+        env:
+          SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git sentient
+          git -C sentient -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=1 origin "$CANONICAL_SENTIENT_SHA"
+          git -C sentient checkout --detach "$CANONICAL_SENTIENT_SHA"
+          git -C sentient remote set-url origin disabled://sentient
+          unset auth
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Strict build accepted Sentient
+        working-directory: sentient
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+
+      - name: Zero-cost plain-chat preflight
+        run: |
+          set -euo pipefail
+          node --check scripts/gate2-final-artifact-closure.mjs
+          node --check scripts/gate2-final-artifact-lease.mjs
+          node --check scripts/gate2-final-artifact-finalize.mjs
+          node scripts/gate2-final-artifact-closure.mjs --preflight
+          node scripts/gate2-final-artifact-closure.mjs --config > gate2-final-config.json
+          jq -e '.call_slot=="closure-call-2" and .structured_output_mode=="NONE_PLAIN_CHAT_COMPLETIONS" and .outputSchema_present==false and .response_format_present==false and .max_reserved_cost<=.hard_budget_usd' gate2-final-config.json >/dev/null
+
+      - name: Acquire fresh closure-call-2 single-spender lease
+        id: lease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/gate2-final-artifact-lease.mjs
+
+      - name: Re-read lease and dispatch exactly one plain Chat Completions request
+        id: live
+        if: ${{ steps.lease.outputs.acquired == 'true' }}
+        shell: bash
+        env:
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
+          GATE2_FINAL_LEASE_PATH: gate2-final-lease.json
+        run: |
+          set -uo pipefail
+          jq -e '.call_slot=="closure-call-2" and .structured_output_mode=="NONE_PLAIN_CHAT_COMPLETIONS" and .outputSchema_present==false and .response_format_present==false and .max_reserved_cost<=.hard_budget_usd' gate2-final-lease.json >/dev/null
+          set +e
+          node scripts/gate2-final-artifact-closure.mjs live
+          status=$?
+          set -e
+          echo "runtime_status=$status" >> "$GITHUB_OUTPUT"
+          test -s gate2-final-transport.json
+          exit 0
+
+      - name: Deterministic raw-artifact validation
+        if: ${{ steps.lease.outputs.acquired == 'true' }}
+        shell: bash
+        run: |
+          set +e
+          node scripts/gate2-final-artifact-finalize.mjs
+          status=$?
+          set -e
+          echo "VALIDATION_EXIT=$status"
+          test -s gate2-final-receipt.json
+          jq '.' gate2-final-receipt.json
+          exit "$status"
+
+      - name: Upload immutable closure evidence
+        if: ${{ always() && steps.lease.outputs.acquired == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate2-final-artifact-closure-call-2
+          path: |
+            gate2-final-config.json
+            gate2-final-preflight.json
+            gate2-final-lease.json
+            gate2-final-request-body.json
+            gate2-final-raw-provider-envelope.txt
+            gate2-final-raw-model-text.txt
+            gate2-final-transport.json
+            gate2-final-receipt.json
+          if-no-files-found: warn
+
+      - name: Re-fence accepted Sentient source
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sentient rev-parse HEAD)" = "$CANONICAL_SENTIENT_SHA"
+          test "$(git -C sentient show -s --format=%T HEAD)" = "$CANONICAL_SENTIENT_TREE"
+          test -z "$(git -C sentient status --porcelain --untracked-files=no)"
+
+      - name: Stop paid cognition and Gate 3
+        if: ${{ always() }}
+        run: |
+          echo "STOP_PAID_COGNITION=true"
+          echo "PRESERVE_STATE=true"
+          echo "GATE_3_AUTHORIZED=false"
+          echo "GATE_3_PROVIDER_CALLS_STARTED=0"
+          echo "GATE_3_PROVIDER_SPEND_USD=0"
+          echo "PRODUCTION_MUTATION=false"
+          echo "PRODUCTION_DEPLOYMENT=false"
