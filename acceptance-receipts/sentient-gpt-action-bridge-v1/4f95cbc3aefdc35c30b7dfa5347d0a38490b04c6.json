@@ -1,0 +1,76 @@
+{
+  "acceptanceRepository": "riggeyb/sentient-fly-runner",
+  "authority": {
+    "authorityExpansion": false,
+    "closureCall2Consumed": false,
+    "gate2FullyClosed": false,
+    "gate3Authorized": false,
+    "governorBypass": false,
+    "productionDeployment": false,
+    "productionMerge": false,
+    "productionMutation": false
+  },
+  "candidate": {
+    "baseSha": "6cf76acc4bfb91065ea39acfb8275a14c4b8748d",
+    "baseTree": "c7e07e3270cc4e31449747fdbf66a69120eaaf10",
+    "path": ".fly-now/gpt-action-bridge-v1",
+    "pr": 367,
+    "preReconciliationSha": "5979ef3e75949a57b0153bc462e84aa41223da44",
+    "repository": "riggeyb/sentient",
+    "sha": "4f95cbc3aefdc35c30b7dfa5347d0a38490b04c6",
+    "tree": "142370dac3f65e8e96ceffae0f0093e59dde44d1"
+  },
+  "changedPaths": [
+    ".fly-now/gpt-action-bridge-v1/Dockerfile",
+    ".fly-now/gpt-action-bridge-v1/README.md",
+    ".fly-now/gpt-action-bridge-v1/fly.toml",
+    ".fly-now/gpt-action-bridge-v1/gpt-instruction-delta.md",
+    ".fly-now/gpt-action-bridge-v1/openapi.yaml",
+    ".fly-now/gpt-action-bridge-v1/package.json",
+    ".fly-now/gpt-action-bridge-v1/src/mcp-client.mjs",
+    ".fly-now/gpt-action-bridge-v1/src/reconciliation.test.mjs",
+    ".fly-now/gpt-action-bridge-v1/src/server.mjs",
+    ".fly-now/gpt-action-bridge-v1/src/server.test.mjs"
+  ],
+  "checks": {
+    "credentialSeparationTest": "PASS",
+    "deterministicBridgeTests": "PASS_10_OF_10",
+    "exactShaTreeMatch": "PASS",
+    "expectedParentLineage": "PASS",
+    "healthRequiresRealSentientMcpResponse": "PASS",
+    "noGate2Activity": "PASS",
+    "noProductionDeployment": "PASS",
+    "noProviderCalls": "PASS",
+    "openapiSurfaceTest": "PASS",
+    "queryParameterRejectionTest": "PASS",
+    "scopeBoundary": "PASS"
+  },
+  "economics": {
+    "cumulativePilotProviderSpendUsd": 0.031958,
+    "newKimiCalls": 0,
+    "newProviderCalls": 0,
+    "newProviderSpendUsd": 0
+  },
+  "executionMode": "LOCAL_SANDBOX_EXACT_REMOTE_BLOBS",
+  "githubActionsAttempt": {
+    "job": 127662047438,
+    "result": "BLOCKED_PRE_RUNNER_GITHUB_ACTIONS_BILLING_LOCK",
+    "run": 42147379806,
+    "stepsStarted": 0
+  },
+  "jobId": "sentient-gpt-action-bridge-v1-acceptance",
+  "mission": "SENTIENT_GPT_ACTION_BRIDGE_V1",
+  "phase": "CANONICAL_RECONCILIATION_AND_INDEPENDENT_ACCEPTANCE",
+  "remoteBlobFence": {
+    "openapi.yaml": "a3bb8f2fae10ba849ce1eccbff58c98cbae14e8c",
+    "src/mcp-client.mjs": "7b4b7bbe34a1c5813cc112694243891c66c2d787",
+    "src/reconciliation.test.mjs": "de108fd5e782080979696231ed4643d1a06ebbcb",
+    "src/server.mjs": "3a0eb28dd0fd5b112f225d4885bcec7a0f2573a5",
+    "src/server.test.mjs": "99e8b13166e3ac040eab256e1a5447b2c2eac6a1"
+  },
+  "result": "PASS",
+  "runId": "local-exact-blob-d51b4d8702266d96d598",
+  "schemaVersion": "sentient-independent-acceptance/v1",
+  "testCommand": "node --test src/server.test.mjs src/reconciliation.test.mjs",
+  "testOutputSha256": "73007594cbdcb9fb075b46bac96dfa6eefb939cebbf8437f0c338e5d709094b1"
+}
