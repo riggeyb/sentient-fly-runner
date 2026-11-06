@@ -1,0 +1,77 @@
+{
+  "githubActionsAttempt": {
+    "jobId": 128131091471,
+    "providerSecretsReferenced": false,
+    "result": "BLOCKED_PRE_RUNNER_GITHUB_ACTIONS_ACCOUNT_CONDITION",
+    "runId": 42287228142,
+    "runnerId": 0,
+    "runnerRepository": "riggeyb/sentient-fly-runner",
+    "stepsStarted": 0,
+    "workflowCommitSha": "d182d2faa57c765352f71c3e130c6d842d52563c",
+    "workflowPath": ".github/workflows/sentient-governed-pilot-lockfile.yml"
+  },
+  "liveEffectFreeze": {
+    "bootstrapExecuted": false,
+    "closureCall2Consumed": false,
+    "cumulativePilotProviderSpendUsd": 0.031958,
+    "deploymentAuthorized": false,
+    "gate2FullyClosed": false,
+    "gate3Authorized": false,
+    "kimiCalls": 0,
+    "liveBootstrapAuthorized": false,
+    "liveGate2ExecutionAuthorized": false,
+    "livePilotStateAuthoritative": false,
+    "liveProviderCalls": 0,
+    "newProviderSpendUsd": 0
+  },
+  "lockGeneration": {
+    "command": "npm install --package-lock-only",
+    "dependencyLockfileCreated": false,
+    "liveProviderCredentialsPresent": false,
+    "localRegistryProbe": "EAI_AGAIN getaddrinfo registry.npmjs.org",
+    "lockGenerationNondefaultNpmFlags": "NONE",
+    "lockfileVersion": null,
+    "nodeVersion": "v22.16.0",
+    "npmCacheEntryCount": 0,
+    "npmConfig": {
+      "include": "",
+      "includeWorkspaceRoot": false,
+      "installLinks": false,
+      "legacyPeerDeps": false,
+      "lockfileVersionConfig": null,
+      "omit": "",
+      "packageLock": true,
+      "strictPeerDeps": false,
+      "workspaces": null
+    },
+    "npmRegistry": "https://registry.npmjs.org/",
+    "npmRegistryAccessDuringInstall": false,
+    "npmVersion": "10.9.2",
+    "packageLockSha256": null,
+    "preexistingNodeModules": false,
+    "requiredProjectNpmConfigCommitted": false
+  },
+  "mission": "SENTIENT_GOVERNED_PILOT_CONTINUATION_V1",
+  "next": "Provide a provider-isolated executor with npm registry access. From a fresh checkout of exact predecessor 4811e09ee2aa69da818a70eb961f7126b199ac11 run exactly npm install --package-lock-only with no nondefault dependency-tree flags, commit only package-lock.json on the same canonical branch, freeze the successor SHA/tree, then restart exact-source final acceptance.",
+  "phase": "REPRODUCIBILITY_REPAIR_AND_FINAL_INDEPENDENT_ACCEPTANCE",
+  "predecessor": {
+    "finalAcceptanceEligible": false,
+    "sha": "4811e09ee2aa69da818a70eb961f7126b199ac11",
+    "status": "BLOCKED_ACCEPTANCE_REPRODUCIBILITY",
+    "tree": "e196457351891bf392b9747dacce26350bcd2902"
+  },
+  "result": "BLOCKED_LOCKFILE_GENERATION_INFRASTRUCTURE",
+  "sourceDelta": {
+    "applicationSourceChanged": false,
+    "dependencyLockfileCreated": false,
+    "gptActionBridgeSourceChanged": false,
+    "mcpSourceChanged": false,
+    "packageJsonChanged": false,
+    "pilotSourceChanged": false
+  },
+  "successor": {
+    "finalIndependentAcceptance": "NOT_STARTED_NO_LOCKFILE_BEARING_SUCCESSOR",
+    "newCandidateSha": null,
+    "newCandidateTree": null
+  }
+}
