@@ -1,0 +1,119 @@
+{
+  "authority": {
+    "authorityExpansion": false,
+    "governorBypass": false,
+    "governorGovernsEffects": true,
+    "modelOutputIsNeverAuthority": true,
+    "parallelAuthoritySystemCreated": false,
+    "sentientIsAuthoritative": true
+  },
+  "candidate": {
+    "baseSha": "6cf76acc4bfb91065ea39acfb8275a14c4b8748d",
+    "baseTree": "c7e07e3270cc4e31449747fdbf66a69120eaaf10",
+    "branch": "sentient-governed-pilot-continuation-v1",
+    "repository": "riggeyb/sentient",
+    "sha": "4811e09ee2aa69da818a70eb961f7126b199ac11",
+    "tree": "e196457351891bf392b9747dacce26350bcd2902"
+  },
+  "economics": {
+    "cumulativePilotProviderSpendUsd": 0.031958,
+    "newKimiCalls": 0,
+    "newLiveProviderCalls": 0,
+    "newProviderSpendUsd": 0
+  },
+  "executedEvidence": {
+    "focusedPilotFakeOnly": {
+      "notes": [
+        "bootstrap replay/conflict/stale/non-human authority",
+        "state read nonmutating/no secrets",
+        "valid continuation and receipt/state transition",
+        "wrong mission/gate/slot/revision and consumed slot fail closed",
+        "duplicate wakeup and concurrent duplicate at most one fake dispatch",
+        "missing/stale human authority pre-dispatch",
+        "Governor denial no fake dispatch",
+        "budget exhaustion no fake dispatch",
+        "invalid artifact deterministic failure",
+        "closed request forbids provider/model/budget/new slot",
+        "bootstrap exact snapshot digest binding",
+        "soft-budget currentness binding",
+        "Action Fabric Governor allow and privacy-drift deny",
+        "fake acceptance support contains no live provider transport"
+      ],
+      "outputSha256": "sha256:29ad7a314fb374623e76809e41f8a660e791aaedb94c7bd47c81d3f925c78fe7",
+      "result": "PASS_20_OF_20"
+    },
+    "mcpIntegration": {
+      "notes": [
+        "sentient.pilot.get_state is fixed zero-input read-only tool",
+        "sentient.pilot.continue_gate uses strict five-field schema",
+        "Sentient client routes to GET /v1/pilot/state and POST /v1/pilot/continue",
+        "server-side Sentient API token remains internal",
+        "no arbitrary MCP operation introduced"
+      ],
+      "result": "PASS_SOURCE_VERIFIED"
+    },
+    "objectiveContinuationRegression": {
+      "notes": [
+        "canonical identity/currentness",
+        "processed wakeup deduplication",
+        "trusted evidence binding",
+        "HUMAN_AUTHORITY-only satisfaction",
+        "projection/lookahead behavior",
+        "terminal fencing",
+        "Director binding remains non-authoritative"
+      ],
+      "outputSha256": "sha256:477d4a822f9c36fd9a1532c62abd074c0d85de728354fb372d282d3869e3c465",
+      "result": "PASS"
+    }
+  },
+  "mission": "SENTIENT_GOVERNED_PILOT_CONTINUATION_V1",
+  "next": "Run dependency-exact strict TypeScript build and the relevant hermetic repository regression suite against exact SHA 4811e09ee2aa69da818a70eb961f7126b199ac11 / tree e196457351891bf392b9747dacce26350bcd2902 in a non-provider-capable environment. If both pass and HEAD remains unchanged, issue final independent acceptance receipt. Do not deploy, bootstrap, or execute Gate 2.",
+  "notVerified": {
+    "independentAcceptance": {
+      "reason": "Mission success requires strict dependency-exact build and relevant full repository regression PASS on the exact final SHA/tree.",
+      "status": "BLOCKED"
+    },
+    "relevantRepositoryRegression": {
+      "reason": "Focused pilot and objective-continuation regressions executed, but the full dependency-installed hermetic repository suite could not be built/run without the unavailable pinned dependencies.",
+      "status": "PARTIAL_NOT_FULL"
+    },
+    "strictTypescriptBuild": {
+      "reason": "Current non-GitHub-Actions acceptance host has Node/TypeScript but cannot install the repository's pinned external npm dependencies; outbound npm access is unavailable. GitHub Actions remains account/billing blocked. A dependency-exact npm ci + npm run build was therefore not executable.",
+      "status": "NOT_VERIFIED"
+    }
+  },
+  "phase": "EXACT_SOURCE_INTEGRATION_AND_ACCEPTANCE",
+  "result": "BLOCKED_ACCEPTANCE_ENVIRONMENT",
+  "sourceRepairsConsumed": [
+    "a3205e5924cfc1397a9527aea9caa63d9b3a2359: repair continuation path validation syntax",
+    "88485fc123b1a0ae9dc2c62cbd849fa52c182044: repair PilotStateV1 integration typos",
+    "9e16cb8bf26092a1465f7fb65b1aa006e525534d: align pilot Governor privacy binding",
+    "0e97ae8fb2c8f0e8d406a76e396a855ea9a2e02c: share canonical pilot Governor privacy binding",
+    "e7bba6734416b4872cbf368cbf3ba57e2a2682b1: add existing Governor admission path test",
+    "4811e09ee2aa69da818a70eb961f7126b199ac11: validate pilot Action Fabric admission request"
+  ],
+  "verified": {
+    "acceptanceProvider": "fake",
+    "bootstrapExecuted": false,
+    "bootstrapHumanAuthorizationRequired": true,
+    "bootstrapMechanismImplemented": true,
+    "closureCall2Consumed": false,
+    "exactShaMatch": "PASS",
+    "exactTreeMatch": "PASS",
+    "expectedBaseLineage": "PASS",
+    "gate2FullyClosed": false,
+    "gate3Authorized": false,
+    "gptActionBridgeSourceChanged": false,
+    "kimiCalls": 0,
+    "livePilotStateAuthoritative": false,
+    "liveProviderCalls": 0,
+    "liveProviderTransportWiredInAcceptance": false,
+    "mcpContinueTool": "sentient.pilot.continue_gate",
+    "mcpGetStateTool": "sentient.pilot.get_state",
+    "mcpGlueTransportOnly": true,
+    "newProviderSpendUsd": 0,
+    "pilotContinueHttpRoute": "POST /v1/pilot/continue",
+    "pilotStateHttpRoute": "GET /v1/pilot/state",
+    "pilotStateV1Implemented": true
+  }
+}
