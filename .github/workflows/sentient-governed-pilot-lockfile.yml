@@ -12,10 +12,15 @@ on:
 
 permissions:
   contents: read
+
 jobs:
   lockfile:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      ATLASCLOUD_API_KEY: ""
+      ATLAS_API_KEY: ""
+      KIMI_API_KEY: ""
     steps:
       - name: Checkout exact Sentient predecessor
         uses: actions/checkout@v4
@@ -32,7 +37,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
-          test "$(git rev-parse HEAD@^{tree})" = "${{ inputs.tree }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.tree }}"
+          test -z "$(git status --short)"
           if [ -e package-lock.json ]; then
             echo "PREDECESSOR_ALREADY_HAS_LOCKFILE=true"
             exit 1
@@ -42,18 +48,18 @@ jobs:
             exit 1
           fi
           echo "PREEXISTING_NODE_MODULES=false"
+          echo "WORKTREE_CLEAN=true"
 
-      - name: Setup Node 22
+      - name: Setup exact Node runtime
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version: 22.16.0
 
       - name: Prove no live provider credentials
         shell: bash
         run: |
           set -euo pipefail
-          if env | cut -d= -f1 | grep -Eqi 'ATLAS|KIMI'; then
+          if env | awk -F= 'BEGIN{IGNORECASE=1} ($1 ~ /ATLAS|KIMI/) && length($2)>0 {found=1} END{exit found?0:1}'; then
             echo "LIVE_PROVIDER_CREDENTIALS_PRESENT=true"
             exit 1
           fi
@@ -67,20 +73,31 @@ jobs:
           echo "NODE_VERSION=$(node --version)"
           echo "NPM_VERSION=$(npm --version)"
           echo "NPM_REGISTRY=$(npm config get registry)"
+          echo "LOCK_GENERATION_COMMAND=npm install --package-lock-only"
           echo "LOCK_GENERATION_NONDEFAULT_NPM_FLAGS=NONE"
+          echo "REQUIRED_PROJECT_NPM_CONFIG_COMMITTED=false"
 
-      - name: Generate lockfile with default npm semantics
+      - name: Generate and mechanically review lockfile
         working-directory: source
         shell: bash
         run: |
           set -euo pipefail
           sha256sum package.json > /tmp/package-before.sha256
           npm install --package-lock-only
+
+          echo "=== git diff -- package.json ==="
+          git diff -- package.json
+          echo "=== git diff -- package-lock.json ==="
+          git diff -- package-lock.json
+          echo "=== git status --short ==="
+          git status --short
+
           test "$(sha256sum package.json | cut -d' ' -f1)" = "$(cut -d' ' -f1 /tmp/package-before.sha256)"
           test ! -e node_modules
           test -f package-lock.json
           test -z "$(git diff --name-only -- package.json)"
-          test "$(git status --porcelall | tr -d '\r')" = "?? package-lock.json"
+          test "$(git status --porcelain | tr -d '\r')" = "?? package-lock.json"
+
           echo "DEPENDENCY_LOCKFILE_CREATED=true"
           echo "PACKAGE_JSON_CHANGED=false"
           echo "APPLICATION_SOURCE_CHANGED=false"
