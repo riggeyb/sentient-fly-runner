@@ -1,0 +1,204 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Sentient Operator Health Bridge",
+    "version": "1.0.0",
+    "description": "Temporary health-only transport bridge from the existing Sentient GPT Action to the existing Fly-hosted Sentient MCP."
+  },
+  "servers": [
+    {
+      "url": "https://REPLACE_WITH_BRIDGE_FLY_HOST"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/operator/health": {
+      "get": {
+        "operationId": "checkSentientHealth",
+        "summary": "Check authoritative Sentient health through the existing MCP transport",
+        "description": "Authenticates the GPT Action request, invokes the existing sentient.health MCP tool server-side, and returns a factual health response. This endpoint cannot invoke arbitrary MCP tools or governed effects.",
+        "responses": {
+          "200": {
+            "description": "The bridge reached the existing MCP and received a successful Sentient health response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect Bearer credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Only GET is allowed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The bridge accepted the request but could not obtain authoritative Sentient health through MCP.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DegradedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Dedicated GPT Action Bearer credential configured separately in the GPT Action authentication settings."
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "bridge",
+          "mcpReachable",
+          "sentientReachable",
+          "authority",
+          "timestamp",
+          "evidence",
+          "sentientHealth"
+        ],
+        "properties": {
+          "bridge": {
+            "type": "string",
+            "const": "ok"
+          },
+          "mcpReachable": {
+            "type": "boolean",
+            "const": true
+          },
+          "sentientReachable": {
+            "type": "boolean",
+            "const": true
+          },
+          "sentientStatus": {
+            "type": "string"
+          },
+          "authority": {
+            "type": "string",
+            "const": "sentient"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "type": "object",
+            "required": [
+              "source",
+              "tool"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "const": "existing-sentient-mcp"
+              },
+              "tool": {
+                "type": "string",
+                "const": "sentient.health"
+              }
+            },
+            "additionalProperties": false
+          },
+          "sentientHealth": {}
+        },
+        "additionalProperties": false
+      },
+      "DegradedResponse": {
+        "type": "object",
+        "required": [
+          "bridge",
+          "mcpReachable",
+          "sentientReachable",
+          "authority",
+          "timestamp",
+          "evidence",
+          "error"
+        ],
+        "properties": {
+          "bridge": {
+            "type": "string",
+            "const": "ok"
+          },
+          "mcpReachable": {
+            "type": "boolean"
+          },
+          "sentientReachable": {
+            "type": "boolean",
+            "const": false
+          },
+          "authority": {
+            "type": "string",
+            "const": "sentient"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "type": "object",
+            "required": [
+              "source",
+              "tool"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "const": "existing-sentient-mcp"
+              },
+              "tool": {
+                "type": "string",
+                "const": "sentient.health"
+              }
+            },
+            "additionalProperties": false
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
