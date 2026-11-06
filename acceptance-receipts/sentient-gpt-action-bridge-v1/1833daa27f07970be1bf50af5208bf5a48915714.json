@@ -1,5 +1,5 @@
 {
-  "mission": "SENTIDÔßGPT_ACTION_BRIDGE_V1",
+  "mission": "SENTIENT_GPT_ACTION_BRIDGE_V1",
   "phase": "LIVE_RUNTIME_RECONCILIATION_COLD_START_HARDENING_AND_CONDITIONAL_GATE_ADAPTER",
   "canonicalBridgeRepository": "riggeyb/sentient",
   "canonicalBridgePr": 367,
@@ -8,7 +8,7 @@
   "finalBridgeTree": "f5e002c67bc12883029f4cad7ec2d4e75482ed32",
   "exactShaTreeMatch": "PASS",
   "expectedParentLineage": "PASS",
-  "scopeBoundary": "PASS_ALL_FILES_UNDER_FLY-NOW/GPT_ACTION_BRIDGE_V1",
+  "scopeBoundary": "PASS_ALL_FILES_UNDER_.fly-now/gpt-action-bridge-v1",
   "incrementScope": "MODIFY_MCP_CLIENT_TIMEOUT_AND_ADD_COLD_START_TEST_ONLY",
   "mcpClientBlob": "b1134085b9930e851e6080cc42b77135a18fc573",
   "coldStartTestBlob": "bae844171d8509346516512bf0874eb082e0ac57",
