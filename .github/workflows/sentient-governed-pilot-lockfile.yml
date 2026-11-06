@@ -1,0 +1,99 @@
+name: Sentient Governed Pilot Lockfile Generation
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact predecessor Sentient SHA
+        required: true
+      tree:
+        description: Exact predecessor Sentient tree
+        required: true
+
+permissions:
+  contents: read
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact Sentient predecessor
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.candidate_sha }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fence exact source identity
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+          test "$(git rev-parse HEAD@^{tree})" = "${{ inputs.tree }}"
+          if [ -e package-lock.json ]; then
+            echo "PREDECESSOR_ALREADY_HAS_LOCKFILE=true"
+            exit 1
+          fi
+          if [ -e node_modules ]; then
+            echo "PREEXISTING_NODE_MODULES=true"
+            exit 1
+          fi
+          echo "PREEXISTING_NODE_MODULES=false"
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Prove no live provider credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if env | cut -d= -f1 | grep -Eqi 'ATLAS|KIMI'; then
+            echo "LIVE_PROVIDER_CREDENTIALS_PRESENT=true"
+            exit 1
+          fi
+          echo "LIVE_PROVIDER_CREDENTIALS_PRESENT=false"
+
+      - name: Record npm provenance
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "NODE_VERSION=$(node --version)"
+          echo "NPM_VERSION=$(npm --version)"
+          echo "NPM_REGISTRY=$(npm config get registry)"
+          echo "LOCK_GENERATION_NONDEFAULT_NPM_FLAGS=NONE"
+
+      - name: Generate lockfile with default npm semantics
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum package.json > /tmp/package-before.sha256
+          npm install --package-lock-only
+          test "$(sha256sum package.json | cut -d' ' -f1)" = "$(cut -d' ' -f1 /tmp/package-before.sha256)"
+          test ! -e node_modules
+          test -f package-lock.json
+          test -z "$(git diff --name-only -- package.json)"
+          test "$(git status --porcelall | tr -d '\r')" = "?? package-lock.json"
+          echo "DEPENDENCY_LOCKFILE_CREATED=true"
+          echo "PACKAGE_JSON_CHANGED=false"
+          echo "APPLICATION_SOURCE_CHANGED=false"
+          echo "PILOT_SOURCE_CHANGED=false"
+          echo "MCP_SOURCE_CHANGED=false"
+          echo "GPT_ACTION_BRIDGE_SOURCE_CHANGED=false"
+          echo "LOCKFILE_VERSION=$(node -p 'require(\"./package-lock.json\").lockfileVersion')"
+          echo "PACKAGE_LOCK_SHA256=$(sha256sum package-lock.json | cut -d' ' -f1)"
+
+      - name: Upload lockfile artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentient-pilot-lockfile-${{ inputs.candidate_sha }}
+          path: source/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
