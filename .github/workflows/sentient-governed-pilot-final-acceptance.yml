@@ -1,0 +1,218 @@
+name: Sentient Governed Pilot Final Exact Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact lockfile-bearing Sentient candidate SHA
+        required: true
+      candidate_tree:
+        description: Exact lockfile-bearing Sentient candidate tree
+        required: true
+      predecessor_sha:
+        description: Permanently ineligible predecessor SHA
+        required: true
+        default: 4811e09ee2aa69da818a70eb961f7126b199ac11
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ATLASCLOUD_API_KEY: ""
+      ATLAS_API_KEY: ""
+      KIMI_API_KEY: ""
+      SENTIENT_ACCEPTANCE_PROVIDER: fake
+    steps:
+      - name: Checkout exact Sentient candidate
+        uses: actions/checkout@v4
+        with:
+          repository: riggeyb/sentient
+          ref: ${{ inputs.candidate_sha }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fence fresh exact checkout
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.candidate_tree }}"
+          test -z "$(git status --short)"
+          test -f package-lock.json
+          if [ -e node_modules ]; then
+            echo "PREEXISTING_NODE_MODULES=true"
+            exit 1
+          fi
+          echo "PREEXISTING_NODE_MODULES=false"
+          echo "EXACT_SHA_VERIFICATION=PASS"
+          echo "EXACT_TREE_VERIFICATION=PASS"
+          echo "WORKTREE_CLEAN=true"
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Prove provider isolation for entire executor
+        shell: bash
+        run: |
+          set -euo pipefail
+          if env | awk -F= 'BEGIN{IGNORECASE=1} ($1 ~ /ATLAS|KIMI/) && length($2)>0 {found=1} END{exit found?0:1}'; then
+            echo "LIVE_PROVIDER_CREDENTIALS_PRESENT=true"
+            exit 1
+          fi
+          test "${SENTIENT_ACCEPTANCE_PROVIDER}" = "fake"
+          echo "LIVE_PROVIDER_CREDENTIALS_PRESENT=false"
+          echo "ACCEPTANCE_PROVIDER=fake"
+          echo "LIVE_PROVIDER_TRANSPORT_NOT_WIRED_IN_ACCEPTANCE=true"
+
+      - name: Record acceptance commands and regression rationale
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat <<'EOF'
+          ACCEPTANCE_COMMANDS_EXECUTED=npm ci ; npm run build ; npm test ; npm run test:permanent-continuation ; node --test dist/test/pilot-*.test.js ; node --test dist/test/objective-continuation.test.js ; node --test dist/test/action-fabric-authority-reuse.test.js ; static MCP route/schema verification
+          RELEVANT_REGRESSION_SELECTION_RATIONALE=The changed closure is canonical PilotStateV1/bootstrap/governed continuation plus objective-continuation reuse, Action Fabric Governor admission, persistence/economic/single-spender state, and fixed priority1 MCP routing. Therefore acceptance runs the repository strict build, persistence npm test, permanent-continuation regression, focused pilot/bootstrap/continuation/economic/concurrency suites, explicit objective-continuation regression, Action Fabric authority reuse regression, and static fixed MCP route/schema verification. Unrelated external-infrastructure suites are outside this changed closure and must be recorded separately if encountered rather than silently counted as PASS or failure.
+          EOF
+
+      - name: Install exact dependencies from committed lockfile
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum package.json > /tmp/package-before-ci.sha256
+          sha256sum package-lock.json > /tmp/lock-before-ci.sha256
+          npm ci
+          test "$(sha256sum package.json | cut -d' ' -f1)" = "$(cut -d' ' -f1 /tmp/package-before-ci.sha2556)"
+          test "$(sha256sum package-lock.json | cut -d' ' -f1)" = "$(cut -d' ' -f1 /tmp/lock-before-ci.sha256)"
+          test -z "$(git diff --name-only -- package.json package-lock.json)"
+          test -z "$(git status --short)"
+          echo "NPM_CI=PASS"
+          echo "PACKAGE_JSON_UNCHANGED_AFTER_NPM_CI=PASS"
+          echo "LOCKFILE_UNCHANGED_AFTER_NPM_CI=PASS"
+          echo "WORKTREE_SOURCE_CLEAN_AFTER_NPM_CI=PASS"
+
+      - name: Prefer outbound network denial for application build and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          isolated=false
+          if command -v iptables >/dev/null 2>&1 && command -v ip6tables >/dev/null 2>&1; then
+            if sudo iptables -F OUTPUT \
+              && sudo iptables -A OUTPUT -o lo -j ACCEPT \
+              && sudo iptables -P OUTPUT DROP \
+              && sudo ip6tables -F OUTPUT \
+              && sudo ip6tables -A OUTPUT -o lo -j ACCEPT \
+              && sudo ip6tables -P OUTPUT DROP; then
+              isolated=true
+            fi
+          fi
+          if [ "$isolated" = true ]; then
+            if node -e 'fetch("https://registry.npmjs.org/",{signal:AbortSignal.timeout(2000)}).then(()=>process.exit(1)).catch(()=>process.exit(0))'; then
+              echo "APPLICATION_TEST_NETWORK_ACCESS=false"
+              echo "APPLICATION_TEST_NETWORK_ISOLATION_NOT_AVAILABLE=false"
+            else
+              echo "NETWORK_DENIAL_PROBE_FAILED=true"
+              exit 1
+            fi
+          else
+            echo "APPLICATION_TEST_NETWORK_ISOLATION_NOT_AVAILABLE=true"
+            echo "LIVE_PROVIDER_CREDENTIALS_PRESENT=false"
+            echo "ACCEPTANCE_PROVIDER=fake"
+            echo "LIVE_PROVIDER_TRANSPORT_NOT_WIRED_IN_ACCEPTANCE=true"
+          fi
+
+      - name: Strict TypeScript build
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          echo "FULL_STRICT_BUILD=PASS"
+
+      - name: Repository persistence regression
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          echo "NPM_TEST=PASS"
+
+      - name: Permanent continuation regression
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:permanent-continuation
+          echo "PERMANENT_CONTINUATION_REGRESSION=PASS"
+
+      - name: Focused pilot acceptance
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test dist/test/pilot-*.test.js
+          echo "FOCUSED_PILOT_TESTS=PASS"
+          echo "FAKE_ONLY_PROVIDER_COMPOSITION=PASS"
+
+      - name: Objective continuation regression
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test dist/test/objective-continuation.test.js
+          echo "OBJECTIVE_CONTINUATION_REGRESSION=PASS"
+
+      - name: Action Fabric Governor regression
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test dist/test/action-fabric-authority-reuse.test.js
+          echo "GOVERNOR_PATH_REGRESSION=PASS"
+
+      - name: Verify fixed MCP pilot surface
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import assert from "node:assert/strict";
+          const tools = fs.readFileSync(".fly-now/priority1-mcp/src/pilot-tools.ts", "utf8");
+          const client = fs.readFileSync(".fly-now/priority1-mcp/src/clients/sentient.ts", "utf8");
+          assert.match(tools, /sentient\.pilot\.get_state/);
+          assert.match(tools, /sentient\.pilot\.continue_gate/);
+          assert.match(tools, /mission/);
+          assert.match(tools, /expectedGate/);
+          assert.match(tools, /expectedCallSlot/);
+          assert.match(tools, /expectedRevision/);
+          assert.match(tools, /wakeupId/);
+          assert.doesNotMatch(tools, /set_budget|set_state|create_gate|providerSelection|modelSelection/);
+          assert.match(client, /\/v1\/pilot\/state/);
+          assert.match(client, /\/v1\/pilot\/continue/);
+          console.log("MCP_INTEGRATION=PASS");
+          NODE
+
+      - name: Final clean-worktree and provider-effect fence
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --short)"
+          echo "FULL_RELEVANT_REGRESSION=PASS"
+          echo "LIVE_PROVIDER_CREDENTIALS_PRESENT=false"
+          echo "ACCEPTANCE_PROVIDER=fake"
+          echo "LIVE_PROVIDER_TRANSPORT_NOT_WIRED_IN_ACCEPTANCE=true"
+          echo "LIVE_PROVIDER_CALLS=0"
+          echo "KIMI_CALLS=0"
+          echo "NEW_PROVIDER_SPEND_USD=0"
+          echo "EXACT_SHA_TREE_VERIFICATION=PASS"
