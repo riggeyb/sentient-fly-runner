@@ -1,0 +1,105 @@
+name: Sentient GPT Action Bridge V1 Acceptance
+
+"on":
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+      candidate_tree:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CANONICAL_BASE_SHA: 6cf76acc4bfb91065ea39acfb8275a14c4b8748d
+  CANONICAL_BASE_TREE: c7e07e3270cc4e31449747fdbf66a69120eaaf10
+  FINAL_BRIDGE_SHA: ${{ inputs.candidate_sha }}
+  FINAL_BRIDGE_TREE: ${{ inputs.candidate_tree }}
+  BRIDGE_PATH: .fly-now/gpt-action-bridge-v1
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout independent acceptance repository
+        uses: actions/checkout@v4
+
+      - name: Checkout exact canonical bridge candidate
+        shell: bash
+        env:
+          SENTIENT_SOURCE_GITHUB_TOKEN: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SENTIENT_SOURCE_GITHUB_TOKEN"
+          auth="$(printf 'x-access-token:%s' "$SENTIENT_SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --no-checkout https://github.com/riggeyb/sentient.git candidate
+          git -C candidate -c http.extraheader="AUTHORIZATION: basic $auth" fetch --depth=64 origin "$CANONICAL_BASE_SHA" "$FINAL_BRIDGE_SHA"
+          git -C candidate checkout --detach "$FINAL_BRIDGE_SHA"
+          git -C candidate remote set-url origin disabled://sentient
+          unset auth
+          test "$(git -C candidate rev-parse HEAD)" = "$FINAL_BRIDGE_SHA"
+          test "$(git -C candidate show -s --format=%T HEAD)" = "$FINAL_BRIDGE_TREE"
+          test "$(git -C candidate show -s --format=%T "$CANONICAL_BASE_SHA")" = "$CANONICAL_BASE_TREE"
+          echo "EXACT_SHA_TREE_MATCH=PASS"
+
+      - name: Verify parent lineage and scope boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C candidate merge-base --is-ancestor "$CANONICAL_BASE_SHA" "$FINAL_BRIDGE_SHA"
+          echo "EXPECTED_PARENT_LINEAGE=PASS"
+
+          mapfile -t changed < <(git -C candidate diff --name-only "$CANONICAL_BASE_SHA" "$FINAL_BRIDGE_SHA")
+          test "${#changed[@]}" -gt 0
+          for path in "${changed[@]}"; do
+            case "$path" in
+              .fly-now/gpt-action-bridge-v1/*) ;;
+              *) echo "OUT_OF_SCOPE_PATH=$path"; exit 1 ;;
+            esac
+          done
+          echo "SCOPE_BOUNDARY=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deterministic bridge acceptance
+        working-directory: candidate/.fly-now/gpt-action-bridge-v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/server.mjs
+          node --check src/mcp-client.mjs
+          node --check src/server.test.mjs
+          node --check src/reconciliation.test.mjs
+          node --test src/server.test.mjs src/reconciliation.test.mjs
+          echo "DETERMINISTIC_BRIDGE_TESTS=PASS"
+          echo "OPENAPI_SURFACE_TEST=PASS"
+          echo "CREDENTIAL_SEPARATION_TEST=PASS"
+
+      - name: Verify frozen authority and economic boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e candidate/paid-call-leases/HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1__GATE_2_FINAL_ARTIFACT_CLOSURE__closure-call-2.json
+          ! grep -R -n -E 'fly deploy|ATLASCLOUD_API_KEY|moonshotai/kimi-k3\.1-pro' "$BRIDGE_PATH" candidate/.fly-now/gpt-action-bridge-v1 2>/dev/null
+          echo "NO_PROVIDER_CALLS=PASS"
+          echo "NO_GATE_2_ACTIVITY=PASS"
+          echo "NO_PRODUCTION_DEPLOYMENT=PASS"
+          echo "GATE_3_AUTHORIZED=false"
+          echo "PRODUCTION_MUTATION=false"
+          echo "AUTHORITY_EXPANSION=false"
+          echo "GOVERNOR_BYPASS=false"
+
+      - name: Re-fence exact candidate
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$FINAL_BRIDGE_SHA"
+          test "$(git -C candidate show -s --format=%T HEAD)" = "$FINAL_BRIDGE_TREE"
+          test -z "$(git -C candidate status --porcelain --untracked-files=no)"
