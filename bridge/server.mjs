@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 const MCP_ENDPOINT = "https://sentient-ops-mcp.fly.dev/mcp";
@@ -172,12 +172,8 @@ function authorized(header, expectedToken) {
 }
 
 function secureEqual(left, right) {
-  const a = Buffer.from(String(left), "utf8");
-  const b = Buffer.from(String(right), "utf8");
-  if (a.length !== b.length) {
-    timingSafeEqual(a, Buffer.alloc(a.length));
-    return false;
-  }
+  const a = createHash("sha256").update(String(left), "utf8").digest();
+  const b = createHash("sha256").update(String(right), "utf8").digest();
   return timingSafeEqual(a, b);
 }
 
