@@ -1,0 +1,116 @@
+{
+  "acceptance": {
+    "atlasCloudApiKeyPresent": false,
+    "kimiCalls": 0,
+    "liveProviderCalls": 0,
+    "liveProviderCredentialsPresent": false,
+    "liveProviderTransportWired": false,
+    "newProviderSpendUsd": 0,
+    "provider": "fake"
+  },
+  "authority": {
+    "governorBypass": false,
+    "mcpGlueBecameAuthority": false,
+    "parallelAuthoritySystemCreated": false
+  },
+  "candidate": {
+    "pr": 368,
+    "sha": "1372cf013e59c6adf7c6bbbfc21f959df3a53f41",
+    "tree": "d64964b9a79c3a89c60d320f91b4ee459669c9ea"
+  },
+  "liveFreeze": {
+    "bootstrapAuthorized": false,
+    "bootstrapExecuted": false,
+    "closureCall2Consumed": false,
+    "cumulativePilotProviderSpendUsd": 0.031958,
+    "gate2Authorized": false,
+    "gate2FullyClosed": false,
+    "gate3Authorized": false,
+    "liveGate2Execution": false,
+    "livePilotStateAuthoritative": false,
+    "preproductionDeploymentExecuted": false
+  },
+  "mission": "HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1",
+  "notes": [
+    "Focused provider-free tests were executed locally from the final-head behavioral closure with no live provider transport.",
+    "TypeScript emission on the local host reported only absent local @types/node declarations; no dependency-exact strict build is claimed.",
+    "No deployment, bootstrap, provider call, Kimi call, production mutation, or GPT Action bridge change occurred."
+  ],
+  "parent": {
+    "remoteIdentityCheck": "PASS",
+    "sha": "4811e09ee2aa69da818a70eb961f7126b199ac11",
+    "tree": "e196457351891bf392b9747dacce26350bcd2902"
+  },
+  "phase": "PROVIDER_DISABLED_PILOT_AND_ISOLATED_MCP_TARGET_REPAIR",
+  "repair1": {
+    "atlasAdapterConstructedInDisabledMode": false,
+    "atlasKeyRequiredInDisabledMode": false,
+    "canonicalStateRead": true,
+    "continueFailsBeforeMutation": true,
+    "economicStateChanged": false,
+    "governorAdmissionPerformed": false,
+    "prebootstrapResult": "PILOT_NOT_BOOTSTRAPPED",
+    "providerDisabledPilotModeImplemented": true,
+    "providerDispatchCount": 0,
+    "receiptCreated": false,
+    "revisionChanged": false,
+    "slotChanged": false,
+    "stateChanged": false,
+    "surfaceEnablementSeparateFromProviderEnablement": true
+  },
+  "repair2": {
+    "arbitraryOriginAllowed": false,
+    "flyObservabilityDisabledInPreprod": true,
+    "mcpPreproductionProfileImplemented": true,
+    "netlifyDirectorAuthorityDisabledInPreprod": true,
+    "preprodSentientTargetDerived": true,
+    "productionFixedTargetsPreserved": true,
+    "productionFlyManifestBlobUnchanged": "d53ff1da4e82002355401dd05fc531a6d0a0b788",
+    "productionSentientTargetRejected": true
+  },
+  "result": "PASS_TRACK_A_PREPRODUCTION_BLOCKERS_REPAIRED",
+  "scope": {
+    "gptActionBridgeSourceChanged": false,
+    "observedAllowedRepairPaths": [
+      ".fly-now/priority1-mcp/src/config.ts",
+      ".fly-now/priority1-mcp/src/config.test.ts",
+      "src/objective-continuation/http-server.ts",
+      "src/pilot/http.ts",
+      "src/pilot/production.ts",
+      "src/pilot/provider-disabled.ts",
+      "src/pilot/service.ts",
+      "test/objective-continuation-readiness.test.ts",
+      "test/pilot-preproduction-repair.test.ts"
+    ],
+    "productionMcpFlyManifestChanged": false,
+    "productionMutation": false
+  },
+  "tests": {
+    "budgetExhaustion": "PASS_NO_PROVIDER_DISPATCH",
+    "concurrentRequest": "PASS_MAX_ONE_FAKE_DISPATCH",
+    "duplicateRequest": "PASS",
+    "governorDenial": "PASS_NO_PROVIDER_DISPATCH",
+    "mcpProfile": {
+      "outputSha256": "104719ea177d513105da0952e0f7b712feee2d24bdc9401abd79ed4e3a93dc8d",
+      "result": "PASS_8_OF_8"
+    },
+    "objectiveContinuation": {
+      "outputSha256": "b8318bf22dd0665ca6a57ddd850bd2e23b934030ae339f16c7e05e11b4f93b8",
+      "result": "PASS_5_OF_5"
+    },
+    "pilotBootstrap": {
+      "outputSha256": "7784470c0d63a73b9b649476b9b227e5f0880b55d94e2b01e9f50cbd24db3b1c",
+      "result": "PASS_5_OF_5"
+    },
+    "pilotContinuationProviderFree": {
+      "outputSha256": "03f1a99e23d77b3890dd9db67cb61e1feceaefec52df8671aebda2bc987e78c5",
+      "result": "PASS_10_OF_10"
+    },
+    "providerCapableFakeCompositionRegression": "PASS"
+  },
+  "trackB": {
+    "dependencyLockfilePresent": false,
+    "finalSourceAcceptance": "BLOCKED_REPRODUCIBILITY",
+    "productionEligibility": false
+  }
+}
