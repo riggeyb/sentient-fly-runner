@@ -1,0 +1,67 @@
+{
+  "authorizedSource": {
+    "pr": 368,
+    "remoteIdentityCheck": "PASS",
+    "repo": "riggeyb/sentient",
+    "sha": "1372cf013e59c6adf7c6bbbfc21f959df3a53f41",
+    "tree": "d64964b9a79c3a89c60d320f91b4ee459669c9ea"
+  },
+  "deploymentClass": "BOUNDED_PREPRODUCTION_EXPERIMENT",
+  "executionPlan": {
+    "mcpPreprodApp": "sentient-pilot-mcp-preprod-v1",
+    "mcpRuntimeProfile": "preproduction",
+    "pilotExecutionMode": "disabled",
+    "preprodStateKey": "pilot-preprod-v1",
+    "preprodStateTable": "sentient_durable_state_preprod",
+    "sentientPreprodApp": "sentient-pilot-preprod-v1"
+  },
+  "executorEvidence": {
+    "jobConclusion": "failure",
+    "jobId": 128318101230,
+    "jobLogsAvailable": false,
+    "jobLogsFailure": "BlobNotFound",
+    "jobStarted": false,
+    "repo": "riggeyb/sentient-fly-runner",
+    "runConclusion": "failure",
+    "runId": 42344142428,
+    "runnerId": 0,
+    "stepsExecuted": 0,
+    "workflow": ".github/workflows/track-a-preprod-v2-preflight.yml",
+    "workflowCommit": "c5989c800e7aadca7fbc50c76f6ba16f751acdbf"
+  },
+  "mission": "HUMAN_GOVERNED_PREPRODUCTION_AUTONOMY_PILOT_V1",
+  "mutationTruth": {
+    "bootstrapExecuted": false,
+    "flyApiCallsExecuted": 0,
+    "gptActionBridgeRuntimeChanged": false,
+    "gptActionBridgeSourceChanged": false,
+    "liveGate2Execution": false,
+    "mcpPreprodDeployed": false,
+    "preprodPersistenceCreated": false,
+    "preprodSecretsCreated": false,
+    "preproductionResourcesCreated": false,
+    "productionMutation": false,
+    "productionPersistenceMutation": false,
+    "sentientPreprodDeployed": false
+  },
+  "nextRecommendedStep": "Restore an available credential-bearing executor (GitHub Actions runner/account billing or another already-authorized Fly operator path) and rerun the same exact-source preflight. Do not change source, bootstrap, Gate 2, provider credentials, or GPT bridge.",
+  "phase": "ISOLATED_PROVIDER_DISABLED_SENTIENT_MCP_DEPLOYMENT_AND_LIVE_PROOF_V2",
+  "providerFreeze": {
+    "atlasCloudApiKeyProvisioned": false,
+    "cumulativePilotProviderSpendUsd": 0.031958,
+    "kimiCalls": 0,
+    "kimiCredentialProvisioned": false,
+    "liveProviderCalls": 0,
+    "liveProviderCapabilityEnabled": false,
+    "newProviderSpendUsd": 0,
+    "otherPaidProviderCredentialProvisioned": false
+  },
+  "result": "INFRASTRUCTURE_BLOCKER_GITHUB_ACTIONS_RUNNER_UNAVAILABLE",
+  "stop": true,
+  "track": "PREPRODUCTION_INTELLIGENCE_PILOT",
+  "trackB": {
+    "dependencyGraphSourcePinned": false,
+    "finalSourceAcceptance": "BLOCKED_REPRODUCIBILITY",
+    "productionEligibility": false
+  }
+}
