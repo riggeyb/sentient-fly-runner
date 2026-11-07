@@ -23,7 +23,7 @@
     "bootstrapExecuted": false,
     "closureCall2Consumed": false,
     "cumulativePilotProviderSpendUsd": 0.031958,
-    "gate2Authorized": false,
+    "gate2ExecutionAuthorized": false,
     "gate2FullyClosed": false,
     "gate3Authorized": false,
     "liveGate2Execution": false,
@@ -34,7 +34,8 @@
   "notes": [
     "Focused provider-free tests were executed locally from the final-head behavioral closure with no live provider transport.",
     "TypeScript emission on the local host reported only absent local @types/node declarations; no dependency-exact strict build is claimed.",
-    "No deployment, bootstrap, provider call, Kimi call, production mutation, or GPT Action bridge change occurred."
+    "No deployment, bootstrap, provider call, Kimi call, production mutation, or GPT Action bridge change occurred.",
+    "Canonical pilot HTTP handler was exercised through a real loopback Node HTTP server with in-memory canonical persistence; the DB-backed production server composition itself was not started because no test Postgres was provisioned in this source-repair increment."
   ],
   "parent": {
     "remoteIdentityCheck": "PASS",
@@ -66,21 +67,22 @@
     "preprodSentientTargetDerived": true,
     "productionFixedTargetsPreserved": true,
     "productionFlyManifestBlobUnchanged": "d53ff1da4e82002355401dd05fc531a6d0a0b788",
+    "productionOverrideRejected": true,
     "productionSentientTargetRejected": true
   },
   "result": "PASS_TRACK_A_PREPRODUCTION_BLOCKERS_REPAIRED",
   "scope": {
     "gptActionBridgeSourceChanged": false,
     "observedAllowedRepairPaths": [
-      ".fly-now/priority1-mcp/src/config.ts",
-      ".fly-now/priority1-mcp/src/config.test.ts",
-      "src/objective-continuation/http-server.ts",
+      "src/pilot/service.ts",
+      "src/pilot/provider-disabled.ts",
       "src/pilot/http.ts",
       "src/pilot/production.ts",
-      "src/pilot/provider-disabled.ts",
-      "src/pilot/service.ts",
-      "test/objective-continuation-readiness.test.ts",
-      "test/pilot-preproduction-repair.test.ts"
+      "src/objective-continuation/http-server.ts",
+      ".fly-now/priority1-mcp/src/config.ts",
+      ".fly-now/priority1-mcp/src/config.test.ts",
+      "test/pilot-preproduction-repair.test.ts",
+      "test/objective-continuation-readiness.test.ts"
     ],
     "productionMcpFlyManifestChanged": false,
     "productionMutation": false
@@ -95,7 +97,7 @@
       "result": "PASS_8_OF_8"
     },
     "objectiveContinuation": {
-      "outputSha256": "b8318bf22dd0665ca6a57ddd850bd2e23b934030ae339f16c7e05e11b4f93b8",
+      "outputSha256": "b8318fb22dd0665ca6a657ddd850bd2e23b934030ae339f16c7e05e11b4f93b8",
       "result": "PASS_5_OF_5"
     },
     "pilotBootstrap": {
@@ -103,11 +105,20 @@
       "result": "PASS_5_OF_5"
     },
     "pilotContinuationProviderFree": {
-      "outputSha256": "03f1a99e23d77b3890dd9db67cb61e1feceaefec52df8671aebda2bc987e78c5",
+      "outputSha256": "03f1a99e23777b3890dd9db67cb61e1feceaefec52df8671aebda2bc987e78c5",
       "result": "PASS_10_OF_10"
+    },
+    "pilotHttpProviderDisabled": {
+      "continueRoute": "503_PILOT_PROVIDER_CAPABILITY_DISABLED",
+      "governorCalls": 0,
+      "outputSha256": "ee127bcf5656ece851e74e829c0de2cb0e82f21f3f6636ba880b3409e9ba09e9",
+      "result": "PASS_2_OF_2",
+      "stateMutation": false,
+      "stateRoute": "404_PILOT_NOT_BOOTSTRAPPED"
     },
     "providerCapableFakeCompositionRegression": "PASS"
   },
+  "track": "PREPRODUCTION_INTELLIGENCE_PILOT",
   "trackB": {
     "dependencyLockfilePresent": false,
     "finalSourceAcceptance": "BLOCKED_REPRODUCIBILITY",
