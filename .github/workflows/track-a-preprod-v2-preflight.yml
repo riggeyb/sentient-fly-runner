@@ -1,0 +1,93 @@
+name: Track A Preprod V2 Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+      source_tree:
+        required: true
+      sentient_app:
+        required: true
+      mcp_app:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Verify Fly credential is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${FLY_API_TOKEN:}" ]; then
+            echo "FLY_API_TOKEN_PRESENT=false"
+            exit 42
+          fi
+          echo "FLY_API_TOKEN_PRESENT=true"
+      - name: Install flyctl
+        uses: superfly/flyctl-action@v1
+      - name: Verify operator identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl auth whoami
+      - name: Verify selected app names are safe and distinct
+        shell: bash
+        run: |
+          set -euo pipefail
+          s="${{ inputs.sentient_app }}"
+          m="${{ inputs.mcp_app }}"
+          test "$s" != "$m"
+          test "$s" != "sentient-validation-runner"
+          test "$m" != "sentient-ops-mcp"
+          test "$m" != "sentient-gpt-action-bridge-v1"
+          echo "$s" | grep -Eq '^sentient-pilot(.*-)?preprod(-.*)?$'
+          echo "$m" | grep -Eq '^sentient-pilot(.*-)?preprod(-.*)?$'
+          echo "SELECTED_SENTIENT_APP=$s"
+          echo "SELECTED_MCP_APP=$m"
+      - name: Verify authorized source identity remotely
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          git clone --quiet --filter=blob:none https://github.com/riggeyb/sentient.git "$tmp/sentient"
+          cd "$tmp/sentient"
+          git fetch --quiet --depth=1 origin "${{ inputs.source_sha }}"
+          git checkout --quiet --detach "${{ inputs.source_sha }}"
+          test "$(git rev-parse HEAB)" = "${{ inputs.source_sha }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ inputs.source_tree }}"
+          echo "REMOTE_SOURCE_IDENTITY_CHECK=PASS"
+      - name: Capture production baselines read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in sentient-validation-runner sentient-ops-mcp sentient-gpt-action-bridge-v1; do
+            echo "=== $app ==="
+            flyctl machines list -a "$app" --json || true
+            flyctl secrets list -a "$app --json | jq '[][] | .{"name": .Name }' || true
+          done
+      - name: Verify selected names are available or stop on collision
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in "${{ inputs.sentient_app }}" "${{ inputs.mcp_app }}"; do
+            if flyctl status -a "$app" --json >/tmp/app.json 2>/tmp/app.err; then
+              echo "APA_NAME_COLLISION=$app"
+              cat /tmp/app.json
+              exit 43
+            fi
+            echo "APP_NAME_AVAILABLE=$app"
+          done
+      - name: Record flyctl and runner versions
+        shell: bash
+        run: |
+          flyctl version
+          node --version
+          npm --version
