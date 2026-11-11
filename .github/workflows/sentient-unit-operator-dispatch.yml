@@ -1,0 +1,39 @@
+name: Sentient Unit Operator Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Bounded operator operation
+        required: true
+        type: choice
+        options:
+          - health
+          - tools_list
+          - fly_machines_list
+          - fly_machine_get
+          - engineering_create
+          - engineering_get
+          - public_probe
+      arguments:
+        description: JSON object for the bounded operation
+        required: true
+        default: "{}"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  operator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MCP_CLIENT_TOKEN: ${{ secrets.MCP_CLIENT_TOKEN }}
+      OPERATION: ${{ inputs.operation }}
+      ARGUMENTS: ${{ inputs.arguments }}
+    steps:
+      - name: Checkout exact runner source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Run existing bounded Sentient operator
+        run: node operator.mjs
