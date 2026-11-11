@@ -14,15 +14,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      TARGET_SHA: fad4aa095ca4d62ea99ec9fc62d46aa13fb11ed4
-      TARGET_TREE: 13e748c05752b42cd016731ae9fa01d2e181961d
+      TARGET_SHA: dcd7a5a8df4d504d8e173403073b10bc6ef2ec2b
+      TARGET_TREE: 5bac8a69d2333b723b2258904f83f4a82634b85d
       RECOVERY_APP: sentient-governor-recovery-root
       RECOVERY_POLICY_REVISION: SENTIENT_GOVERNOR_RECOVERY_V1
     steps:
       - uses: actions/checkout@v4
         with:
           repository: riggeyb/sentient
-          ref: fad4aa095ca4d62ea99ec9fc62d46aa13fb11ed4
+          ref: dcd7a5a8df4d504d8e173403073b10bc6ef2ec2b
           token: ${{ secrets.SENTIENT_SOURCE_GITHUB_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
@@ -37,11 +37,9 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
-          echo "RECOVERY_SOURCE_IDENTITY=PASS"
           npm install --package-lock=false --no-audit --no-fund
           npm run build
           node --test dist/test/recovery-executor.test.js
-          echo "RECOVERY_FOCUSED_TESTS=PASS"
 
       - name: Install fixed Fly CLI
         shell: bash
@@ -59,13 +57,9 @@ jobs:
           test -n "$FLY_API_TOKEN"
           export PATH="$HOME/.fly/bin:$PATH"
           flyctl deploy --app "$RECOVERY_APP" --config fly.recovery.toml --remote-only --yes --ha=false
-          echo "RECOVERY_ROOT_DEPLOY=PASS"
-
           machines="$(flyctl machines list --app "$RECOVERY_APP" --json)"
           test "$(printf '%s' "$machines" | jq 'length')" -ge 1
           printf '%s' "$machines" | jq -e 'all(.[]; .state=="started")' >/dev/null
-          echo "RECOVERY_ROOT_MACHINE_STATE=PASS"
-
           healthy=false
           for _ in $(seq 1 90); do
             code="$(curl -sS --max-time 5 -o /tmp/health.json -w '%{http_code}' "https://${RECOVERY_APP}.fly.dev/healthz" || true)"
@@ -76,4 +70,3 @@ jobs:
             sleep 2
           done
           test "$healthy" = "true"
-          echo "RECOVERY_ROOT_HEALTH=PASS"
